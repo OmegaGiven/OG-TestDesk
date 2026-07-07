@@ -1411,6 +1411,7 @@ pub async fn fetch_timezone(state: &SqlEngineState, connection: &str) -> Result<
     })
 }
 
+#[derive(Debug, Clone)]
 pub struct TableBrowseResult {
     pub headers: Vec<String>,
     pub rows: Vec<Vec<String>>,
@@ -1488,6 +1489,7 @@ pub async fn browse_table(
     })
 }
 
+#[derive(Debug, Clone)]
 pub struct TableWriteResult {
     pub status: String,
     pub message: String,

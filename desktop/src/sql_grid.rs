@@ -1,6 +1,7 @@
-use iced::widget::{button, container, row, scrollable, text};
+use iced::widget::{button, container, mouse_area, row, scrollable, text};
 use iced::{Element, Length};
 use iced_table::table;
+use std::collections::HashSet;
 
 pub type Row = Vec<String>;
 
@@ -10,6 +11,8 @@ pub enum GridMessage {
     ColumnResized,
     SyncHeader(scrollable::AbsoluteOffset),
     SortBy(usize),
+    /// (row_index, col_index) into the currently displayed (possibly sorted) rows.
+    CellClicked(usize, usize),
 }
 
 pub struct GridColumn {
@@ -17,25 +20,44 @@ pub struct GridColumn {
     pub title: String,
     pub width: f32,
     pub resize_offset: Option<f32>,
+    /// Columns considered foreign keys get an underline + click-to-navigate cursor.
+    pub is_fk: bool,
 }
 
 impl<'a> table::Column<'a, GridMessage, iced::Theme, iced::Renderer> for GridColumn {
     type Row = Row;
 
     fn header(&'a self, _col_index: usize) -> Element<'a, GridMessage> {
-        button(text(self.title.clone()))
+        let label = if self.is_fk {
+            format!("{} 🔗", self.title)
+        } else {
+            self.title.clone()
+        };
+        button(text(label))
             .on_press(GridMessage::SortBy(self.index))
             .width(Length::Fill)
             .into()
     }
 
-    fn cell(&'a self, col_index: usize, _row_index: usize, row_data: &'a Self::Row) -> Element<'a, GridMessage> {
-        match row_data.get(col_index) {
-            Some(value) if !value.is_empty() => text(value.clone()).into(),
-            _ => text("—")
-                .color(iced::Color::from_rgba8(0x88, 0x88, 0x88, 0.7))
+    fn cell(&'a self, col_index: usize, row_index: usize, row_data: &'a Self::Row) -> Element<'a, GridMessage> {
+        let content: Element<'a, GridMessage> = match row_data.get(col_index) {
+            Some(value) if !value.is_empty() => {
+                if self.is_fk {
+                    text(value.clone())
+                        .color(iced::Color::from_rgb8(0x4d, 0xa6, 0xff))
+                        .into()
+                } else {
+                    text(value.clone()).into()
+                }
+            }
+            _ => text("NULL")
+                .color(iced::Color::from_rgba8(0x88, 0x88, 0x88, 0.6))
                 .into(),
-        }
+        };
+
+        mouse_area(content)
+            .on_press(GridMessage::CellClicked(row_index, col_index))
+            .into()
     }
 
     fn width(&self) -> f32 {
@@ -57,14 +79,22 @@ pub struct ResultsGrid {
 
 impl ResultsGrid {
     pub fn new(headers: Vec<String>, rows: Vec<Row>) -> Self {
+        Self::with_fk_columns(headers, rows, &HashSet::new())
+    }
+
+    pub fn with_fk_columns(headers: Vec<String>, rows: Vec<Row>, fk_columns: &HashSet<String>) -> Self {
         let columns = headers
             .into_iter()
             .enumerate()
-            .map(|(index, title)| GridColumn {
-                index,
-                title,
-                width: 160.0,
-                resize_offset: None,
+            .map(|(index, title)| {
+                let is_fk = fk_columns.contains(&title);
+                GridColumn {
+                    index,
+                    title,
+                    width: 160.0,
+                    resize_offset: None,
+                    is_fk,
+                }
             })
             .collect();
         Self {
@@ -111,6 +141,10 @@ impl ResultsGrid {
                 self.sort = Some((index, ascending));
                 iced::Task::none()
             }
+            // Real handling (FK navigation / start-edit) happens in
+            // `SqlTab::update`, which needs schema/connection context this
+            // grid doesn't have; nothing to do here.
+            GridMessage::CellClicked(..) => iced::Task::none(),
         }
     }
 

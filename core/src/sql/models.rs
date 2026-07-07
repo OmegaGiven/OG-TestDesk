@@ -118,7 +118,7 @@ pub struct SqlExecution {
     pub error: Option<String>,
 }
 
-#[derive(Serialize, Clone)]
+#[derive(Serialize, Clone, Debug)]
 pub struct SqlColumnInfo {
     pub name: String,
     pub data_type: String,
@@ -127,7 +127,7 @@ pub struct SqlColumnInfo {
     pub primary_key: bool,
 }
 
-#[derive(Serialize, Clone)]
+#[derive(Serialize, Clone, Debug)]
 pub struct SqlForeignKeyInfo {
     pub name: String,
     pub from_table: String,
@@ -136,13 +136,13 @@ pub struct SqlForeignKeyInfo {
     pub to_column: String,
 }
 
-#[derive(Serialize, Clone)]
+#[derive(Serialize, Clone, Debug)]
 pub struct SqlTableInfo {
     pub name: String,
     pub columns: Vec<SqlColumnInfo>,
 }
 
-#[derive(Serialize, Clone)]
+#[derive(Serialize, Clone, Debug)]
 pub struct SqlRelationshipSchema {
     pub tables: Vec<SqlTableInfo>,
     pub relationships: Vec<SqlForeignKeyInfo>,
@@ -158,7 +158,7 @@ pub struct DbFunctionInfo {
     pub definition: String,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Clone)]
 pub struct TableBrowseFilter {
     pub column: Option<String>,
     pub op: String,
