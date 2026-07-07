@@ -8,3 +8,11 @@ og_testdesk_core = { path = "../core" }
 iced = { version = "0.13", features = ["tokio"] }
 tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
 serde_json = "1"
+
+[package.metadata.packager]
+product-name = "OG TestDesk"
+identifier = "com.omegagiven.ogtestdesk"
+description = "OG TestDesk: native developer desk (SQL, API requests, JSON inspector, and dev tools)."
+authors = ["OmegaGiven"]
+out-dir = "../dist"
+icons = ["icons/icon.png"]
