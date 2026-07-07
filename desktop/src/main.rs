@@ -1,4 +1,5 @@
 mod appdata;
+mod requests_tab;
 mod sql_tab;
 
 use std::sync::Arc;
@@ -7,6 +8,7 @@ use iced::widget::{button, column, container, row, text};
 use iced::{Element, Length, Task};
 
 use og_testdesk_core::sql::engine::SqlEngineState;
+use requests_tab::{RequestsMessage, RequestsTab};
 use sql_tab::{SqlMessage, SqlTab};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -19,24 +21,31 @@ enum Tab {
 struct App {
     active_tab: Tab,
     sql_tab: SqlTab,
+    requests_tab: RequestsTab,
 }
 
 #[derive(Debug, Clone)]
 enum Message {
     TabSelected(Tab),
     Sql(SqlMessage),
+    Requests(RequestsMessage),
 }
 
 impl App {
     fn new() -> (Self, Task<Message>) {
         let engine = Arc::new(SqlEngineState::new());
         let (sql_tab, sql_task) = SqlTab::new(engine);
+        let (requests_tab, requests_task) = RequestsTab::new();
         (
             Self {
                 active_tab: Tab::Sql,
                 sql_tab,
+                requests_tab,
             },
-            sql_task.map(Message::Sql),
+            Task::batch([
+                sql_task.map(Message::Sql),
+                requests_task.map(Message::Requests),
+            ]),
         )
     }
 
@@ -47,6 +56,7 @@ impl App {
                 Task::none()
             }
             Message::Sql(msg) => self.sql_tab.update(msg).map(Message::Sql),
+            Message::Requests(msg) => self.requests_tab.update(msg).map(Message::Requests),
         }
     }
 
@@ -64,7 +74,7 @@ impl App {
 
         let body: Element<'_, Message> = match self.active_tab {
             Tab::Sql => self.sql_tab.view().map(Message::Sql),
-            Tab::Requests => text("Requests — coming soon").into(),
+            Tab::Requests => self.requests_tab.view().map(Message::Requests),
             Tab::Inspector => text("Inspector — coming soon").into(),
         };
 

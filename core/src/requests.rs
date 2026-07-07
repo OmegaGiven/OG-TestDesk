@@ -16,7 +16,7 @@ fn running_requests() -> &'static Mutex<HashMap<String, u32>> {
     RUNNING_REQUESTS.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
-#[derive(Serialize, Deserialize, Clone)]
+#[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct SavedRequest {
     pub name: String,
     pub method: String,
@@ -79,6 +79,7 @@ pub struct GraphqlPayload {
     pub operation_name: Option<String>,
 }
 
+#[derive(Clone, Debug)]
 pub struct ProxyResponse {
     pub status: u16,
     pub headers: String,
