@@ -17,7 +17,9 @@ use og_testdesk_core::sql::models::{
 const HISTORY_LIMIT: i64 = 200;
 
 use crate::sql_grid::{GridMessage, ResultsGrid};
-use crate::sql_highlighter::{SqlHighlighter, format_for};
+use crate::sql_highlighter::{
+    self, SqlHighlighter, SqlHighlighterSettings, VariableFormat, format_for,
+};
 
 const SPLIT_REFERENCE_HEIGHT: f32 = 700.0;
 
@@ -96,6 +98,17 @@ pub enum SqlMessage {
     NewRowFieldChanged(String, String),
     SaveNewRow,
     CancelAddRow,
+
+    VariableValueChanged(String, String),
+    VariableFormatChanged(String, VariableFormat),
+
+    AutocompleteSelected(String),
+
+    ToggleFind,
+    FindTermChanged(String),
+    FindNext,
+    FindPrev,
+    CloseFind,
 }
 
 pub struct SqlTab {
@@ -138,6 +151,16 @@ pub struct SqlTab {
 
     editing_row: Option<(usize, HashMap<String, String>)>,
     new_row: Option<HashMap<String, String>>,
+
+    variables: HashMap<String, (String, VariableFormat)>,
+    variable_order: Vec<String>,
+
+    autocomplete: Vec<String>,
+
+    find_open: bool,
+    find_term: String,
+    find_matches: Vec<(usize, usize)>,
+    find_current: usize,
 }
 
 impl SqlTab {
@@ -182,6 +205,16 @@ impl SqlTab {
 
             editing_row: None,
             new_row: None,
+
+            variables: HashMap::new(),
+            variable_order: Vec::new(),
+
+            autocomplete: Vec::new(),
+
+            find_open: false,
+            find_term: String::new(),
+            find_matches: Vec::new(),
+            find_current: 0,
         };
         let task = reload_connections(engine);
         (tab, task)
@@ -194,6 +227,16 @@ impl SqlTab {
             }
             iced::Event::Mouse(iced::mouse::Event::ButtonReleased(iced::mouse::Button::Left)) => {
                 Some(SqlMessage::SplitDragEnd)
+            }
+            iced::Event::Keyboard(iced::keyboard::Event::KeyPressed { key, modifiers, .. }) => {
+                if modifiers.command() {
+                    if let iced::keyboard::Key::Character(c) = key.as_ref() {
+                        if c == "f" {
+                            return Some(SqlMessage::ToggleFind);
+                        }
+                    }
+                }
+                None
             }
             _ => None,
         })
@@ -215,7 +258,14 @@ impl SqlTab {
                     reload_history(nickname),
                 ]);
             }
-            SqlMessage::EditorAction(action) => self.editor.perform(action),
+            SqlMessage::EditorAction(action) => {
+                self.editor.perform(action);
+                self.sync_variables();
+                self.update_autocomplete();
+                if self.find_open {
+                    self.recompute_find_matches();
+                }
+            }
             SqlMessage::RunPressed => {
                 if let Some(connection) = self.selected_connection.clone() {
                     self.running = true;
@@ -226,12 +276,13 @@ impl SqlTab {
                     let engine = self.engine.clone();
                     let sql = self.editor.text();
                     let history_connection = connection.clone();
+                    let variables = self.resolved_variables();
                     return Task::perform(
                         async move {
                             let form = SqlForm {
                                 sql: sql.clone(),
                                 connection,
-                                variables: None,
+                                variables,
                                 tab_id: None,
                                 query_name: None,
                                 query_folder: None,
@@ -687,8 +738,140 @@ impl SqlTab {
                     );
                 }
             }
+
+            SqlMessage::VariableValueChanged(name, value) => {
+                if let Some((raw, _)) = self.variables.get_mut(&name) {
+                    *raw = value;
+                }
+            }
+            SqlMessage::VariableFormatChanged(name, mode) => {
+                if let Some((_, format)) = self.variables.get_mut(&name) {
+                    *format = mode;
+                }
+            }
+
+            SqlMessage::AutocompleteSelected(name) => {
+                self.editor.perform(text_editor::Action::Select(text_editor::Motion::WordLeft));
+                self.editor.perform(text_editor::Action::Edit(text_editor::Edit::Paste(
+                    std::sync::Arc::new(name),
+                )));
+                self.autocomplete.clear();
+                self.sync_variables();
+            }
+
+            SqlMessage::ToggleFind => {
+                self.find_open = !self.find_open;
+                if self.find_open {
+                    self.recompute_find_matches();
+                } else {
+                    self.find_term.clear();
+                    self.find_matches.clear();
+                    self.find_current = 0;
+                }
+            }
+            SqlMessage::FindTermChanged(v) => {
+                self.find_term = v;
+                self.find_current = 0;
+                self.recompute_find_matches();
+            }
+            SqlMessage::FindNext => {
+                if !self.find_matches.is_empty() {
+                    self.find_current = (self.find_current + 1) % self.find_matches.len();
+                }
+            }
+            SqlMessage::FindPrev => {
+                if !self.find_matches.is_empty() {
+                    self.find_current =
+                        (self.find_current + self.find_matches.len() - 1) % self.find_matches.len();
+                }
+            }
+            SqlMessage::CloseFind => {
+                self.find_open = false;
+                self.find_term.clear();
+                self.find_matches.clear();
+                self.find_current = 0;
+            }
         }
         Task::none()
+    }
+
+    /// Rescans the editor text for `{{name}}` tokens, adding/removing
+    /// entries in `self.variables` to match what's currently present
+    /// while preserving already-entered values for names still in use.
+    fn sync_variables(&mut self) {
+        let names = sql_highlighter::scan_variable_names(&self.editor.text());
+        self.variables.retain(|name, _| names.contains(name));
+        for name in &names {
+            self.variables
+                .entry(name.clone())
+                .or_insert_with(|| (String::new(), VariableFormat::Raw));
+        }
+        self.variable_order = names;
+    }
+
+    /// Builds the final `{{name}} -> value` map to send with the query,
+    /// applying each variable's selected format transform.
+    fn resolved_variables(&self) -> Option<HashMap<String, String>> {
+        if self.variables.is_empty() {
+            return None;
+        }
+        Some(
+            self.variables
+                .iter()
+                .map(|(name, (raw, mode))| {
+                    (name.clone(), sql_highlighter::format_variable_value(raw, *mode))
+                })
+                .collect(),
+        )
+    }
+
+    /// Recomputes autocomplete suggestions for the word currently being
+    /// typed at the cursor, against known table names from the cached
+    /// schema for the selected connection.
+    fn update_autocomplete(&mut self) {
+        self.autocomplete.clear();
+        let Some(schema) = &self.schema else {
+            return;
+        };
+        let (line_index, column) = self.editor.cursor_position();
+        let Some(line) = self.editor.line(line_index) else {
+            return;
+        };
+        let line: &str = &line;
+        let column = column.min(line.len());
+        let prefix_start = line[..column]
+            .rfind(|c: char| !c.is_alphanumeric() && c != '_')
+            .map(|i| i + 1)
+            .unwrap_or(0);
+        let word = &line[prefix_start..column];
+        if word.is_empty() {
+            return;
+        }
+        let word_lower = word.to_lowercase();
+        for table in &schema.tables {
+            let table_lower = table.name.to_lowercase();
+            if table_lower.starts_with(&word_lower) && table_lower != word_lower {
+                self.autocomplete.push(table.name.clone());
+            }
+        }
+        self.autocomplete.truncate(8);
+    }
+
+    /// Recomputes the flat list of `(line, byte_start)` matches for the
+    /// current find term across the whole document.
+    fn recompute_find_matches(&mut self) {
+        self.find_matches.clear();
+        if self.find_term.is_empty() {
+            return;
+        }
+        for (line_index, line) in self.editor.lines().enumerate() {
+            for range in sql_highlighter::find_search_matches(&line, &self.find_term) {
+                self.find_matches.push((line_index, range.start));
+            }
+        }
+        if self.find_current >= self.find_matches.len() {
+            self.find_current = 0;
+        }
     }
 
     /// Returns `Some(task)` if the click was on an FK cell and should
@@ -1021,17 +1204,101 @@ impl SqlTab {
         .width(Length::Fixed(280.0));
 
         let run_label = if self.running { "Running..." } else { "Run" };
+        let highlighter_settings = SqlHighlighterSettings {
+            search_term: if self.find_open { self.find_term.clone() } else { String::new() },
+            current_match: self.find_matches.get(self.find_current).copied(),
+        };
         let editor_widget = text_editor(&self.editor)
             .on_action(SqlMessage::EditorAction)
-            .highlight_with::<SqlHighlighter>((), format_for)
+            .highlight_with::<SqlHighlighter>(highlighter_settings, format_for)
             .height(Length::Fill);
+
+        let find_bar: Element<'_, SqlMessage> = if self.find_open {
+            let count_label = if self.find_matches.is_empty() {
+                "0 of 0".to_string()
+            } else {
+                format!("{} of {}", self.find_current + 1, self.find_matches.len())
+            };
+            row![
+                text_input("Find in editor", &self.find_term).on_input(SqlMessage::FindTermChanged),
+                text(count_label).size(12),
+                button(text("Prev")).on_press(SqlMessage::FindPrev),
+                button(text("Next")).on_press(SqlMessage::FindNext),
+                button(text("x")).on_press(SqlMessage::CloseFind),
+            ]
+            .spacing(6)
+            .into()
+        } else {
+            row![button(text("Find (Ctrl/Cmd+F)")).on_press(SqlMessage::ToggleFind)].into()
+        };
+
+        let autocomplete_popup: Element<'_, SqlMessage> = if self.autocomplete.is_empty() {
+            column![].into()
+        } else {
+            self.autocomplete.iter().fold(
+                column![text("Suggestions:").size(11)].spacing(2),
+                |col, name| {
+                    col.push(
+                        button(text(name.clone()).size(12))
+                            .on_press(SqlMessage::AutocompleteSelected(name.clone())),
+                    )
+                },
+            )
+            .into()
+        };
+
+        let variables_bar: Element<'_, SqlMessage> = if self.variable_order.is_empty() {
+            column![].into()
+        } else {
+            self.variable_order.iter().fold(
+                column![text("Variables").size(13)].spacing(4),
+                |col, name| {
+                    let (raw, mode) = self
+                        .variables
+                        .get(name)
+                        .cloned()
+                        .unwrap_or_else(|| (String::new(), VariableFormat::Raw));
+                    let name_for_input = name.clone();
+                    let name_for_format = name.clone();
+                    let format_buttons = VariableFormat::ALL.iter().fold(row![].spacing(4), |r, f| {
+                        let selected = *f == mode;
+                        let label = if selected {
+                            format!("[{}]", f.label())
+                        } else {
+                            f.label().to_string()
+                        };
+                        let name_for_format = name_for_format.clone();
+                        r.push(
+                            button(text(label).size(11))
+                                .on_press(SqlMessage::VariableFormatChanged(name_for_format, *f)),
+                        )
+                    });
+                    col.push(
+                        row![
+                            text(format!("{{{{{name}}}}}")).size(12).width(Length::Fixed(120.0)),
+                            text_input("value", &raw)
+                                .on_input(move |v| {
+                                    SqlMessage::VariableValueChanged(name_for_input.clone(), v)
+                                })
+                                .width(Length::Fixed(160.0)),
+                            format_buttons,
+                        ]
+                        .spacing(6),
+                    )
+                },
+            )
+            .into()
+        };
 
         let editor_pane = column![
             text(format!(
                 "Editor (connection: {})",
                 self.selected_connection.as_deref().unwrap_or("none selected")
             )),
+            find_bar,
             editor_widget,
+            autocomplete_popup,
+            variables_bar,
             row![
                 button(text(run_label)).on_press(SqlMessage::RunPressed),
                 text_input("query name", &self.save_query_name)
