@@ -4,6 +4,7 @@ use std::sync::Arc;
 use iced::widget::{button, column, container, mouse_area, row, scrollable, text, text_editor, text_input};
 use iced::{Element, Length, Task};
 
+use og_testdesk_core::app_db::{self, SqlRunHistoryRecord};
 use og_testdesk_core::sql::engine::{
     self, SqlEngineState, TableBrowseResult, TableWriteResult,
 };
@@ -12,6 +13,8 @@ use og_testdesk_core::sql::models::{
     AddConnForm, DbConnection, SavedQuery, SqlExecution, SqlForm, SqlRelationshipSchema,
     TableBrowseFilter, TableUpdateChange,
 };
+
+const HISTORY_LIMIT: i64 = 200;
 
 use crate::sql_grid::{GridMessage, ResultsGrid};
 use crate::sql_highlighter::{SqlHighlighter, format_for};
@@ -46,9 +49,30 @@ pub enum SqlMessage {
     ConnectionsReloaded(Vec<DbConnection>),
 
     SaveQueryNameChanged(String),
+    SaveQueryFolderChanged(String),
     SaveQueryPressed,
     SavedQueriesReloaded(Vec<SavedQuery>),
+    SavedFoldersReloaded(Vec<String>),
     LoadSavedQuery(String),
+    QueryFilterChanged(String),
+    ToggleFolderExpanded(String),
+    NewFolderNameChanged(String),
+    CreateFolderPressed,
+    DeleteFolderPressed(String),
+    RenameQueryStart(String),
+    RenameQueryFieldChanged(String),
+    RenameQueryConfirm(String),
+    RenameQueryCancel,
+    DeleteQueryPressed(String),
+    MoveQueryFieldChanged(String, String),
+    MoveQueryPressed(String),
+
+    HistoryReloaded(Vec<SqlRunHistoryRecord>),
+    HistoryFilterChanged(String),
+    LoadHistoryEntry(String),
+    HistoryEntryLoaded(Option<SqlRunHistoryRecord>),
+    DeleteHistoryEntry(String),
+    ClearHistoryPressed,
 
     SplitDragStart,
     SplitCursorMoved(f32),
@@ -91,7 +115,17 @@ pub struct SqlTab {
     new_conn_password: String,
 
     saved_queries: Vec<SavedQuery>,
+    saved_folders: Vec<String>,
     save_query_name: String,
+    save_query_folder: String,
+    query_filter: String,
+    expanded_folders: HashSet<String>,
+    new_folder_name: String,
+    renaming_query: Option<(String, String)>,
+    move_target: HashMap<String, String>,
+
+    history: Vec<SqlRunHistoryRecord>,
+    history_filter: String,
 
     split_ratio: f32,
     resizing: bool,
@@ -125,7 +159,17 @@ impl SqlTab {
             new_conn_password: String::new(),
 
             saved_queries: Vec::new(),
+            saved_folders: Vec::new(),
             save_query_name: String::new(),
+            save_query_folder: String::new(),
+            query_filter: String::new(),
+            expanded_folders: HashSet::new(),
+            new_folder_name: String::new(),
+            renaming_query: None,
+            move_target: HashMap::new(),
+
+            history: Vec::new(),
+            history_filter: String::new(),
 
             split_ratio: 0.4,
             resizing: false,
@@ -166,7 +210,9 @@ impl SqlTab {
                 self.new_row = None;
                 return Task::batch([
                     reload_saved_queries(nickname.clone()),
-                    reload_schema(self.engine.clone(), nickname),
+                    reload_saved_folders(nickname.clone()),
+                    reload_schema(self.engine.clone(), nickname.clone()),
+                    reload_history(nickname),
                 ]);
             }
             SqlMessage::EditorAction(action) => self.editor.perform(action),
@@ -179,10 +225,11 @@ impl SqlTab {
                     self.new_row = None;
                     let engine = self.engine.clone();
                     let sql = self.editor.text();
+                    let history_connection = connection.clone();
                     return Task::perform(
                         async move {
                             let form = SqlForm {
-                                sql,
+                                sql: sql.clone(),
                                 connection,
                                 variables: None,
                                 tab_id: None,
@@ -193,7 +240,35 @@ impl SqlTab {
                                 cron_task_name: None,
                                 alert: None,
                             };
-                            engine::execute_sql(form, &engine).await
+                            let execution = engine::execute_sql(form, &engine).await;
+                            let created_at = engine::now_isoish();
+                            let record = SqlRunHistoryRecord {
+                                id: history_record_id(),
+                                connection: history_connection,
+                                tab_id: String::new(),
+                                sql,
+                                query_name: String::new(),
+                                query_folder: String::new(),
+                                run_source: "manual".to_string(),
+                                cron_task_id: String::new(),
+                                cron_task_name: String::new(),
+                                status: if execution.error.is_some() {
+                                    "error".to_string()
+                                } else {
+                                    "completed".to_string()
+                                },
+                                created_at: created_at.clone(),
+                                completed_at: Some(created_at),
+                                row_count_text: Some(format!("{} rows", execution.rows.len())),
+                                result_json: None,
+                                error: execution.error.clone(),
+                                alert_triggered: false,
+                                alert_message: None,
+                            };
+                            if let Err(err) = app_db::upsert_sql_run_history(&record).await {
+                                eprintln!("Failed to persist SQL run history: {err}");
+                            }
+                            execution
                         },
                         |execution| SqlMessage::QueryFinished(Arc::new(execution)),
                     );
@@ -207,6 +282,9 @@ impl SqlTab {
                 } else {
                     self.last_error = None;
                     self.grid = ResultsGrid::new(execution.headers.clone(), execution.rows.clone());
+                }
+                if let Some(connection) = self.selected_connection.clone() {
+                    return reload_history(connection);
                 }
             }
             SqlMessage::Grid(grid_message) => {
@@ -256,15 +334,22 @@ impl SqlTab {
             SqlMessage::ConnectionsReloaded(connections) => self.connections = connections,
 
             SqlMessage::SaveQueryNameChanged(v) => self.save_query_name = v,
+            SqlMessage::SaveQueryFolderChanged(v) => self.save_query_folder = v,
             SqlMessage::SaveQueryPressed => {
                 if let Some(connection) = self.selected_connection.clone() {
                     if !self.save_query_name.trim().is_empty() {
                         let name = self.save_query_name.clone();
                         let sql = self.editor.text();
+                        let folder = self.save_query_folder.clone();
                         self.save_query_name.clear();
                         return Task::perform(
                             async move {
-                                let _ = engine::save_query(&connection, &name, &sql, None).await;
+                                let folder_arg = if folder.trim().is_empty() {
+                                    None
+                                } else {
+                                    Some(folder.as_str())
+                                };
+                                let _ = engine::save_query(&connection, &name, &sql, folder_arg).await;
                                 engine::list_saved_queries(&connection).await
                             },
                             SqlMessage::SavedQueriesReloaded,
@@ -273,7 +358,109 @@ impl SqlTab {
                 }
             }
             SqlMessage::SavedQueriesReloaded(queries) => self.saved_queries = queries,
+            SqlMessage::SavedFoldersReloaded(folders) => self.saved_folders = folders,
             SqlMessage::LoadSavedQuery(sql) => self.editor = text_editor::Content::with_text(&sql),
+            SqlMessage::QueryFilterChanged(v) => self.query_filter = v,
+            SqlMessage::ToggleFolderExpanded(folder) => {
+                if !self.expanded_folders.remove(&folder) {
+                    self.expanded_folders.insert(folder);
+                }
+            }
+            SqlMessage::NewFolderNameChanged(v) => self.new_folder_name = v,
+            SqlMessage::CreateFolderPressed => {
+                if let Some(connection) = self.selected_connection.clone() {
+                    if !self.new_folder_name.trim().is_empty() {
+                        let folder = self.new_folder_name.clone();
+                        self.new_folder_name.clear();
+                        return reload_folders_after(connection.clone(), async move {
+                            let _ = engine::create_query_folder(&connection, &folder).await;
+                        });
+                    }
+                }
+            }
+            SqlMessage::DeleteFolderPressed(folder) => {
+                if let Some(connection) = self.selected_connection.clone() {
+                    return reload_saved_after(connection.clone(), async move {
+                        let _ = engine::delete_query_folder(&connection, &folder).await;
+                    });
+                }
+            }
+            SqlMessage::RenameQueryStart(name) => {
+                self.renaming_query = Some((name.clone(), name));
+            }
+            SqlMessage::RenameQueryFieldChanged(v) => {
+                if let Some((_, new_name)) = &mut self.renaming_query {
+                    *new_name = v;
+                }
+            }
+            SqlMessage::RenameQueryCancel => self.renaming_query = None,
+            SqlMessage::RenameQueryConfirm(original) => {
+                if let (Some(connection), Some((_, new_name))) =
+                    (self.selected_connection.clone(), self.renaming_query.take())
+                {
+                    return reload_saved_after(connection.clone(), async move {
+                        let _ = engine::rename_query(&connection, &original, &new_name).await;
+                    });
+                }
+            }
+            SqlMessage::DeleteQueryPressed(name) => {
+                if let Some(connection) = self.selected_connection.clone() {
+                    return reload_saved_after(connection.clone(), async move {
+                        let _ = engine::delete_query(&connection, &name).await;
+                    });
+                }
+            }
+            SqlMessage::MoveQueryFieldChanged(name, folder) => {
+                self.move_target.insert(name, folder);
+            }
+            SqlMessage::MoveQueryPressed(name) => {
+                if let Some(connection) = self.selected_connection.clone() {
+                    let folder = self.move_target.remove(&name).unwrap_or_default();
+                    return reload_saved_after(connection.clone(), async move {
+                        let folder_arg = if folder.trim().is_empty() {
+                            None
+                        } else {
+                            Some(folder.as_str())
+                        };
+                        let _ = engine::move_query(&connection, &name, folder_arg).await;
+                    });
+                }
+            }
+
+            SqlMessage::HistoryReloaded(history) => self.history = history,
+            SqlMessage::HistoryFilterChanged(v) => self.history_filter = v,
+            SqlMessage::LoadHistoryEntry(id) => {
+                return Task::perform(
+                    async move { app_db::get_sql_run_history_by_id(&id).await },
+                    SqlMessage::HistoryEntryLoaded,
+                );
+            }
+            SqlMessage::HistoryEntryLoaded(Some(record)) => {
+                self.editor = text_editor::Content::with_text(&record.sql);
+            }
+            SqlMessage::HistoryEntryLoaded(None) => {}
+            SqlMessage::DeleteHistoryEntry(id) => {
+                if let Some(connection) = self.selected_connection.clone() {
+                    return Task::perform(
+                        async move {
+                            let _ = app_db::delete_sql_run_history(&id).await;
+                            app_db::get_sql_run_history_summaries(&connection, None, HISTORY_LIMIT).await
+                        },
+                        SqlMessage::HistoryReloaded,
+                    );
+                }
+            }
+            SqlMessage::ClearHistoryPressed => {
+                if let Some(connection) = self.selected_connection.clone() {
+                    return Task::perform(
+                        async move {
+                            let _ = app_db::clear_sql_run_history(&connection, None).await;
+                            app_db::get_sql_run_history_summaries(&connection, None, HISTORY_LIMIT).await
+                        },
+                        SqlMessage::HistoryReloaded,
+                    );
+                }
+            }
 
             SqlMessage::SplitDragStart => {
                 self.resizing = true;
@@ -555,6 +742,127 @@ impl SqlTab {
         col.into()
     }
 
+    fn view_saved_queries_tree(&self) -> Element<'_, SqlMessage> {
+        let filter = self.query_filter.to_lowercase();
+        let matches = |name: &str| filter.is_empty() || name.to_lowercase().contains(&filter);
+
+        let mut col = column![
+            text("Saved queries").size(16),
+            text_input("filter queries", &self.query_filter).on_input(SqlMessage::QueryFilterChanged),
+            row![
+                text_input("new folder name", &self.new_folder_name)
+                    .on_input(SqlMessage::NewFolderNameChanged),
+                button(text("+ Folder")).on_press(SqlMessage::CreateFolderPressed),
+            ]
+            .spacing(6),
+        ]
+        .spacing(4);
+
+        let query_row = |q: &SavedQuery| -> Element<'_, SqlMessage> {
+            if let Some((original, editing_name)) = &self.renaming_query {
+                if original == &q.name {
+                    return row![
+                        text_input("new name", editing_name)
+                            .on_input(SqlMessage::RenameQueryFieldChanged),
+                        button(text("OK"))
+                            .on_press(SqlMessage::RenameQueryConfirm(original.clone())),
+                        button(text("x")).on_press(SqlMessage::RenameQueryCancel),
+                    ]
+                    .spacing(4)
+                    .into();
+                }
+            }
+            let move_value = self.move_target.get(&q.name).cloned().unwrap_or_default();
+            let name_for_move = q.name.clone();
+            let name_for_move2 = q.name.clone();
+            row![
+                button(text(q.name.clone())).on_press(SqlMessage::LoadSavedQuery(q.sql.clone())),
+                button(text("rename")).on_press(SqlMessage::RenameQueryStart(q.name.clone())),
+                button(text("delete")).on_press(SqlMessage::DeleteQueryPressed(q.name.clone())),
+                text_input("move to folder", &move_value)
+                    .on_input(move |v| SqlMessage::MoveQueryFieldChanged(name_for_move.clone(), v))
+                    .width(Length::Fixed(110.0)),
+                button(text("Move")).on_press(SqlMessage::MoveQueryPressed(name_for_move2)),
+            ]
+            .spacing(4)
+            .into()
+        };
+
+        // Root-level (no folder) queries matching the filter.
+        for q in self.saved_queries.iter().filter(|q| q.folder.is_none() && matches(&q.name)) {
+            col = col.push(query_row(q));
+        }
+
+        for folder in &self.saved_folders {
+            let folder_queries: Vec<&SavedQuery> = self
+                .saved_queries
+                .iter()
+                .filter(|q| q.folder.as_deref() == Some(folder.as_str()))
+                .collect();
+            let has_match = filter.is_empty() || folder_queries.iter().any(|q| matches(&q.name));
+            if !has_match {
+                continue;
+            }
+            let expanded = self.expanded_folders.contains(folder);
+            let arrow = if expanded { "v" } else { ">" };
+            col = col.push(
+                row![
+                    button(text(format!("{arrow} {folder}")))
+                        .on_press(SqlMessage::ToggleFolderExpanded(folder.clone())),
+                    button(text("delete folder")).on_press(SqlMessage::DeleteFolderPressed(folder.clone())),
+                ]
+                .spacing(6),
+            );
+            if expanded {
+                for q in folder_queries.iter().filter(|q| matches(&q.name)) {
+                    col = col.push(row![text("  "), query_row(q)].spacing(0));
+                }
+            }
+        }
+
+        col.into()
+    }
+
+    fn view_history_panel(&self) -> Element<'_, SqlMessage> {
+        let filter = self.history_filter.to_lowercase();
+        let mut col = column![
+            row![
+                text("Run history").size(16),
+                button(text("Clear")).on_press(SqlMessage::ClearHistoryPressed),
+            ]
+            .spacing(8),
+            text_input("filter history", &self.history_filter)
+                .on_input(SqlMessage::HistoryFilterChanged),
+        ]
+        .spacing(4);
+
+        for entry in &self.history {
+            if !filter.is_empty()
+                && !entry.sql.to_lowercase().contains(&filter)
+                && !entry.query_name.to_lowercase().contains(&filter)
+            {
+                continue;
+            }
+            let status_color = if entry.status == "error" {
+                iced::Color::from_rgb8(0xe0, 0x5a, 0x5a)
+            } else {
+                iced::Color::from_rgb8(0x5a, 0xc0, 0x7a)
+            };
+            let preview: String = entry.sql.chars().take(60).collect();
+            col = col.push(
+                row![
+                    button(text(format!("[{}] {}", entry.status, preview)).color(status_color))
+                        .on_press(SqlMessage::LoadHistoryEntry(entry.id.clone())),
+                    text(entry.created_at.clone()).size(11),
+                    button(text("delete")).on_press(SqlMessage::DeleteHistoryEntry(entry.id.clone())),
+                ]
+                .spacing(6),
+            );
+        }
+
+        col.into()
+    }
+
     fn view_browse_toolbar(&self) -> Element<'_, SqlMessage> {
         let Some(browse) = &self.browse else {
             return row![].into();
@@ -696,20 +1004,19 @@ impl SqlTab {
         ]
         .spacing(6);
 
-        let saved_queries_list = self.saved_queries.iter().fold(
-            column![text("Saved queries").size(16)].spacing(4),
-            |col, q| {
-                col.push(
-                    button(text(q.name.clone())).on_press(SqlMessage::LoadSavedQuery(q.sql.clone())),
-                )
-            },
-        );
-
         let schema_tree = self.view_schema_tree();
+        let saved_queries_tree = self.view_saved_queries_tree();
+        let history_panel = self.view_history_panel();
 
         let sidebar = scrollable(
-            column![connections_list, add_connection_form, schema_tree, saved_queries_list]
-                .spacing(16),
+            column![
+                connections_list,
+                add_connection_form,
+                schema_tree,
+                saved_queries_tree,
+                history_panel
+            ]
+            .spacing(16),
         )
         .width(Length::Fixed(280.0));
 
@@ -729,6 +1036,8 @@ impl SqlTab {
                 button(text(run_label)).on_press(SqlMessage::RunPressed),
                 text_input("query name", &self.save_query_name)
                     .on_input(SqlMessage::SaveQueryNameChanged),
+                text_input("folder (optional)", &self.save_query_folder)
+                    .on_input(SqlMessage::SaveQueryFolderChanged),
                 button(text("Save query")).on_press(SqlMessage::SaveQueryPressed),
             ]
             .spacing(8),
@@ -825,4 +1134,54 @@ fn browse_task(
         },
         SqlMessage::BrowseResultLoaded,
     )
+}
+
+fn reload_saved_folders(connection: String) -> Task<SqlMessage> {
+    Task::perform(
+        async move { engine::list_saved_query_folders(&connection).await },
+        SqlMessage::SavedFoldersReloaded,
+    )
+}
+
+fn reload_history(connection: String) -> Task<SqlMessage> {
+    Task::perform(
+        async move { app_db::get_sql_run_history_summaries(&connection, None, HISTORY_LIMIT).await },
+        SqlMessage::HistoryReloaded,
+    )
+}
+
+/// Runs `action`, then reloads the saved-query list for `connection`.
+fn reload_saved_after(
+    connection: String,
+    action: impl std::future::Future<Output = ()> + Send + 'static,
+) -> Task<SqlMessage> {
+    Task::perform(
+        async move {
+            action.await;
+            engine::list_saved_queries(&connection).await
+        },
+        SqlMessage::SavedQueriesReloaded,
+    )
+}
+
+/// Runs `action`, then reloads the saved-query-folder list for `connection`.
+fn reload_folders_after(
+    connection: String,
+    action: impl std::future::Future<Output = ()> + Send + 'static,
+) -> Task<SqlMessage> {
+    Task::perform(
+        async move {
+            action.await;
+            engine::list_saved_query_folders(&connection).await
+        },
+        SqlMessage::SavedFoldersReloaded,
+    )
+}
+
+fn history_record_id() -> String {
+    let millis = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis())
+        .unwrap_or_default();
+    format!("manual-{millis}-{}", std::process::id())
 }

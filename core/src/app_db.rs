@@ -460,7 +460,7 @@ pub async fn set_active_ai_provider_settings(id: &str) -> Result<(), sqlx::Error
     Ok(())
 }
 
-#[derive(Serialize, Deserialize, Clone, Default)]
+#[derive(Serialize, Deserialize, Clone, Default, Debug)]
 pub struct SqlRunHistoryRecord {
     pub id: String,
     pub connection: String,
