@@ -16,10 +16,17 @@ use og_testdesk_core::sql::models::{
 
 const HISTORY_LIMIT: i64 = 200;
 
+use crate::sql_erd::{self, CardLayout, ErdMessage, ErdProgram};
 use crate::sql_grid::{GridMessage, ResultsGrid};
 use crate::sql_highlighter::{
     self, SqlHighlighter, SqlHighlighterSettings, VariableFormat, format_for,
 };
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum SqlViewMode {
+    QueryEditor,
+    RelationshipDiagram,
+}
 
 const SPLIT_REFERENCE_HEIGHT: f32 = 700.0;
 
@@ -109,6 +116,10 @@ pub enum SqlMessage {
     FindNext,
     FindPrev,
     CloseFind,
+
+    ToggleErdView,
+    ErdFilterChanged(String),
+    Erd(ErdMessage),
 }
 
 pub struct SqlTab {
@@ -161,6 +172,10 @@ pub struct SqlTab {
     find_term: String,
     find_matches: Vec<(usize, usize)>,
     find_current: usize,
+
+    view_mode: SqlViewMode,
+    erd_filter: String,
+    erd_highlighted: Option<String>,
 }
 
 impl SqlTab {
@@ -215,6 +230,10 @@ impl SqlTab {
             find_term: String::new(),
             find_matches: Vec::new(),
             find_current: 0,
+
+            view_mode: SqlViewMode::QueryEditor,
+            erd_filter: String::new(),
+            erd_highlighted: None,
         };
         let task = reload_connections(engine);
         (tab, task)
@@ -791,6 +810,26 @@ impl SqlTab {
                 self.find_matches.clear();
                 self.find_current = 0;
             }
+
+            SqlMessage::ToggleErdView => {
+                self.view_mode = match self.view_mode {
+                    SqlViewMode::QueryEditor => SqlViewMode::RelationshipDiagram,
+                    SqlViewMode::RelationshipDiagram => SqlViewMode::QueryEditor,
+                };
+            }
+            SqlMessage::ErdFilterChanged(v) => self.erd_filter = v,
+            SqlMessage::Erd(ErdMessage::TableClicked(table)) => {
+                self.erd_highlighted = Some(table);
+            }
+            SqlMessage::Erd(ErdMessage::FkColumnClicked(table, _column)) => {
+                // Clicking an FK column in the diagram (not a specific row's
+                // cell, which is Phase 2's grid FK-navigation) has no value
+                // to filter on — just switch to browsing the referenced
+                // table, mirroring "jump to this table" behavior.
+                self.erd_highlighted = Some(table.clone());
+                self.view_mode = SqlViewMode::QueryEditor;
+                return Task::done(SqlMessage::BrowseTable(table));
+            }
         }
         Task::none()
     }
@@ -878,9 +917,14 @@ impl SqlTab {
     /// navigate to the referenced table instead of the default grid
     /// handling (sort etc). Returns `None` for a plain-cell click.
     fn view_schema_tree(&self) -> Element<'_, SqlMessage> {
+        let diagram_label = match self.view_mode {
+            SqlViewMode::QueryEditor => "View diagram",
+            SqlViewMode::RelationshipDiagram => "Back to editor",
+        };
         let mut col = column![row![
             text("Schema").size(16),
             button(text("Refresh")).on_press(SqlMessage::RefreshSchema),
+            button(text(diagram_label)).on_press(SqlMessage::ToggleErdView),
         ]
         .spacing(8)]
         .spacing(4);
@@ -1114,6 +1158,61 @@ impl SqlTab {
         form.into()
     }
 
+    fn view_erd(&self) -> Element<'_, SqlMessage> {
+        let Some(schema) = &self.schema else {
+            return container(text("Select a connection to load schema first"))
+                .padding(16)
+                .into();
+        };
+
+        let visible_tables: Vec<&og_testdesk_core::sql::models::SqlTableInfo> = schema
+            .tables
+            .iter()
+            .filter(|t| sql_erd::table_matches_filter(t, &self.erd_filter))
+            .collect();
+
+        let mut layout: Vec<CardLayout> = sql_erd::layout_cards(&visible_tables);
+        sql_erd::mark_fk_columns(&mut layout, &schema.relationships);
+
+        let canvas_width = layout
+            .iter()
+            .map(|c| c.bounds.x + c.bounds.width)
+            .fold(600.0_f32, f32::max);
+        let canvas_height = layout
+            .iter()
+            .map(|c| c.bounds.y + c.bounds.height)
+            .fold(400.0_f32, f32::max);
+
+        let diagram: Element<'_, ErdMessage> = iced::widget::Canvas::new(ErdProgram {
+            schema,
+            layout,
+            highlighted: &self.erd_highlighted,
+        })
+        .width(Length::Fixed(canvas_width))
+        .height(Length::Fixed(canvas_height))
+        .into();
+
+        column![
+            row![
+                text("Relationship diagram").size(16),
+                text_input("Filter tables/columns", &self.erd_filter)
+                    .on_input(SqlMessage::ErdFilterChanged)
+                    .width(Length::Fixed(240.0)),
+            ]
+            .spacing(12),
+            scrollable(diagram.map(SqlMessage::Erd))
+                .direction(scrollable::Direction::Both {
+                    vertical: scrollable::Scrollbar::default(),
+                    horizontal: scrollable::Scrollbar::default(),
+                })
+                .width(Length::Fill)
+                .height(Length::Fill),
+        ]
+        .spacing(8)
+        .padding(16)
+        .into()
+    }
+
     fn handle_cell_clicked(&mut self, row_index: usize, col_index: usize) -> Option<Task<SqlMessage>> {
         let browse = self.browse.as_ref()?;
         let schema = self.schema.as_ref()?;
@@ -1345,15 +1444,21 @@ impl SqlTab {
         let editor_portion = (self.split_ratio * 1000.0) as u16;
         let results_portion = ((1.0 - self.split_ratio) * 1000.0) as u16;
 
-        let main_area = column![
-            container(editor_pane)
-                .height(Length::FillPortion(editor_portion.max(1))),
-            divider,
-            container(results_pane)
-                .height(Length::FillPortion(results_portion.max(1))),
-        ];
+        let main_content: Element<'_, SqlMessage> = match self.view_mode {
+            SqlViewMode::QueryEditor => {
+                let main_area = column![
+                    container(editor_pane)
+                        .height(Length::FillPortion(editor_portion.max(1))),
+                    divider,
+                    container(results_pane)
+                        .height(Length::FillPortion(results_portion.max(1))),
+                ];
+                main_area.width(Length::Fill).padding(16).into()
+            }
+            SqlViewMode::RelationshipDiagram => self.view_erd(),
+        };
 
-        container(row![sidebar, main_area.width(Length::Fill).padding(16)].spacing(16))
+        container(row![sidebar, main_content].spacing(16))
             .width(Length::Fill)
             .height(Length::Fill)
             .into()

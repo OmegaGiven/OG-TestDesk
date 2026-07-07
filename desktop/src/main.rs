@@ -6,6 +6,7 @@ mod inspector_tab;
 mod jwt_tab;
 mod requests_tab;
 mod scratchpad_tab;
+mod sql_erd;
 mod sql_grid;
 mod sql_highlighter;
 mod sql_tab;
