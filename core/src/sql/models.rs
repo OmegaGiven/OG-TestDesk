@@ -51,7 +51,7 @@ pub struct SqlForm {
     pub alert: Option<SqlAlertRule>,
 }
 
-#[derive(Deserialize, Clone)]
+#[derive(Deserialize, Clone, Debug)]
 pub struct SqlAlertRule {
     pub comparator: String,
     pub value: i64,
@@ -171,7 +171,7 @@ pub struct TableUpdateChange {
     pub current: HashMap<String, String>,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, Clone, Debug)]
 pub struct SqlTimezoneInfo {
     pub timezone: String,
     pub db_time: String,

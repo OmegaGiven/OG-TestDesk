@@ -10,8 +10,8 @@ use og_testdesk_core::sql::engine::{
 };
 use og_testdesk_core::sql::helpers::find_connection;
 use og_testdesk_core::sql::models::{
-    AddConnForm, DbConnection, SavedQuery, SqlExecution, SqlForm, SqlRelationshipSchema,
-    TableBrowseFilter, TableUpdateChange,
+    AddConnForm, DbConnection, SavedQuery, SqlAlertRule, SqlExecution, SqlForm,
+    SqlRelationshipSchema, SqlTimezoneInfo, TableBrowseFilter, TableUpdateChange,
 };
 
 const HISTORY_LIMIT: i64 = 200;
@@ -37,6 +37,107 @@ struct BrowseState {
     page: u32,
     has_next: bool,
     filter: Option<TableBrowseFilter>,
+}
+
+/// A periodically-run SQL task with an optional row-count alert rule.
+/// `core` stores these as opaque `serde_json::Value` blobs (a single
+/// app-wide list, not scoped per connection) — this type and its
+/// `to_value`/`from_value` conversions define the shape we read/write.
+#[derive(Clone, Debug)]
+struct CronTask {
+    id: String,
+    name: String,
+    sql: String,
+    connection: String,
+    interval_ms: i64,
+    alert: Option<SqlAlertRule>,
+    enabled: bool,
+    last_run_ms: i64,
+}
+
+impl CronTask {
+    fn to_value(&self) -> serde_json::Value {
+        serde_json::json!({
+            "id": self.id,
+            "name": self.name,
+            "sql": self.sql,
+            "connection": self.connection,
+            "interval_ms": self.interval_ms,
+            "alert": self.alert.as_ref().map(|a| serde_json::json!({
+                "comparator": a.comparator,
+                "value": a.value,
+            })),
+            "enabled": self.enabled,
+            "last_run_ms": self.last_run_ms,
+        })
+    }
+
+    fn from_value(value: &serde_json::Value) -> Option<Self> {
+        let alert = value.get("alert").and_then(|a| {
+            if a.is_null() {
+                return None;
+            }
+            Some(SqlAlertRule {
+                comparator: a.get("comparator")?.as_str()?.to_string(),
+                value: a.get("value")?.as_i64()?,
+            })
+        });
+        Some(CronTask {
+            id: value.get("id")?.as_str()?.to_string(),
+            name: value.get("name")?.as_str()?.to_string(),
+            sql: value.get("sql")?.as_str()?.to_string(),
+            connection: value.get("connection")?.as_str()?.to_string(),
+            interval_ms: value.get("interval_ms")?.as_i64()?,
+            alert,
+            enabled: value.get("enabled").and_then(|v| v.as_bool()).unwrap_or(true),
+            last_run_ms: value.get("last_run_ms").and_then(|v| v.as_i64()).unwrap_or(0),
+        })
+    }
+
+    fn is_due(&self, now_ms: i64) -> bool {
+        self.enabled && self.interval_ms > 0 && now_ms - self.last_run_ms >= self.interval_ms
+    }
+}
+
+const ALERT_COMPARATORS: &[&str] = &["=", "!=", "<", "<=", ">", ">="];
+
+/// Cycles through the available alert comparators, wrapping to the first
+/// after the last — used by a single toggle button rather than a dropdown.
+fn next_comparator(current: &str) -> String {
+    let index = ALERT_COMPARATORS.iter().position(|c| *c == current).unwrap_or(0);
+    ALERT_COMPARATORS[(index + 1) % ALERT_COMPARATORS.len()].to_string()
+}
+
+fn now_ms() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as i64)
+        .unwrap_or(0)
+}
+
+/// Quotes a CSV field per RFC 4180 (wrap in quotes and double any embedded
+/// quote) only when the field actually contains a character that requires it.
+fn csv_field(value: &str) -> String {
+    if value.contains(',') || value.contains('"') || value.contains('\n') || value.contains('\r') {
+        format!("\"{}\"", value.replace('"', "\"\""))
+    } else {
+        value.to_string()
+    }
+}
+
+/// Builds a CSV document (CRLF line endings per RFC 4180) from grid-style
+/// headers/rows already held in memory — works for both ad-hoc query
+/// results and table-browse results, unlike `core`'s `export_results_csv`
+/// which only covers the last ad-hoc query run (see Phase 6 notes).
+fn build_csv(headers: &[String], rows: &[Vec<String>]) -> String {
+    let mut out = String::new();
+    out.push_str(&headers.iter().map(|h| csv_field(h)).collect::<Vec<_>>().join(","));
+    out.push_str("\r\n");
+    for row in rows {
+        out.push_str(&row.iter().map(|c| csv_field(c)).collect::<Vec<_>>().join(","));
+        out.push_str("\r\n");
+    }
+    out
 }
 
 #[derive(Debug, Clone)]
@@ -120,6 +221,25 @@ pub enum SqlMessage {
     ToggleErdView,
     ErdFilterChanged(String),
     Erd(ErdMessage),
+
+    ExportCsvPressed,
+    ExportCsvFinished(Result<String, String>),
+
+    TimezoneLoaded(Result<SqlTimezoneInfo, String>),
+
+    CronTasksLoaded(Vec<serde_json::Value>),
+    CronNameChanged(String),
+    CronSqlAction(text_editor::Action),
+    CronIntervalValueChanged(String),
+    CronIntervalUnitChanged(String),
+    CronAlertComparatorChanged(String),
+    CronAlertValueChanged(String),
+    CreateCronTaskPressed,
+    DeleteCronTask(String),
+    ToggleCronEnabled(String),
+    RunCronNow(String),
+    CronTick,
+    CronRunFinished(String, Arc<SqlExecution>),
 }
 
 pub struct SqlTab {
@@ -176,6 +296,19 @@ pub struct SqlTab {
     view_mode: SqlViewMode,
     erd_filter: String,
     erd_highlighted: Option<String>,
+
+    csv_status: Option<Result<String, String>>,
+
+    timezone: Option<Result<SqlTimezoneInfo, String>>,
+
+    cron_tasks: Vec<CronTask>,
+    cron_activity: Vec<String>,
+    cron_name: String,
+    cron_sql: text_editor::Content,
+    cron_interval_value: String,
+    cron_interval_unit: String,
+    cron_alert_comparator: String,
+    cron_alert_value: String,
 }
 
 impl SqlTab {
@@ -234,12 +367,33 @@ impl SqlTab {
             view_mode: SqlViewMode::QueryEditor,
             erd_filter: String::new(),
             erd_highlighted: None,
+
+            csv_status: None,
+
+            timezone: None,
+
+            cron_tasks: Vec::new(),
+            cron_activity: Vec::new(),
+            cron_name: String::new(),
+            cron_sql: text_editor::Content::new(),
+            cron_interval_value: String::new(),
+            cron_interval_unit: "minutes".to_string(),
+            cron_alert_comparator: ">".to_string(),
+            cron_alert_value: String::new(),
         };
-        let task = reload_connections(engine);
+        let task = Task::batch([reload_connections(engine), load_cron_tasks()]);
         (tab, task)
     }
 
     pub fn subscription(&self) -> iced::Subscription<SqlMessage> {
+        iced::Subscription::batch([
+            self.event_subscription(),
+            iced::time::every(std::time::Duration::from_secs(30))
+                .map(|_instant| SqlMessage::CronTick),
+        ])
+    }
+
+    fn event_subscription(&self) -> iced::Subscription<SqlMessage> {
         iced::event::listen_with(|event, _status, _window| match event {
             iced::Event::Mouse(iced::mouse::Event::CursorMoved { position }) => {
                 Some(SqlMessage::SplitCursorMoved(position.y))
@@ -270,11 +424,13 @@ impl SqlTab {
                 self.browse = None;
                 self.editing_row = None;
                 self.new_row = None;
+                self.timezone = None;
                 return Task::batch([
                     reload_saved_queries(nickname.clone()),
                     reload_saved_folders(nickname.clone()),
                     reload_schema(self.engine.clone(), nickname.clone()),
-                    reload_history(nickname),
+                    reload_history(nickname.clone()),
+                    reload_timezone(self.engine.clone(), nickname),
                 ]);
             }
             SqlMessage::EditorAction(action) => {
@@ -830,6 +986,127 @@ impl SqlTab {
                 self.view_mode = SqlViewMode::QueryEditor;
                 return Task::done(SqlMessage::BrowseTable(table));
             }
+
+            SqlMessage::ExportCsvPressed => {
+                let csv = build_csv(
+                    &self.grid.columns.iter().map(|c| c.title.clone()).collect::<Vec<_>>(),
+                    &self.grid.rows,
+                );
+                return Task::perform(
+                    async move {
+                        let path = tokio::task::spawn_blocking(move || {
+                            rfd::FileDialog::new()
+                                .set_file_name("results.csv")
+                                .add_filter("CSV", &["csv"])
+                                .save_file()
+                        })
+                        .await
+                        .map_err(|err| format!("File dialog task failed: {err}"))?;
+                        let Some(path) = path else {
+                            return Err("Export cancelled.".to_string());
+                        };
+                        std::fs::write(&path, csv)
+                            .map_err(|err| format!("Failed to write CSV: {err}"))?;
+                        Ok(path.display().to_string())
+                    },
+                    SqlMessage::ExportCsvFinished,
+                );
+            }
+            SqlMessage::ExportCsvFinished(result) => {
+                self.csv_status = Some(result);
+            }
+
+            SqlMessage::TimezoneLoaded(result) => self.timezone = Some(result),
+
+            SqlMessage::CronTasksLoaded(values) => {
+                self.cron_tasks = values.iter().filter_map(CronTask::from_value).collect();
+            }
+            SqlMessage::CronNameChanged(v) => self.cron_name = v,
+            SqlMessage::CronSqlAction(action) => self.cron_sql.perform(action),
+            SqlMessage::CronIntervalValueChanged(v) => self.cron_interval_value = v,
+            SqlMessage::CronIntervalUnitChanged(v) => self.cron_interval_unit = v,
+            SqlMessage::CronAlertComparatorChanged(v) => self.cron_alert_comparator = v,
+            SqlMessage::CronAlertValueChanged(v) => self.cron_alert_value = v,
+            SqlMessage::CreateCronTaskPressed => {
+                if let Some(connection) = self.selected_connection.clone() {
+                    let interval_units: f64 = self.cron_interval_value.trim().parse().unwrap_or(0.0);
+                    let interval_ms = match self.cron_interval_unit.as_str() {
+                        "hours" => (interval_units * 3_600_000.0) as i64,
+                        _ => (interval_units * 60_000.0) as i64,
+                    };
+                    if !self.cron_name.trim().is_empty() && interval_ms > 0 {
+                        let alert = self.cron_alert_value.trim().parse::<i64>().ok().map(|value| {
+                            SqlAlertRule {
+                                comparator: self.cron_alert_comparator.clone(),
+                                value,
+                            }
+                        });
+                        let task = CronTask {
+                            id: format!("cron-{}-{}", now_ms(), self.cron_tasks.len()),
+                            name: self.cron_name.clone(),
+                            sql: self.cron_sql.text(),
+                            connection,
+                            interval_ms,
+                            alert,
+                            enabled: true,
+                            last_run_ms: 0,
+                        };
+                        self.cron_tasks.push(task);
+                        self.cron_name.clear();
+                        self.cron_sql = text_editor::Content::new();
+                        self.cron_interval_value.clear();
+                        self.cron_alert_value.clear();
+                        return save_cron_tasks(self.cron_tasks.clone());
+                    }
+                }
+            }
+            SqlMessage::DeleteCronTask(id) => {
+                self.cron_tasks.retain(|t| t.id != id);
+                return save_cron_tasks(self.cron_tasks.clone());
+            }
+            SqlMessage::ToggleCronEnabled(id) => {
+                if let Some(task) = self.cron_tasks.iter_mut().find(|t| t.id == id) {
+                    task.enabled = !task.enabled;
+                }
+                return save_cron_tasks(self.cron_tasks.clone());
+            }
+            SqlMessage::RunCronNow(id) => {
+                if let Some(task) = self.cron_tasks.iter().find(|t| t.id == id).cloned() {
+                    return run_cron_task(self.engine.clone(), task);
+                }
+            }
+            SqlMessage::CronTick => {
+                let now = now_ms();
+                let due: Vec<CronTask> = self.cron_tasks.iter().filter(|t| t.is_due(now)).cloned().collect();
+                if due.is_empty() {
+                    return Task::none();
+                }
+                for task in &due {
+                    if let Some(t) = self.cron_tasks.iter_mut().find(|t| t.id == task.id) {
+                        t.last_run_ms = now;
+                    }
+                }
+                let save = save_cron_tasks(self.cron_tasks.clone());
+                let runs = Task::batch(
+                    due.into_iter().map(|task| run_cron_task(self.engine.clone(), task)),
+                );
+                return Task::batch([save, runs]);
+            }
+            SqlMessage::CronRunFinished(task_id, execution) => {
+                let name = self
+                    .cron_tasks
+                    .iter()
+                    .find(|t| t.id == task_id)
+                    .map(|t| t.name.clone())
+                    .unwrap_or(task_id);
+                let summary = if let Some(err) = &execution.error {
+                    format!("{name}: error - {err}")
+                } else {
+                    format!("{name}: {} rows", execution.rows.len())
+                };
+                self.cron_activity.insert(0, summary);
+                self.cron_activity.truncate(50);
+            }
         }
         Task::none()
     }
@@ -1104,6 +1381,105 @@ impl SqlTab {
         .into()
     }
 
+    fn view_timezone_pill(&self) -> Element<'_, SqlMessage> {
+        match &self.timezone {
+            None => text("").size(11).into(),
+            Some(Ok(tz)) => text(format!("TZ: {} ({})", tz.timezone, tz.utc_offset))
+                .size(11)
+                .color(iced::Color::from_rgb8(0x5a, 0xc0, 0x7a))
+                .into(),
+            Some(Err(err)) => text(format!("TZ error: {err}"))
+                .size(11)
+                .color(iced::Color::from_rgb8(0xe0, 0x5a, 0x5a))
+                .into(),
+        }
+    }
+
+    fn view_csv_export_bar(&self) -> Element<'_, SqlMessage> {
+        let status: Element<'_, SqlMessage> = match &self.csv_status {
+            None => text("").size(11).into(),
+            Some(Ok(path)) => text(format!("Saved to {path}"))
+                .size(11)
+                .color(iced::Color::from_rgb8(0x5a, 0xc0, 0x7a))
+                .into(),
+            Some(Err(err)) => text(err.clone())
+                .size(11)
+                .color(iced::Color::from_rgb8(0xe0, 0x5a, 0x5a))
+                .into(),
+        };
+        row![
+            button(text("Export CSV")).on_press(SqlMessage::ExportCsvPressed),
+            status,
+        ]
+        .spacing(8)
+        .into()
+    }
+
+    fn view_cron_panel(&self) -> Element<'_, SqlMessage> {
+        let mut col = column![text("Scheduled queries").size(16)].spacing(4);
+
+        for task in &self.cron_tasks {
+            let enabled_label = if task.enabled { "enabled" } else { "disabled" };
+            let interval_label = if task.interval_ms % 3_600_000 == 0 {
+                format!("{}h", task.interval_ms / 3_600_000)
+            } else {
+                format!("{}m", task.interval_ms / 60_000)
+            };
+            col = col.push(
+                row![
+                    text(format!("{} ({interval_label}, {enabled_label})", task.name)).size(12),
+                    button(text("Run now")).on_press(SqlMessage::RunCronNow(task.id.clone())),
+                    button(text(enabled_label)).on_press(SqlMessage::ToggleCronEnabled(task.id.clone())),
+                    button(text("delete")).on_press(SqlMessage::DeleteCronTask(task.id.clone())),
+                ]
+                .spacing(6),
+            );
+        }
+
+        col = col.push(text("New scheduled query").size(13));
+        col = col.push(
+            text_input("name", &self.cron_name).on_input(SqlMessage::CronNameChanged),
+        );
+        col = col.push(
+            text_editor(&self.cron_sql)
+                .on_action(SqlMessage::CronSqlAction)
+                .height(Length::Fixed(60.0)),
+        );
+        col = col.push(
+            row![
+                text_input("interval", &self.cron_interval_value)
+                    .on_input(SqlMessage::CronIntervalValueChanged)
+                    .width(Length::Fixed(60.0)),
+                button(text("minutes")).on_press(SqlMessage::CronIntervalUnitChanged("minutes".to_string())),
+                button(text("hours")).on_press(SqlMessage::CronIntervalUnitChanged("hours".to_string())),
+                text(self.cron_interval_unit.clone()).size(11),
+            ]
+            .spacing(6),
+        );
+        col = col.push(
+            row![
+                text("Alert if row count").size(11),
+                button(text(self.cron_alert_comparator.clone())).on_press(
+                    SqlMessage::CronAlertComparatorChanged(next_comparator(&self.cron_alert_comparator))
+                ),
+                text_input("value", &self.cron_alert_value)
+                    .on_input(SqlMessage::CronAlertValueChanged)
+                    .width(Length::Fixed(60.0)),
+            ]
+            .spacing(6),
+        );
+        col = col.push(button(text("+ Create scheduled query")).on_press(SqlMessage::CreateCronTaskPressed));
+
+        if !self.cron_activity.is_empty() {
+            col = col.push(text("Recent activity").size(12));
+            for line in self.cron_activity.iter().take(10) {
+                col = col.push(text(line.clone()).size(11));
+            }
+        }
+
+        col.into()
+    }
+
     fn view_row_edit_form(&self) -> Element<'_, SqlMessage> {
         let Some((_, values)) = &self.editing_row else {
             return column![].into();
@@ -1289,6 +1665,7 @@ impl SqlTab {
         let schema_tree = self.view_schema_tree();
         let saved_queries_tree = self.view_saved_queries_tree();
         let history_panel = self.view_history_panel();
+        let cron_panel = self.view_cron_panel();
 
         let sidebar = scrollable(
             column![
@@ -1296,7 +1673,8 @@ impl SqlTab {
                 add_connection_form,
                 schema_tree,
                 saved_queries_tree,
-                history_panel
+                history_panel,
+                cron_panel
             ]
             .spacing(16),
         )
@@ -1390,10 +1768,14 @@ impl SqlTab {
         };
 
         let editor_pane = column![
-            text(format!(
-                "Editor (connection: {})",
-                self.selected_connection.as_deref().unwrap_or("none selected")
-            )),
+            row![
+                text(format!(
+                    "Editor (connection: {})",
+                    self.selected_connection.as_deref().unwrap_or("none selected")
+                )),
+                self.view_timezone_pill(),
+            ]
+            .spacing(12),
             find_bar,
             editor_widget,
             autocomplete_popup,
@@ -1427,9 +1809,11 @@ impl SqlTab {
                 .into()
         } else {
             let grid_view = self.grid.view().map(SqlMessage::Grid);
+            let csv_bar = self.view_csv_export_bar();
             if self.browse.is_some() {
                 column![
                     self.view_browse_toolbar(),
+                    csv_bar,
                     grid_view,
                     self.view_row_edit_form(),
                     self.view_new_row_form(),
@@ -1437,7 +1821,7 @@ impl SqlTab {
                 .spacing(8)
                 .into()
             } else {
-                grid_view
+                column![csv_bar, grid_view].spacing(8).into()
             }
         };
 
@@ -1550,10 +1934,206 @@ fn reload_folders_after(
     )
 }
 
+fn reload_timezone(engine: Arc<SqlEngineState>, connection: String) -> Task<SqlMessage> {
+    Task::perform(
+        async move { engine::fetch_timezone(&engine, &connection).await },
+        SqlMessage::TimezoneLoaded,
+    )
+}
+
+fn load_cron_tasks() -> Task<SqlMessage> {
+    Task::perform(async move { engine::get_cron_tasks().await }, SqlMessage::CronTasksLoaded)
+}
+
+fn save_cron_tasks(tasks: Vec<CronTask>) -> Task<SqlMessage> {
+    Task::perform(
+        async move {
+            let values: Vec<serde_json::Value> = tasks.iter().map(CronTask::to_value).collect();
+            let _ = engine::save_cron_tasks(&values).await;
+            values
+        },
+        SqlMessage::CronTasksLoaded,
+    )
+}
+
+/// Runs one cron task's SQL, records it in run history with
+/// `run_source: "cron"`, evaluates its alert rule against the row count,
+/// and reports the outcome for the cron-activity log.
+fn run_cron_task(engine: Arc<SqlEngineState>, task: CronTask) -> Task<SqlMessage> {
+    let task_id = task.id.clone();
+    Task::perform(
+        async move {
+            let form = SqlForm {
+                sql: task.sql.clone(),
+                connection: task.connection.clone(),
+                variables: None,
+                tab_id: None,
+                query_name: Some(task.name.clone()),
+                query_folder: None,
+                run_source: Some("cron".to_string()),
+                cron_task_id: Some(task.id.clone()),
+                cron_task_name: Some(task.name.clone()),
+                alert: task.alert.clone(),
+            };
+            let execution = engine::execute_sql(form, &engine).await;
+            let row_count_text = format!("{} rows", execution.rows.len());
+            let alert_message = engine::alert_trigger_message(task.alert.as_ref(), &row_count_text, &task.name);
+            let created_at = engine::now_isoish();
+            let record = SqlRunHistoryRecord {
+                id: format!("cron-run-{}-{}", now_ms(), task.id),
+                connection: task.connection.clone(),
+                tab_id: String::new(),
+                sql: task.sql.clone(),
+                query_name: task.name.clone(),
+                query_folder: String::new(),
+                run_source: "cron".to_string(),
+                cron_task_id: task.id.clone(),
+                cron_task_name: task.name.clone(),
+                status: if execution.error.is_some() { "error".to_string() } else { "completed".to_string() },
+                created_at: created_at.clone(),
+                completed_at: Some(created_at),
+                row_count_text: Some(row_count_text),
+                result_json: None,
+                error: execution.error.clone(),
+                alert_triggered: alert_message.is_some(),
+                alert_message,
+            };
+            if let Err(err) = app_db::upsert_sql_run_history(&record).await {
+                eprintln!("Failed to persist cron run history: {err}");
+            }
+            execution
+        },
+        move |execution| SqlMessage::CronRunFinished(task_id.clone(), Arc::new(execution)),
+    )
+}
+
 fn history_record_id() -> String {
     let millis = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_millis())
         .unwrap_or_default();
     format!("manual-{millis}-{}", std::process::id())
+}
+
+#[cfg(test)]
+mod phase6_tests {
+    use super::*;
+
+    #[test]
+    fn csv_field_passes_through_plain_values() {
+        assert_eq!(csv_field("hello"), "hello");
+        assert_eq!(csv_field(""), "");
+    }
+
+    #[test]
+    fn csv_field_quotes_values_needing_it() {
+        assert_eq!(csv_field("a,b"), "\"a,b\"");
+        assert_eq!(csv_field("say \"hi\""), "\"say \"\"hi\"\"\"");
+        assert_eq!(csv_field("line\nbreak"), "\"line\nbreak\"");
+    }
+
+    #[test]
+    fn build_csv_produces_header_and_rows_with_crlf() {
+        let headers = vec!["id".to_string(), "name".to_string()];
+        let rows = vec![
+            vec!["1".to_string(), "Alice".to_string()],
+            vec!["2".to_string(), "Bob, Jr.".to_string()],
+        ];
+        let csv = build_csv(&headers, &rows);
+        assert_eq!(csv, "id,name\r\n1,Alice\r\n2,\"Bob, Jr.\"\r\n");
+    }
+
+    #[test]
+    fn build_csv_with_no_rows_is_just_the_header() {
+        let headers = vec!["a".to_string()];
+        assert_eq!(build_csv(&headers, &[]), "a\r\n");
+    }
+
+    fn sample_task(interval_ms: i64, last_run_ms: i64, enabled: bool) -> CronTask {
+        CronTask {
+            id: "t1".to_string(),
+            name: "Nightly check".to_string(),
+            sql: "SELECT 1".to_string(),
+            connection: "conn".to_string(),
+            interval_ms,
+            alert: Some(SqlAlertRule { comparator: ">".to_string(), value: 5 }),
+            enabled,
+            last_run_ms,
+        }
+    }
+
+    #[test]
+    fn cron_task_round_trips_through_value() {
+        let task = sample_task(60_000, 12345, true);
+        let value = task.to_value();
+        let parsed = CronTask::from_value(&value).expect("should parse back");
+        assert_eq!(parsed.id, task.id);
+        assert_eq!(parsed.name, task.name);
+        assert_eq!(parsed.sql, task.sql);
+        assert_eq!(parsed.connection, task.connection);
+        assert_eq!(parsed.interval_ms, task.interval_ms);
+        assert_eq!(parsed.enabled, task.enabled);
+        assert_eq!(parsed.last_run_ms, task.last_run_ms);
+        let alert = parsed.alert.expect("alert should round-trip");
+        assert_eq!(alert.comparator, ">");
+        assert_eq!(alert.value, 5);
+    }
+
+    #[test]
+    fn cron_task_round_trips_with_no_alert() {
+        let mut task = sample_task(60_000, 0, false);
+        task.alert = None;
+        let value = task.to_value();
+        let parsed = CronTask::from_value(&value).expect("should parse back");
+        assert!(parsed.alert.is_none());
+        assert!(!parsed.enabled);
+    }
+
+    #[test]
+    fn cron_task_from_value_rejects_missing_required_fields() {
+        let value = serde_json::json!({ "id": "t1" });
+        assert!(CronTask::from_value(&value).is_none());
+    }
+
+    #[test]
+    fn is_due_true_when_interval_elapsed_and_enabled() {
+        let task = sample_task(60_000, 1_000, true);
+        assert!(task.is_due(61_000));
+        assert!(task.is_due(100_000));
+    }
+
+    #[test]
+    fn is_due_false_when_interval_not_elapsed() {
+        let task = sample_task(60_000, 1_000, true);
+        assert!(!task.is_due(30_000));
+    }
+
+    #[test]
+    fn is_due_false_when_disabled() {
+        let task = sample_task(60_000, 1_000, false);
+        assert!(!task.is_due(1_000_000));
+    }
+
+    #[test]
+    fn is_due_false_for_zero_interval() {
+        let task = sample_task(0, 0, true);
+        assert!(!task.is_due(1_000_000));
+    }
+
+    #[test]
+    fn next_comparator_cycles_through_all_and_wraps() {
+        let mut c = "=".to_string();
+        let mut seen = vec![c.clone()];
+        for _ in 0..ALERT_COMPARATORS.len() - 1 {
+            c = next_comparator(&c);
+            seen.push(c.clone());
+        }
+        assert_eq!(seen, ALERT_COMPARATORS.to_vec());
+        assert_eq!(next_comparator(&c), "=");
+    }
+
+    #[test]
+    fn next_comparator_falls_back_to_first_for_unknown_input() {
+        assert_eq!(next_comparator("bogus"), "!=");
+    }
 }
