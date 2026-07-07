@@ -35,6 +35,17 @@ jobs:
         shell: bash
         run: cargo packager --release -f "$(echo '${{ matrix.formats }}' | tr ' ' ',')"
 
+      - name: Ad-hoc sign and re-package macOS app
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          set -euo pipefail
+          APP_PATH=$(find dist -maxdepth 1 -name '*.app')
+          codesign --force --deep --sign - "$APP_PATH"
+          codesign --verify --deep --strict "$APP_PATH"
+          rm -f dist/*.dmg
+          hdiutil create -volname "OG TestDesk" -srcfolder "$APP_PATH" -ov -format UDZO "dist/OG TestDesk.dmg"
+
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
