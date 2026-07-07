@@ -6,11 +6,13 @@ use iced::widget::{button, column, container, mouse_area, row, scrollable, text,
 use iced::{Element, Length, Task};
 
 use og_testdesk_core::requests::{
-    self, GraphqlPayload, ProxyRequest, ProxyResponse, RequestVariableSet, RequestVariables, SavedRequest,
+    self, GraphqlPayload, PostmanImportResult, ProxyRequest, ProxyResponse, RequestVariableSet, RequestVariables,
+    SavedRequest,
 };
 
 use crate::graphql_highlighter::{self, GraphqlHighlighter};
 use crate::json_highlighter::{self, JsonHighlighter};
+use crate::curl_import::{generate_curl_command, parse_curl_command};
 use crate::request_auth::{AuthMessage, AuthState};
 use crate::request_env::{merge_scopes, scan_env_variables, substitute_env_variables};
 use crate::request_history::{self, HistoryEntry, RequestSnapshot, ResponseSnapshot};
@@ -302,6 +304,69 @@ impl EnvManagerState {
     }
 }
 
+/// State for the "Curl" toggle panel: import a pasted curl command into
+/// the current tab, and view/copy the current tab's request as curl.
+pub struct CurlPanelState {
+    pub open: bool,
+    pub import_text: String,
+    pub import_error: Option<String>,
+}
+
+impl CurlPanelState {
+    fn blank() -> Self {
+        Self {
+            open: false,
+            import_text: String::new(),
+            import_error: None,
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub enum CurlMessage {
+    ToggleOpen,
+    ImportTextChanged(String),
+    ImportPressed,
+    CopyPressed,
+}
+
+/// State for the Postman collection import panel: pick a `.json` export,
+/// choose how to handle name collisions, and import it via
+/// `core::requests::import_postman_collection`.
+pub struct PostmanImportState {
+    pub open: bool,
+    pub duplicate_mode: String,
+    pub pending_collection: Option<serde_json::Value>,
+    pub loading: bool,
+    pub importing: bool,
+    pub error: Option<String>,
+    pub result: Option<PostmanImportResult>,
+}
+
+impl PostmanImportState {
+    fn blank() -> Self {
+        Self {
+            open: false,
+            duplicate_mode: "rename".to_string(),
+            pending_collection: None,
+            loading: false,
+            importing: false,
+            error: None,
+            result: None,
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub enum PostmanImportMessage {
+    ToggleOpen,
+    DuplicateModeChanged(String),
+    PickFilePressed,
+    FileLoaded(Result<serde_json::Value, String>),
+    ImportPressed,
+    Imported(Result<PostmanImportResult, String>),
+}
+
 #[derive(Debug, Clone)]
 pub enum EnvMessage {
     ToggleOpen,
@@ -376,6 +441,8 @@ pub enum RequestsMessage {
     DeleteSaved(String, Option<String>),
     Collection(CollectionMessage),
     History(HistoryMessage),
+    Curl(CurlMessage),
+    Postman(PostmanImportMessage),
 
     SplitDragStart,
     SplitCursorMoved(f32),
@@ -401,6 +468,8 @@ pub struct RequestsTab {
     resizing: bool,
     drag_last_y: Option<f32>,
     env: EnvManagerState,
+    curl: CurlPanelState,
+    postman: PostmanImportState,
 }
 
 impl RequestsTab {
@@ -424,6 +493,8 @@ impl RequestsTab {
             resizing: false,
             drag_last_y: None,
             env: EnvManagerState::blank(),
+            curl: CurlPanelState::blank(),
+            postman: PostmanImportState::blank(),
         };
         let load_env = Task::perform(requests::get_request_variables(), |vars| {
             RequestsMessage::Env(EnvMessage::Loaded(vars))
@@ -437,6 +508,11 @@ impl RequestsTab {
     /// Mirrors `SqlTab::subscription`'s split-drag tracking exactly (see
     /// `sql_tab.rs`) — same `mouse_area` + window-level `CursorMoved`/
     /// `ButtonReleased` pattern, not a new approach.
+    /// Mirrors `SqlTab`'s split-drag tracking, plus two shortcuts scoped to
+    /// this tab: Ctrl/Cmd+Enter sends the current request, Ctrl/Cmd+S saves
+    /// it. Both require a modifier key, so they don't fire on plain typing
+    /// (e.g. Enter inside a single-line text_input still behaves normally
+    /// unless a modifier is held) — same reasoning as SQL's Ctrl/Cmd+F.
     pub fn subscription(&self) -> iced::Subscription<RequestsMessage> {
         iced::event::listen_with(|event, _status, _window| match event {
             iced::Event::Mouse(iced::mouse::Event::CursorMoved { position }) => {
@@ -444,6 +520,18 @@ impl RequestsTab {
             }
             iced::Event::Mouse(iced::mouse::Event::ButtonReleased(iced::mouse::Button::Left)) => {
                 Some(RequestsMessage::SplitDragEnd)
+            }
+            iced::Event::Keyboard(iced::keyboard::Event::KeyPressed { key, modifiers, .. }) => {
+                if !modifiers.command() {
+                    return None;
+                }
+                match key.as_ref() {
+                    iced::keyboard::Key::Named(iced::keyboard::key::Named::Enter) => {
+                        Some(RequestsMessage::SendPressed)
+                    }
+                    iced::keyboard::Key::Character("s") => Some(RequestsMessage::SavePressed),
+                    _ => None,
+                }
             }
             _ => None,
         })
@@ -569,6 +657,8 @@ impl RequestsTab {
             }
             RequestsMessage::Collection(msg) => return self.update_collection(msg),
             RequestsMessage::History(msg) => return self.update_history(msg),
+            RequestsMessage::Curl(msg) => return self.update_curl(msg),
+            RequestsMessage::Postman(msg) => return self.update_postman(msg),
 
             RequestsMessage::SplitDragStart => {
                 self.resizing = true;
@@ -902,6 +992,113 @@ impl RequestsTab {
         )
     }
 
+    /// Imports a pasted curl command into the *current* tab (method, URL,
+    /// headers, body). Replaces headers/body outright rather than merging,
+    /// mirroring what pasting a curl command into Postman's importer does.
+    fn update_curl(&mut self, message: CurlMessage) -> Task<RequestsMessage> {
+        match message {
+            CurlMessage::ToggleOpen => self.curl.open = !self.curl.open,
+            CurlMessage::ImportTextChanged(v) => self.curl.import_text = v,
+            CurlMessage::ImportPressed => match parse_curl_command(&self.curl.import_text) {
+                Ok(parsed) => {
+                    self.curl.import_error = None;
+                    let tab = self.current();
+                    tab.method = parsed.method;
+                    let (base, rows) = parse_query_params(&parsed.url);
+                    tab.url_base = base;
+                    tab.params = rows;
+                    request_kv_editor::ensure_trailing_blank_row(&mut tab.params);
+                    tab.headers = parsed
+                        .headers
+                        .into_iter()
+                        .map(|(k, v)| KvRow::new(k, v))
+                        .collect();
+                    request_kv_editor::ensure_trailing_blank_row(&mut tab.headers);
+                    if let Some(body) = parsed.body {
+                        tab.raw_body = text_editor::Content::with_text(&body);
+                        tab.body_mode = BodyMode::Raw;
+                    }
+                    sync_path_vars(tab);
+                }
+                Err(err) => self.curl.import_error = Some(err),
+            },
+            CurlMessage::CopyPressed => {
+                let tab = self.current();
+                let headers = request_kv_editor::active_pairs(&tab.headers);
+                let body = matches!(tab.body_mode, BodyMode::Raw | BodyMode::Binary)
+                    .then(|| tab.raw_body.text())
+                    .filter(|b| !b.is_empty());
+                let command = generate_curl_command(&tab.method, &tab.full_url(), &headers, body.as_deref());
+                return iced::clipboard::write(command);
+            }
+        }
+        Task::none()
+    }
+
+    /// Picks a `.json` file, parses it, and imports it via
+    /// `core::requests::import_postman_collection`, refreshing the
+    /// collections tree/saved-requests list on success.
+    fn update_postman(&mut self, message: PostmanImportMessage) -> Task<RequestsMessage> {
+        match message {
+            PostmanImportMessage::ToggleOpen => {
+                self.postman.open = !self.postman.open;
+            }
+            PostmanImportMessage::DuplicateModeChanged(v) => self.postman.duplicate_mode = v,
+            PostmanImportMessage::PickFilePressed => {
+                self.postman.loading = true;
+                self.postman.error = None;
+                self.postman.result = None;
+                return Task::perform(
+                    async move {
+                        tokio::task::spawn_blocking(|| {
+                            let path = rfd::FileDialog::new()
+                                .add_filter("Postman Collection", &["json"])
+                                .pick_file()
+                                .ok_or_else(|| "Import cancelled.".to_string())?;
+                            let text = std::fs::read_to_string(&path)
+                                .map_err(|err| format!("Failed to read file: {err}"))?;
+                            serde_json::from_str::<serde_json::Value>(&text)
+                                .map_err(|err| format!("File is not valid JSON: {err}"))
+                        })
+                        .await
+                        .unwrap_or_else(|err| Err(format!("File dialog task failed: {err}")))
+                    },
+                    |result| RequestsMessage::Postman(PostmanImportMessage::FileLoaded(result)),
+                );
+            }
+            PostmanImportMessage::FileLoaded(result) => {
+                self.postman.loading = false;
+                match result {
+                    Ok(value) => self.postman.pending_collection = Some(value),
+                    Err(err) => self.postman.error = Some(err),
+                }
+            }
+            PostmanImportMessage::ImportPressed => {
+                if let Some(collection) = self.postman.pending_collection.clone() {
+                    self.postman.importing = true;
+                    self.postman.error = None;
+                    let duplicate_mode = self.postman.duplicate_mode.clone();
+                    return Task::perform(
+                        async move { requests::import_postman_collection(&collection, &duplicate_mode).await },
+                        |result| RequestsMessage::Postman(PostmanImportMessage::Imported(result)),
+                    );
+                }
+            }
+            PostmanImportMessage::Imported(result) => {
+                self.postman.importing = false;
+                match result {
+                    Ok(summary) => {
+                        self.postman.result = Some(summary);
+                        self.postman.pending_collection = None;
+                        return reload_collections();
+                    }
+                    Err(err) => self.postman.error = Some(err),
+                }
+            }
+        }
+        Task::none()
+    }
+
     /// Nested folder tree of saved requests — mirrors `SqlTab::view_saved_queries_tree`'s
     /// structure exactly (filter box, new-folder input, collapsible folder
     /// headers, per-request rename/delete/move-to-folder controls), just
@@ -1075,12 +1272,16 @@ impl RequestsTab {
         };
         let env_toggle_label = if self.env.open { "Hide environments" } else { "Environments" };
         let history_toggle_label = if self.history_open { "Hide history" } else { "History" };
+        let curl_toggle_label = if self.curl.open { "Hide curl" } else { "Curl" };
+        let postman_toggle_label = if self.postman.open { "Hide Postman import" } else { "Postman import" };
         let url_row = row![
             method_row,
             text_input("https://example.com/{id}", &tab.full_url()).on_input(RequestsMessage::UrlChanged),
             env_indicator,
             button(text(env_toggle_label)).on_press(RequestsMessage::Env(EnvMessage::ToggleOpen)),
             button(text(history_toggle_label)).on_press(RequestsMessage::History(HistoryMessage::ToggleOpen)),
+            button(text(curl_toggle_label)).on_press(RequestsMessage::Curl(CurlMessage::ToggleOpen)),
+            button(text(postman_toggle_label)).on_press(RequestsMessage::Postman(PostmanImportMessage::ToggleOpen)),
         ]
         .spacing(8);
 
@@ -1137,6 +1338,12 @@ impl RequestsTab {
         }
         if self.history_open {
             builder = builder.push(self.view_history_panel());
+        }
+        if self.curl.open {
+            builder = builder.push(view_curl_panel(&self.curl, tab));
+        }
+        if self.postman.open {
+            builder = builder.push(view_postman_panel(&self.postman));
         }
         builder = builder.push(section_row).push(section_body);
         if let Some(err) = &tab.send_error {
@@ -1292,6 +1499,101 @@ fn view_env_manager(env: &EnvManagerState) -> Element<'_, RequestsMessage> {
             background: Some(theme.extended_palette().background.weak.color.into()),
             ..Default::default()
         })
+        .into()
+}
+
+/// Curl import (paste a command, populates the current tab) and export
+/// ("View as curl" of the current tab's raw builder state, plus a Copy
+/// button using `iced::clipboard::write`).
+fn view_curl_panel<'a>(curl: &'a CurlPanelState, tab: &'a RequestTabState) -> Element<'a, RequestsMessage> {
+    let import_section = column![
+        text("Paste a curl command to populate this tab:").size(12),
+        text_input("curl https://...", &curl.import_text)
+            .on_input(|v| RequestsMessage::Curl(CurlMessage::ImportTextChanged(v))),
+        button(text("Import")).on_press(RequestsMessage::Curl(CurlMessage::ImportPressed)),
+    ]
+    .spacing(6);
+
+    let import_section: Element<'_, RequestsMessage> = if let Some(err) = &curl.import_error {
+        column![import_section, text(err.clone()).color(iced::Color::from_rgb8(0xe0, 0x5a, 0x5a))]
+            .spacing(6)
+            .into()
+    } else {
+        import_section.into()
+    };
+
+    let headers = request_kv_editor::active_pairs(&tab.headers);
+    let body = matches!(tab.body_mode, BodyMode::Raw | BodyMode::Binary)
+        .then(|| tab.raw_body.text())
+        .filter(|b| !b.is_empty());
+    let generated = generate_curl_command(&tab.method, &tab.full_url(), &headers, body.as_deref());
+    let export_section = column![
+        text("This tab as curl:").size(12),
+        text(generated).size(12),
+        button(text("Copy")).on_press(RequestsMessage::Curl(CurlMessage::CopyPressed)),
+    ]
+    .spacing(6);
+
+    container(column![import_section, export_section].spacing(16).padding(10))
+        .style(|theme: &iced::Theme| container::Style {
+            background: Some(theme.extended_palette().background.weak.color.into()),
+            ..Default::default()
+        })
+        .into()
+}
+
+/// Postman collection import: pick a `.json` file, choose a duplicate-name
+/// strategy, import via `core::requests::import_postman_collection`.
+fn view_postman_panel(postman: &PostmanImportState) -> Element<'_, RequestsMessage> {
+    let mode_row = row![
+        text("On name conflict:").size(12),
+        duplicate_mode_button("Rename", "rename", &postman.duplicate_mode),
+        duplicate_mode_button("Overwrite", "overwrite", &postman.duplicate_mode),
+        duplicate_mode_button("Skip", "skip", &postman.duplicate_mode),
+    ]
+    .spacing(8);
+
+    let pick_label = if postman.loading { "Loading..." } else { "Choose file..." };
+    let mut col = column![
+        mode_row,
+        button(text(pick_label)).on_press(RequestsMessage::Postman(PostmanImportMessage::PickFilePressed)),
+    ]
+    .spacing(8);
+
+    if postman.pending_collection.is_some() {
+        let import_label = if postman.importing { "Importing..." } else { "Import" };
+        col = col.push(row![
+            text("Collection loaded, ready to import.").size(12),
+            button(text(import_label)).on_press(RequestsMessage::Postman(PostmanImportMessage::ImportPressed)),
+        ].spacing(8));
+    }
+
+    if let Some(err) = &postman.error {
+        col = col.push(text(err.clone()).color(iced::Color::from_rgb8(0xe0, 0x5a, 0x5a)));
+    }
+
+    if let Some(result) = &postman.result {
+        col = col.push(text(format!(
+            "Imported {} request(s), {} folder(s), {} variable(s).",
+            result.imported, result.folders, result.variables
+        )));
+        for warning in &result.warnings {
+            col = col.push(text(format!("Warning: {warning}")).size(12));
+        }
+    }
+
+    container(col.padding(10))
+        .style(|theme: &iced::Theme| container::Style {
+            background: Some(theme.extended_palette().background.weak.color.into()),
+            ..Default::default()
+        })
+        .into()
+}
+
+fn duplicate_mode_button<'a>(label: &'a str, value: &'static str, current: &str) -> Element<'a, RequestsMessage> {
+    let display = if current == value { format!("[{label}]") } else { label.to_string() };
+    button(text(display))
+        .on_press(RequestsMessage::Postman(PostmanImportMessage::DuplicateModeChanged(value.to_string())))
         .into()
 }
 

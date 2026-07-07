@@ -49,6 +49,7 @@ pub struct RequestVariables {
     pub global: HashMap<String, String>,
 }
 
+#[derive(Debug, Clone)]
 pub struct PostmanImportResult {
     pub imported: usize,
     pub folders: usize,

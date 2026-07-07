@@ -7,6 +7,7 @@ mod inspector_tab;
 mod json_highlighter;
 mod jwt_tab;
 mod request_auth;
+mod curl_import;
 mod request_env;
 mod request_history;
 mod request_kv_editor;
