@@ -37,7 +37,7 @@ pub fn default_panel_opacity() -> u32 {
 }
 
 /// A named color/spacing palette applied to the desktop UI.
-#[derive(Serialize, Deserialize, Clone)]
+#[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct Theme {
     pub name: String,
     #[serde(default = "default_theme_mode")]

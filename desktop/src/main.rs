@@ -1,4 +1,6 @@
 mod appdata;
+mod ai_tab;
+mod appearance_tab;
 mod calculator_tab;
 mod inspector_tab;
 mod jwt_tab;
@@ -11,6 +13,8 @@ use std::sync::Arc;
 use iced::widget::{button, column, container, row, text};
 use iced::{Element, Length, Task};
 
+use ai_tab::{AiMessage, AiTab};
+use appearance_tab::{AppearanceMessage, AppearanceTab};
 use calculator_tab::{CalculatorMessage, CalculatorTab};
 use inspector_tab::{InspectorMessage, InspectorTab};
 use jwt_tab::{JwtMessage, JwtTab};
@@ -27,6 +31,8 @@ enum Tab {
     Calculator,
     Jwt,
     Scratchpad,
+    Appearance,
+    Ai,
 }
 
 struct App {
@@ -37,6 +43,8 @@ struct App {
     calculator_tab: CalculatorTab,
     jwt_tab: JwtTab,
     scratchpad_tab: ScratchpadTab,
+    appearance_tab: AppearanceTab,
+    ai_tab: AiTab,
 }
 
 #[derive(Debug, Clone)]
@@ -48,6 +56,8 @@ enum Message {
     Calculator(CalculatorMessage),
     Jwt(JwtMessage),
     Scratchpad(ScratchpadMessage),
+    Appearance(AppearanceMessage),
+    Ai(AiMessage),
 }
 
 impl App {
@@ -59,6 +69,8 @@ impl App {
         let (calculator_tab, calculator_task) = CalculatorTab::new();
         let (jwt_tab, jwt_task) = JwtTab::new();
         let (scratchpad_tab, scratchpad_task) = ScratchpadTab::new();
+        let (appearance_tab, appearance_task) = AppearanceTab::new();
+        let (ai_tab, ai_task) = AiTab::new();
         (
             Self {
                 active_tab: Tab::Sql,
@@ -68,6 +80,8 @@ impl App {
                 calculator_tab,
                 jwt_tab,
                 scratchpad_tab,
+                appearance_tab,
+                ai_tab,
             },
             Task::batch([
                 sql_task.map(Message::Sql),
@@ -76,6 +90,8 @@ impl App {
                 calculator_task.map(Message::Calculator),
                 jwt_task.map(Message::Jwt),
                 scratchpad_task.map(Message::Scratchpad),
+                appearance_task.map(Message::Appearance),
+                ai_task.map(Message::Ai),
             ]),
         )
     }
@@ -96,6 +112,10 @@ impl App {
             Message::Scratchpad(msg) => {
                 self.scratchpad_tab.update(msg).map(Message::Scratchpad)
             }
+            Message::Appearance(msg) => {
+                self.appearance_tab.update(msg).map(Message::Appearance)
+            }
+            Message::Ai(msg) => self.ai_tab.update(msg).map(Message::Ai),
         }
     }
 
@@ -111,6 +131,8 @@ impl App {
             nav_button("Calculator", Tab::Calculator),
             nav_button("JWT", Tab::Jwt),
             nav_button("Scratch Pad", Tab::Scratchpad),
+            nav_button("Appearance", Tab::Appearance),
+            nav_button("AI Assistant", Tab::Ai),
         ]
         .spacing(8);
 
@@ -121,6 +143,8 @@ impl App {
             Tab::Calculator => self.calculator_tab.view().map(Message::Calculator),
             Tab::Jwt => self.jwt_tab.view().map(Message::Jwt),
             Tab::Scratchpad => self.scratchpad_tab.view().map(Message::Scratchpad),
+            Tab::Appearance => self.appearance_tab.view().map(Message::Appearance),
+            Tab::Ai => self.ai_tab.view().map(Message::Ai),
         };
 
         container(column![nav, body].spacing(16).padding(16))
