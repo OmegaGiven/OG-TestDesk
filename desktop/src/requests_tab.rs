@@ -1,5 +1,6 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use iced::widget::{button, column, container, mouse_area, row, scrollable, text, text_editor, text_input};
 use iced::{Element, Length, Task};
@@ -12,8 +13,13 @@ use crate::graphql_highlighter::{self, GraphqlHighlighter};
 use crate::json_highlighter::{self, JsonHighlighter};
 use crate::request_auth::{AuthMessage, AuthState};
 use crate::request_env::{merge_scopes, scan_env_variables, substitute_env_variables};
+use crate::request_history::{self, HistoryEntry, RequestSnapshot, ResponseSnapshot};
 use crate::request_kv_editor::{self, KvEditorMessage, KvRow};
 use crate::request_url::{build_url_with_params, parse_query_params, scan_path_variables, substitute_path_variables};
+
+fn current_millis() -> u64 {
+    SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_millis() as u64).unwrap_or(0)
+}
 
 const SPLIT_REFERENCE_HEIGHT: f32 = 700.0;
 
@@ -157,6 +163,47 @@ impl RequestTabState {
         build_url_with_params(&self.url_base, &self.params)
     }
 
+    /// Opens a history entry as a new tab, restoring both the request that
+    /// was sent and the response/error it produced, so the user can inspect
+    /// what happened without re-sending.
+    fn from_history(entry: &HistoryEntry) -> Self {
+        let mut tab = Self::blank();
+        let (base, rows) = parse_query_params(&entry.request.url);
+        tab.name = format!("History: {} {}", entry.request.method, base);
+        tab.method = entry.request.method.clone();
+        tab.url_base = base;
+        tab.params = rows;
+        request_kv_editor::ensure_trailing_blank_row(&mut tab.params);
+        tab.headers = headers_from_text(&entry.request.headers);
+        request_kv_editor::ensure_trailing_blank_row(&mut tab.headers);
+        tab.raw_body = text_editor::Content::with_text(&entry.request.body);
+        sync_path_vars(&mut tab);
+
+        if let Some(resp) = &entry.response {
+            let proxy_resp = ProxyResponse {
+                status: resp.status,
+                headers: resp.headers.clone(),
+                body: resp.body.clone(),
+                body_truncated: false,
+                body_bytes: resp.body.len() as u64,
+                body_limit_bytes: 0,
+                stderr: String::new(),
+                curl_exit: 0,
+                duration_ms: 0,
+            };
+            let display_text = match serde_json::from_str::<serde_json::Value>(&proxy_resp.body) {
+                Ok(value) => serde_json::to_string_pretty(&value).unwrap_or_else(|_| proxy_resp.body.clone()),
+                Err(_) => proxy_resp.body.clone(),
+            };
+            tab.response_body_editor = text_editor::Content::with_text(&display_text);
+            tab.last_response = Some(Ok(proxy_resp));
+        } else if let Some(err) = &entry.error {
+            tab.last_response = Some(Err(err.clone()));
+        }
+
+        tab
+    }
+
     fn fingerprint(&self) -> String {
         format!(
             "{}|{}|{:?}|{}|{:?}|{}|{}",
@@ -270,6 +317,32 @@ pub enum EnvMessage {
 }
 
 #[derive(Debug, Clone)]
+pub enum CollectionMessage {
+    FilterChanged(String),
+    ToggleFolderExpanded(String),
+    NewFolderNameChanged(String),
+    CreateFolderPressed,
+    DeleteFolderPressed(String),
+    RenameStart(String, Option<String>),
+    RenameFieldChanged(String),
+    RenameCancel,
+    RenameConfirm(String, Option<String>),
+    MoveFieldChanged(String, Option<String>, String),
+    MovePressed(String, Option<String>),
+}
+
+#[derive(Debug, Clone)]
+pub enum HistoryMessage {
+    ToggleOpen,
+    Loaded(serde_json::Value),
+    Saved,
+    FilterChanged(String),
+    Load(String),
+    Delete(String),
+    ClearAll,
+}
+
+#[derive(Debug, Clone)]
 pub enum RequestsMessage {
     NewTab,
     CloseTab(usize),
@@ -296,10 +369,13 @@ pub enum RequestsMessage {
     OAuthTokenReceived(Result<String, String>),
 
     SaveNameChanged(String),
+    SaveFolderChanged(String),
     SavePressed,
-    SavedReloaded(Vec<SavedRequest>),
-    LoadSaved(String),
-    DeleteSaved(String),
+    CollectionsReloaded(Vec<SavedRequest>, Vec<String>),
+    LoadSaved(String, Option<String>),
+    DeleteSaved(String, Option<String>),
+    Collection(CollectionMessage),
+    History(HistoryMessage),
 
     SplitDragStart,
     SplitCursorMoved(f32),
@@ -310,7 +386,17 @@ pub struct RequestsTab {
     tabs: Vec<RequestTabState>,
     active: usize,
     save_name: String,
+    save_folder: String,
     saved: Vec<SavedRequest>,
+    saved_folders: Vec<String>,
+    collections_filter: String,
+    expanded_folders: HashSet<String>,
+    new_folder_name: String,
+    renaming: Option<(String, Option<String>, String)>,
+    move_target: HashMap<(String, Option<String>), String>,
+    history: Vec<HistoryEntry>,
+    history_filter: String,
+    history_open: bool,
     split_ratio: f32,
     resizing: bool,
     drag_last_y: Option<f32>,
@@ -323,7 +409,17 @@ impl RequestsTab {
             tabs: vec![RequestTabState::blank()],
             active: 0,
             save_name: String::new(),
+            save_folder: String::new(),
             saved: Vec::new(),
+            saved_folders: Vec::new(),
+            collections_filter: String::new(),
+            expanded_folders: HashSet::new(),
+            new_folder_name: String::new(),
+            renaming: None,
+            move_target: HashMap::new(),
+            history: Vec::new(),
+            history_filter: String::new(),
+            history_open: false,
             split_ratio: 0.55,
             resizing: false,
             drag_last_y: None,
@@ -332,7 +428,10 @@ impl RequestsTab {
         let load_env = Task::perform(requests::get_request_variables(), |vars| {
             RequestsMessage::Env(EnvMessage::Loaded(vars))
         });
-        (tab, Task::batch([reload_saved(), load_env]))
+        let load_history = Task::perform(requests::get_request_history(), |value| {
+            RequestsMessage::History(HistoryMessage::Loaded(value))
+        });
+        (tab, Task::batch([reload_collections(), load_env, load_history]))
     }
 
     /// Mirrors `SqlTab::subscription`'s split-drag tracking exactly (see
@@ -412,6 +511,10 @@ impl RequestsTab {
 
             RequestsMessage::SendPressed => return self.send_request(),
             RequestsMessage::ResponseReceived(result) => {
+                let (method, url, headers_text, body_text) = {
+                    let tab = self.current();
+                    (tab.method.clone(), tab.full_url(), headers_as_text(&tab.headers), tab.raw_body.text())
+                };
                 let tab = self.current();
                 tab.sending = false;
                 if let Ok(resp) = result.as_ref() {
@@ -424,6 +527,20 @@ impl RequestsTab {
                     tab.response_body_editor = text_editor::Content::with_text(&display_text);
                 }
                 tab.last_response = Some((*result).clone());
+
+                let (response_snapshot, error) = match result.as_ref() {
+                    Ok(resp) => (Some(ResponseSnapshot::new(resp.status, &resp.headers, &resp.body)), None),
+                    Err(err) => (None, Some(err.clone())),
+                };
+                let entry = HistoryEntry {
+                    id: format!("{}-{}", current_millis(), self.history.len()),
+                    timestamp_ms: current_millis(),
+                    request: RequestSnapshot::new(&method, &url, &headers_text, &body_text),
+                    response: response_snapshot,
+                    error,
+                };
+                request_history::push_capped(&mut self.history, entry, request_history::HISTORY_CAP);
+                return self.save_history_task();
             }
             RequestsMessage::OAuthTokenReceived(result) => {
                 let tab = self.current();
@@ -438,19 +555,20 @@ impl RequestsTab {
             }
 
             RequestsMessage::SaveNameChanged(v) => self.save_name = v,
+            RequestsMessage::SaveFolderChanged(v) => self.save_folder = v,
             RequestsMessage::SavePressed => return self.save_current(),
-            RequestsMessage::SavedReloaded(saved) => self.saved = saved,
-            RequestsMessage::LoadSaved(name) => self.load_saved_into_current(&name),
-            RequestsMessage::DeleteSaved(name) => {
-                let folder = self.saved.iter().find(|r| r.name == name).and_then(|r| r.folder.clone());
-                return Task::perform(
-                    async move {
-                        let _ = requests::delete_request(&name, folder.as_deref()).await;
-                        requests::list_saved_requests().await
-                    },
-                    RequestsMessage::SavedReloaded,
-                );
+            RequestsMessage::CollectionsReloaded(saved, folders) => {
+                self.saved = saved;
+                self.saved_folders = folders;
             }
+            RequestsMessage::LoadSaved(name, folder) => self.load_saved_into_current(&name, folder.as_deref()),
+            RequestsMessage::DeleteSaved(name, folder) => {
+                return reload_collections_after(async move {
+                    let _ = requests::delete_request(&name, folder.as_deref()).await;
+                });
+            }
+            RequestsMessage::Collection(msg) => return self.update_collection(msg),
+            RequestsMessage::History(msg) => return self.update_history(msg),
 
             RequestsMessage::SplitDragStart => {
                 self.resizing = true;
@@ -619,26 +737,40 @@ impl RequestsTab {
             return Task::none();
         }
         let name = self.save_name.clone();
+        let folder_input = self.save_folder.trim().to_string();
+        let folder = if folder_input.is_empty() { None } else { Some(folder_input) };
         self.save_name.clear();
+        self.save_folder.clear();
         let tab = self.current();
         let method = tab.method.clone();
         let url = tab.full_url();
         let headers = headers_as_text(&tab.headers);
         let body = tab.raw_body.text();
         tab.saved_name = Some(name.clone());
+        tab.saved_folder = folder.clone();
         tab.name = name.clone();
         tab.baseline = Some(tab.fingerprint());
-        Task::perform(
-            async move {
-                let _ = requests::save_request(&name, &method, &url, &headers, &body, None, None, None, None, None, None).await;
-                requests::list_saved_requests().await
-            },
-            RequestsMessage::SavedReloaded,
-        )
+        let folder_for_save = folder.clone();
+        reload_collections_after(async move {
+            let _ = requests::save_request(
+                &name,
+                &method,
+                &url,
+                &headers,
+                &body,
+                None,
+                None,
+                None,
+                None,
+                None,
+                folder_for_save.as_deref(),
+            )
+            .await;
+        })
     }
 
-    fn load_saved_into_current(&mut self, name: &str) {
-        let Some(saved) = self.saved.iter().find(|r| r.name == name).cloned() else {
+    fn load_saved_into_current(&mut self, name: &str, folder: Option<&str>) {
+        let Some(saved) = self.saved.iter().find(|r| r.name == name && r.folder.as_deref() == folder).cloned() else {
             return;
         };
         let (base, rows) = parse_query_params(&saved.url);
@@ -655,6 +787,260 @@ impl RequestsTab {
         tab.raw_body = text_editor::Content::with_text(&saved.body);
         sync_path_vars(tab);
         tab.baseline = Some(tab.fingerprint());
+    }
+
+    /// Mirrors `SqlTab`'s saved-query-folder-tree message handling
+    /// (`ToggleFolderExpanded`/`CreateFolderPressed`/etc. in `sql_tab.rs`)
+    /// against `core::requests`'s folder functions instead of the SQL
+    /// engine's — same interaction pattern, no drag-and-drop (per the
+    /// design doc's v1 simplification), move-to-folder via a text field.
+    fn update_collection(&mut self, message: CollectionMessage) -> Task<RequestsMessage> {
+        match message {
+            CollectionMessage::FilterChanged(v) => {
+                self.collections_filter = v;
+                Task::none()
+            }
+            CollectionMessage::ToggleFolderExpanded(folder) => {
+                if !self.expanded_folders.remove(&folder) {
+                    self.expanded_folders.insert(folder);
+                }
+                Task::none()
+            }
+            CollectionMessage::NewFolderNameChanged(v) => {
+                self.new_folder_name = v;
+                Task::none()
+            }
+            CollectionMessage::CreateFolderPressed => {
+                let folder = self.new_folder_name.trim().to_string();
+                if folder.is_empty() {
+                    return Task::none();
+                }
+                self.new_folder_name.clear();
+                reload_collections_after(async move {
+                    let _ = requests::create_request_folder(&folder).await;
+                })
+            }
+            CollectionMessage::DeleteFolderPressed(folder) => reload_collections_after(async move {
+                let _ = requests::delete_request_folder(&folder).await;
+            }),
+            CollectionMessage::RenameStart(name, folder) => {
+                self.renaming = Some((name.clone(), folder, name));
+                Task::none()
+            }
+            CollectionMessage::RenameFieldChanged(v) => {
+                if let Some((_, _, editing)) = &mut self.renaming {
+                    *editing = v;
+                }
+                Task::none()
+            }
+            CollectionMessage::RenameCancel => {
+                self.renaming = None;
+                Task::none()
+            }
+            CollectionMessage::RenameConfirm(original, folder) => {
+                let Some((_, _, new_name)) = self.renaming.take() else {
+                    return Task::none();
+                };
+                reload_collections_after(async move {
+                    let _ = requests::rename_request(&original, folder.as_deref(), &new_name).await;
+                })
+            }
+            CollectionMessage::MoveFieldChanged(name, folder, target) => {
+                self.move_target.insert((name, folder), target);
+                Task::none()
+            }
+            CollectionMessage::MovePressed(name, folder) => {
+                let target = self.move_target.remove(&(name.clone(), folder.clone())).unwrap_or_default();
+                let new_folder = if target.trim().is_empty() { None } else { Some(target) };
+                reload_collections_after(async move {
+                    let _ = requests::move_request(&name, folder.as_deref(), new_folder.as_deref()).await;
+                })
+            }
+        }
+    }
+
+    fn update_history(&mut self, message: HistoryMessage) -> Task<RequestsMessage> {
+        match message {
+            HistoryMessage::ToggleOpen => {
+                self.history_open = !self.history_open;
+                Task::none()
+            }
+            HistoryMessage::Loaded(value) => {
+                self.history = request_history::entries_from_value(&value);
+                Task::none()
+            }
+            HistoryMessage::Saved => Task::none(),
+            HistoryMessage::FilterChanged(v) => {
+                self.history_filter = v;
+                Task::none()
+            }
+            HistoryMessage::Load(id) => {
+                if let Some(entry) = self.history.iter().find(|e| e.id == id).cloned() {
+                    self.tabs.push(RequestTabState::from_history(&entry));
+                    self.active = self.tabs.len() - 1;
+                }
+                Task::none()
+            }
+            HistoryMessage::Delete(id) => {
+                self.history.retain(|e| e.id != id);
+                self.save_history_task()
+            }
+            HistoryMessage::ClearAll => {
+                self.history.clear();
+                self.save_history_task()
+            }
+        }
+    }
+
+    fn save_history_task(&self) -> Task<RequestsMessage> {
+        let value = request_history::entries_to_value(&self.history);
+        Task::perform(
+            async move {
+                let _ = requests::save_request_history(&value).await;
+            },
+            |_| RequestsMessage::History(HistoryMessage::Saved),
+        )
+    }
+
+    /// Nested folder tree of saved requests — mirrors `SqlTab::view_saved_queries_tree`'s
+    /// structure exactly (filter box, new-folder input, collapsible folder
+    /// headers, per-request rename/delete/move-to-folder controls), just
+    /// against `core::requests`'s folder functions and keyed by (name,
+    /// folder) since request identity includes the folder, unlike SQL's
+    /// saved queries.
+    fn view_collections_tree(&self) -> Element<'_, RequestsMessage> {
+        let filter = self.collections_filter.to_lowercase();
+        let matches = |name: &str| filter.is_empty() || name.to_lowercase().contains(&filter);
+
+        let mut col = column![
+            text("Saved requests").size(16),
+            text_input("filter requests", &self.collections_filter)
+                .on_input(|v| RequestsMessage::Collection(CollectionMessage::FilterChanged(v))),
+            row![
+                text_input("new folder name", &self.new_folder_name)
+                    .on_input(|v| RequestsMessage::Collection(CollectionMessage::NewFolderNameChanged(v))),
+                button(text("+ Folder")).on_press(RequestsMessage::Collection(CollectionMessage::CreateFolderPressed)),
+            ]
+            .spacing(6),
+        ]
+        .spacing(4);
+
+        let request_row = |r: &SavedRequest| -> Element<'_, RequestsMessage> {
+            if let Some((original, folder, editing_name)) = &self.renaming {
+                if original == &r.name && folder == &r.folder {
+                    return row![
+                        text_input("new name", editing_name)
+                            .on_input(|v| RequestsMessage::Collection(CollectionMessage::RenameFieldChanged(v))),
+                        button(text("OK")).on_press(RequestsMessage::Collection(CollectionMessage::RenameConfirm(
+                            original.clone(),
+                            folder.clone(),
+                        ))),
+                        button(text("x")).on_press(RequestsMessage::Collection(CollectionMessage::RenameCancel)),
+                    ]
+                    .spacing(4)
+                    .into();
+                }
+            }
+            let key = (r.name.clone(), r.folder.clone());
+            let move_value = self.move_target.get(&key).cloned().unwrap_or_default();
+            let (name_a, folder_a) = (r.name.clone(), r.folder.clone());
+            let (name_b, folder_b) = (r.name.clone(), r.folder.clone());
+            let (name_c, folder_c) = (r.name.clone(), r.folder.clone());
+            let (name_d, folder_d) = (r.name.clone(), r.folder.clone());
+            row![
+                button(text(format!("{} {}", r.method, r.name))).on_press(RequestsMessage::LoadSaved(name_a, folder_a)),
+                button(text("rename"))
+                    .on_press(RequestsMessage::Collection(CollectionMessage::RenameStart(name_b, folder_b))),
+                button(text("delete")).on_press(RequestsMessage::DeleteSaved(name_c, folder_c)),
+                text_input("move to folder", &move_value)
+                    .on_input(move |v| {
+                        RequestsMessage::Collection(CollectionMessage::MoveFieldChanged(
+                            name_d.clone(),
+                            folder_d.clone(),
+                            v,
+                        ))
+                    })
+                    .width(Length::Fixed(110.0)),
+                button(text("Move")).on_press(RequestsMessage::Collection(CollectionMessage::MovePressed(
+                    r.name.clone(),
+                    r.folder.clone(),
+                ))),
+            ]
+            .spacing(4)
+            .into()
+        };
+
+        for r in self.saved.iter().filter(|r| r.folder.is_none() && matches(&r.name)) {
+            col = col.push(request_row(r));
+        }
+
+        for folder in &self.saved_folders {
+            let folder_requests: Vec<&SavedRequest> =
+                self.saved.iter().filter(|r| r.folder.as_deref() == Some(folder.as_str())).collect();
+            let has_match = filter.is_empty() || folder_requests.iter().any(|r| matches(&r.name));
+            if !has_match {
+                continue;
+            }
+            let expanded = self.expanded_folders.contains(folder);
+            let arrow = if expanded { "v" } else { ">" };
+            col = col.push(
+                row![
+                    button(text(format!("{arrow} {folder}")))
+                        .on_press(RequestsMessage::Collection(CollectionMessage::ToggleFolderExpanded(folder.clone()))),
+                    button(text("delete folder"))
+                        .on_press(RequestsMessage::Collection(CollectionMessage::DeleteFolderPressed(folder.clone()))),
+                ]
+                .spacing(6),
+            );
+            if expanded {
+                for r in folder_requests.iter().filter(|r| matches(&r.name)) {
+                    col = col.push(row![text("  "), request_row(r)].spacing(0));
+                }
+            }
+        }
+
+        col.into()
+    }
+
+    /// Searchable history list — replaces the original app's 12-entry
+    /// `<select>` dropdown per the design doc's explicit UX-gap call-out.
+    fn view_history_panel(&self) -> Element<'_, RequestsMessage> {
+        let filter = self.history_filter.clone();
+        let mut col = column![
+            row![
+                text("History").size(16),
+                button(text("Clear all")).on_press(RequestsMessage::History(HistoryMessage::ClearAll)),
+            ]
+            .spacing(8),
+            text_input("filter history", &self.history_filter)
+                .on_input(|v| RequestsMessage::History(HistoryMessage::FilterChanged(v))),
+        ]
+        .spacing(4);
+
+        for entry in self.history.iter().filter(|e| request_history::matches_filter(e, &filter)) {
+            let status_label = match (&entry.response, &entry.error) {
+                (Some(resp), _) => resp.status.to_string(),
+                (None, Some(_)) => "error".to_string(),
+                (None, None) => "?".to_string(),
+            };
+            let (id_load, id_delete) = (entry.id.clone(), entry.id.clone());
+            col = col.push(
+                row![
+                    button(text(format!("{} {} [{}]", entry.request.method, entry.request.url, status_label)))
+                        .on_press(RequestsMessage::History(HistoryMessage::Load(id_load))),
+                    button(text("delete")).on_press(RequestsMessage::History(HistoryMessage::Delete(id_delete))),
+                ]
+                .spacing(6),
+            );
+        }
+
+        container(scrollable(col).height(Length::Fixed(220.0)))
+            .style(|theme: &iced::Theme| container::Style {
+                background: Some(theme.extended_palette().background.weak.color.into()),
+                ..Default::default()
+            })
+            .padding(8)
+            .into()
     }
 
     pub fn view(&self) -> Element<'_, RequestsMessage> {
@@ -688,11 +1074,13 @@ impl RequestsTab {
             text(format!("Env: {}", self.env.active_set)).size(12)
         };
         let env_toggle_label = if self.env.open { "Hide environments" } else { "Environments" };
+        let history_toggle_label = if self.history_open { "Hide history" } else { "History" };
         let url_row = row![
             method_row,
             text_input("https://example.com/{id}", &tab.full_url()).on_input(RequestsMessage::UrlChanged),
             env_indicator,
             button(text(env_toggle_label)).on_press(RequestsMessage::Env(EnvMessage::ToggleOpen)),
+            button(text(history_toggle_label)).on_press(RequestsMessage::History(HistoryMessage::ToggleOpen)),
         ]
         .spacing(8);
 
@@ -747,6 +1135,9 @@ impl RequestsTab {
         if self.env.open {
             builder = builder.push(view_env_manager(&self.env));
         }
+        if self.history_open {
+            builder = builder.push(self.view_history_panel());
+        }
         builder = builder.push(section_row).push(section_body);
         if let Some(err) = &tab.send_error {
             builder = builder.push(text(err.clone()).color(iced::Color::from_rgb8(0xe0, 0x5a, 0x5a)));
@@ -755,21 +1146,13 @@ impl RequestsTab {
             row![
                 button(text(send_label)).on_press(RequestsMessage::SendPressed),
                 text_input("request name", &self.save_name).on_input(RequestsMessage::SaveNameChanged),
+                text_input("folder (optional)", &self.save_folder).on_input(RequestsMessage::SaveFolderChanged),
                 button(text("Save request")).on_press(RequestsMessage::SavePressed),
             ]
             .spacing(8),
         );
 
-        let saved_list = self.saved.iter().fold(column![text("Saved requests").size(16)].spacing(4), |col, r| {
-            col.push(
-                row![
-                    button(text(format!("{} {}", r.method, r.name))).on_press(RequestsMessage::LoadSaved(r.name.clone())),
-                    button(text("delete")).on_press(RequestsMessage::DeleteSaved(r.name.clone())),
-                ]
-                .spacing(6),
-            )
-        });
-        let sidebar = scrollable(saved_list).width(Length::Fixed(240.0));
+        let sidebar = scrollable(self.view_collections_tree()).width(Length::Fixed(280.0));
 
         let response_view: Element<'_, RequestsMessage> = match &tab.last_response {
             Some(Ok(resp)) => view_response(resp, &tab.response_body_editor),
@@ -1108,8 +1491,25 @@ fn build_proxy_request(tab: &RequestTabState, env_values: &HashMap<String, Strin
     })
 }
 
-fn reload_saved() -> Task<RequestsMessage> {
-    Task::perform(requests::list_saved_requests(), RequestsMessage::SavedReloaded)
+fn reload_collections() -> Task<RequestsMessage> {
+    Task::perform(
+        async { (requests::list_saved_requests().await, requests::list_request_folders().await) },
+        |(saved, folders)| RequestsMessage::CollectionsReloaded(saved, folders),
+    )
+}
+
+/// Runs `action`, then reloads both the saved-requests list and the
+/// folder list — mirrors `sql_tab.rs`'s `reload_saved_after`/
+/// `reload_folders_after` pair, combined into one round trip since
+/// requests don't have SQL's per-connection dimension to key on.
+fn reload_collections_after(action: impl std::future::Future<Output = ()> + Send + 'static) -> Task<RequestsMessage> {
+    Task::perform(
+        async move {
+            action.await;
+            (requests::list_saved_requests().await, requests::list_request_folders().await)
+        },
+        |(saved, folders)| RequestsMessage::CollectionsReloaded(saved, folders),
+    )
 }
 
 #[cfg(test)]

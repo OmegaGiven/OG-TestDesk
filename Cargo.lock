@@ -3090,6 +3090,7 @@ dependencies = [
  "iced_table",
  "og_testdesk_core",
  "rfd",
+ "serde",
  "serde_json",
  "tokio",
 ]
