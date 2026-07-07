@@ -3085,6 +3085,7 @@ dependencies = [
 name = "og_testdesk_desktop"
 version = "0.1.0"
 dependencies = [
+ "base64 0.22.1",
  "iced",
  "iced_table",
  "og_testdesk_core",

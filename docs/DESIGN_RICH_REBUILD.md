@@ -38,6 +38,17 @@ Postico 2 and Postman's known feature sets.
    resizable editor/results split was hand-rolled instead (`mouse_area` +
    a raw `CursorMoved`/`ButtonReleased` subscription). Don't re-attempt the
    split crates unless the project's `iced` dependency is bumped past 0.13.
+   **Same finding for `iced_aw`** during Requests Phase 1: `cargo add
+   iced_aw --features tabs,tab_bar` and `cargo check` both succeed, but an
+   actual `iced_aw::widget::TabBar` value fails to convert into this
+   project's `Element<'_, Message>` with `E0277` — rustc names it
+   explicitly: multiple `iced_core` versions in the graph. Tabs were
+   hand-rolled (button row + active-index enum, same pattern as the
+   top-level app nav). Treat every other `iced_aw` widget referenced below
+   (`context_menu`, `menu`, `drop_down`, `date_picker`, `selection_list`)
+   as **unconfirmed** until someone does the same real-compile smoke test
+   — don't assume the crate works just because one widget from it doesn't;
+   equally don't assume the rest works either. Test before building on it.
 3. **Ship in vertical slices.** Each phase below should leave the app in a
    runnable, demoable state — mirrors how the MVP tabs were built.
 4. **Close real gaps, not just parity.** Both research passes found things
@@ -86,8 +97,9 @@ Postico 2 and Postman's known feature sets.
 - Add-row flow → `build_table_insert_sql` (already exists).
 - **New vs original:** clickable column-header sort, distinct NULL
   rendering (gray "NULL" pill, not blank), type-aware cell editors
-  (checkbox for bool, date picker for timestamp — `iced_aw` has
-  `date_picker` built in), click a FK cell to jump to the referenced row
+  (checkbox for bool, date picker for timestamp — `iced_aw::date_picker`
+  if it turns out compatible, unconfirmed, see Guiding Principles),
+  click a FK cell to jump to the referenced row
   inline (not just in the separate ERD view).
 
 **Schema browser**
@@ -169,8 +181,9 @@ From the research's gap list — build these in, don't treat as optional:
 
 **Multi-tab request workspace**
 - Each open request is its own tab with independent state (method, URL,
-  params, headers, body, auth). Use `iced_aw`'s `tabs`/`tab_bar` widget
-  rather than hand-rolling tab chrome.
+  params, headers, body, auth). `iced_aw`'s tabs turned out incompatible
+  (see Guiding Principles) — built with hand-rolled tab chrome (button row
+  + active-index state) instead, done in Phase 1.
 - Unsaved-changes indicator per tab.
 
 **Request builder tabs** (Params / Path / Auth / Headers / Body / Curl)
@@ -219,7 +232,8 @@ From the research's gap list — build these in, don't treat as optional:
 - Nested folder tree of saved requests, search/filter box.
 - v1: move-to-folder via menu (same DnD deferral rationale as SQL saved
   queries — see §1.3 step 3).
-- Rename/delete/duplicate via context menu (`iced_aw::context_menu`).
+- Rename/delete/duplicate via context menu (`iced_aw::context_menu` if
+  confirmed compatible when this phase is reached, else inline buttons).
 
 **History**
 - **New vs original**: raise the cap past 12 entries and present it as a
@@ -246,8 +260,10 @@ The original had **none** of these; add them from the start.
 
 ### 2.3 Suggested phase breakdown
 
-1. **Multi-tab workspace + builder tabs** (Params/Path/Auth/Headers/Body)
-   using the shared key/value row component and `iced_aw` tabs.
+1. **Multi-tab workspace + builder tabs** (Params/Path/Auth/Headers/Body) —
+   done: shared key/value row component (`request_kv_editor.rs`) plus
+   hand-rolled tabs (`iced_aw` confirmed incompatible, see Guiding
+   Principles).
 2. **Syntax-highlighted body editor + response viewer** with graduated
    status coloring and a hand-rolled resizable split (see §3.1).
 3. **Environments with real scoping** + `{{var}}` substitution.
@@ -317,11 +333,11 @@ Confirmed available and compatible with this project's `iced = "0.13"`:
 
 | Need | Solution |
 |---|---|
-| Tabs (request tabs, SQL tab bar) | `iced_aw::tabs` / `tab_bar` |
-| Context menus (right-click actions) | `iced_aw::context_menu` |
-| Dropdown/combobox-style menus | `iced_aw::menu`, `iced_aw::drop_down` |
-| Date picker (timestamp cell editor) | `iced_aw::date_picker` |
-| Selection list | `iced_aw::selection_list` |
+| Tabs (request tabs, SQL tab bar) | Hand-rolled (button row + active-index state) — `iced_aw::tabs`/`tab_bar` confirmed incompatible (`iced_core` version mismatch, same failure mode as `iced_split`) |
+| Context menus (right-click actions) | `iced_aw::context_menu` — **unconfirmed**, test before use |
+| Dropdown/combobox-style menus | `iced_aw::menu`, `iced_aw::drop_down` — **unconfirmed**, test before use |
+| Date picker (timestamp cell editor) | `iced_aw::date_picker` — **unconfirmed**, test before use |
+| Selection list | `iced_aw::selection_list` — **unconfirmed**, test before use |
 | Resizable split panes | Hand-rolled (`mouse_area` + subscription) — `iced_split` targets `iced_core 0.14`, incompatible |
 | Data grid (SQL results) | `iced_table` |
 | Multi-line code editor | `iced::widget::text_editor` (built in) |
