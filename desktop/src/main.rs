@@ -2,7 +2,9 @@ mod appdata;
 mod ai_tab;
 mod appearance_tab;
 mod calculator_tab;
+mod graphql_highlighter;
 mod inspector_tab;
+mod json_highlighter;
 mod jwt_tab;
 mod request_auth;
 mod request_kv_editor;
@@ -126,7 +128,10 @@ impl App {
     }
 
     fn subscription(&self) -> iced::Subscription<Message> {
-        self.sql_tab.subscription().map(Message::Sql)
+        iced::Subscription::batch([
+            self.sql_tab.subscription().map(Message::Sql),
+            self.requests_tab.subscription().map(Message::Requests),
+        ])
     }
 
     fn view(&self) -> Element<'_, Message> {

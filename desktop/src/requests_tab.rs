@@ -1,14 +1,62 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use iced::widget::{button, column, container, row, scrollable, text, text_editor, text_input};
+use iced::widget::{button, column, container, mouse_area, row, scrollable, text, text_editor, text_input};
 use iced::{Element, Length, Task};
 
 use og_testdesk_core::requests::{self, GraphqlPayload, ProxyRequest, ProxyResponse, SavedRequest};
 
+use crate::graphql_highlighter::{self, GraphqlHighlighter};
+use crate::json_highlighter::{self, JsonHighlighter};
 use crate::request_auth::{AuthMessage, AuthState};
 use crate::request_kv_editor::{self, KvEditorMessage, KvRow};
 use crate::request_url::{build_url_with_params, parse_query_params, scan_path_variables, substitute_path_variables};
+
+const SPLIT_REFERENCE_HEIGHT: f32 = 700.0;
+
+/// Coarse classification of an HTTP response outcome for status-line
+/// coloring: successful ranges get their own class, and a request that
+/// never got a real status (network/curl failure) gets a distinct class
+/// rather than falling into some arbitrary numeric bucket.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum StatusClass {
+    Success,
+    Redirect,
+    ClientError,
+    ServerError,
+    NetworkFailure,
+    Other,
+}
+
+impl StatusClass {
+    pub fn color(&self) -> iced::Color {
+        match self {
+            StatusClass::Success => iced::Color::from_rgb8(0x50, 0xfa, 0x7b),
+            StatusClass::Redirect => iced::Color::from_rgb8(0x8b, 0xe9, 0xfd),
+            StatusClass::ClientError => iced::Color::from_rgb8(0xff, 0xb8, 0x6c),
+            StatusClass::ServerError => iced::Color::from_rgb8(0xff, 0x55, 0x55),
+            StatusClass::NetworkFailure => iced::Color::from_rgb8(0xff, 0x55, 0x55),
+            StatusClass::Other => iced::Color::from_rgb8(0xf8, 0xf8, 0xf2),
+        }
+    }
+}
+
+/// Classifies a `ProxyResponse` outcome. `status == 0` (with a non-zero
+/// `curl_exit`) means curl never got a response at all — see
+/// `core::requests::run_proxy_request`, which sets `status` to `0` via
+/// `unwrap_or(0)` when curl's `%{http_code}` output can't be parsed.
+pub fn classify_status(status: u16, curl_exit: i32) -> StatusClass {
+    if status == 0 && curl_exit != 0 {
+        return StatusClass::NetworkFailure;
+    }
+    match status {
+        200..=299 => StatusClass::Success,
+        300..=399 => StatusClass::Redirect,
+        400..=499 => StatusClass::ClientError,
+        500..=599 => StatusClass::ServerError,
+        _ => StatusClass::Other,
+    }
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BuilderSection {
@@ -67,6 +115,7 @@ pub struct RequestTabState {
     pub graphql_vars: text_editor::Content,
     pub sending: bool,
     pub last_response: Option<Result<ProxyResponse, String>>,
+    pub response_body_editor: text_editor::Content,
     pub send_error: Option<String>,
     pub baseline: Option<String>,
 }
@@ -92,6 +141,7 @@ impl RequestTabState {
             graphql_vars: text_editor::Content::new(),
             sending: false,
             last_response: None,
+            response_body_editor: text_editor::Content::new(),
             send_error: None,
             baseline: None,
         }
@@ -156,6 +206,10 @@ pub enum RequestsMessage {
     SavedReloaded(Vec<SavedRequest>),
     LoadSaved(String),
     DeleteSaved(String),
+
+    SplitDragStart,
+    SplitCursorMoved(f32),
+    SplitDragEnd,
 }
 
 pub struct RequestsTab {
@@ -163,6 +217,9 @@ pub struct RequestsTab {
     active: usize,
     save_name: String,
     saved: Vec<SavedRequest>,
+    split_ratio: f32,
+    resizing: bool,
+    drag_last_y: Option<f32>,
 }
 
 impl RequestsTab {
@@ -172,8 +229,26 @@ impl RequestsTab {
             active: 0,
             save_name: String::new(),
             saved: Vec::new(),
+            split_ratio: 0.55,
+            resizing: false,
+            drag_last_y: None,
         };
         (tab, reload_saved())
+    }
+
+    /// Mirrors `SqlTab::subscription`'s split-drag tracking exactly (see
+    /// `sql_tab.rs`) — same `mouse_area` + window-level `CursorMoved`/
+    /// `ButtonReleased` pattern, not a new approach.
+    pub fn subscription(&self) -> iced::Subscription<RequestsMessage> {
+        iced::event::listen_with(|event, _status, _window| match event {
+            iced::Event::Mouse(iced::mouse::Event::CursorMoved { position }) => {
+                Some(RequestsMessage::SplitCursorMoved(position.y))
+            }
+            iced::Event::Mouse(iced::mouse::Event::ButtonReleased(iced::mouse::Button::Left)) => {
+                Some(RequestsMessage::SplitDragEnd)
+            }
+            _ => None,
+        })
     }
 
     fn current(&mut self) -> &mut RequestTabState {
@@ -238,6 +313,15 @@ impl RequestsTab {
             RequestsMessage::ResponseReceived(result) => {
                 let tab = self.current();
                 tab.sending = false;
+                if let Ok(resp) = result.as_ref() {
+                    let display_text = match serde_json::from_str::<serde_json::Value>(&resp.body) {
+                        Ok(value) => {
+                            serde_json::to_string_pretty(&value).unwrap_or_else(|_| resp.body.clone())
+                        }
+                        Err(_) => resp.body.clone(),
+                    };
+                    tab.response_body_editor = text_editor::Content::with_text(&display_text);
+                }
                 tab.last_response = Some((*result).clone());
             }
             RequestsMessage::OAuthTokenReceived(result) => {
@@ -265,6 +349,24 @@ impl RequestsTab {
                     },
                     RequestsMessage::SavedReloaded,
                 );
+            }
+
+            RequestsMessage::SplitDragStart => {
+                self.resizing = true;
+                self.drag_last_y = None;
+            }
+            RequestsMessage::SplitCursorMoved(y) => {
+                if self.resizing {
+                    if let Some(last_y) = self.drag_last_y {
+                        let delta = (y - last_y) / SPLIT_REFERENCE_HEIGHT;
+                        self.split_ratio = (self.split_ratio + delta).clamp(0.15, 0.85);
+                    }
+                    self.drag_last_y = Some(y);
+                }
+            }
+            RequestsMessage::SplitDragEnd => {
+                self.resizing = false;
+                self.drag_last_y = None;
             }
         }
         Task::none()
@@ -467,40 +569,87 @@ impl RequestsTab {
         let sidebar = scrollable(saved_list).width(Length::Fixed(240.0));
 
         let response_view: Element<'_, RequestsMessage> = match &tab.last_response {
-            Some(Ok(resp)) => {
-                let error_note = if resp.curl_exit != 0 || !resp.stderr.trim().is_empty() {
-                    format!("curl exit {}: {}", resp.curl_exit, resp.stderr.trim())
-                } else {
-                    String::new()
-                };
-                scrollable(
-                    column![
-                        text(format!(
-                            "Status: {}  ({} ms, {} bytes{})",
-                            resp.status,
-                            resp.duration_ms,
-                            resp.body_bytes,
-                            if resp.body_truncated { ", truncated" } else { "" }
-                        )),
-                        text(error_note),
-                        text("Headers:"),
-                        text(resp.headers.clone()),
-                        text("Body:"),
-                        text(resp.body.clone()),
-                    ]
-                    .spacing(6),
-                )
-                .into()
-            }
-            Some(Err(err)) => text(format!("Request failed: {err}")).into(),
+            Some(Ok(resp)) => view_response(resp, &tab.response_body_editor),
+            Some(Err(err)) => text(format!("Request failed: {err}"))
+                .color(StatusClass::NetworkFailure.color())
+                .into(),
             None => text("Send a request to see the response").into(),
         };
 
-        container(row![sidebar, column![builder, response_view].spacing(16).padding(16)].spacing(16))
+        let divider = mouse_area(
+            container(text(""))
+                .width(Length::Fill)
+                .height(Length::Fixed(6.0))
+                .style(|theme: &iced::Theme| container::Style {
+                    background: Some(theme.extended_palette().background.strong.color.into()),
+                    ..Default::default()
+                }),
+        )
+        .on_press(RequestsMessage::SplitDragStart);
+
+        let builder_portion = (self.split_ratio * 1000.0) as u16;
+        let response_portion = ((1.0 - self.split_ratio) * 1000.0) as u16;
+
+        let main_area = column![
+            container(builder).height(Length::FillPortion(builder_portion.max(1))),
+            divider,
+            container(response_view).height(Length::FillPortion(response_portion.max(1))),
+        ];
+
+        container(row![sidebar, main_area.width(Length::Fill).padding(16)].spacing(16))
             .width(Length::Fill)
             .height(Length::Fill)
             .into()
     }
+}
+
+/// Renders a successful `ProxyResponse`: graduated status-code coloring,
+/// headers, and a highlighted pretty-printed body when it parses as JSON
+/// (falls back to plain text otherwise, e.g. HTML/plain-text responses).
+fn view_response<'a>(
+    resp: &'a ProxyResponse,
+    response_body_editor: &'a text_editor::Content,
+) -> Element<'a, RequestsMessage> {
+    let class = classify_status(resp.status, resp.curl_exit);
+    let status_label = if resp.status == 0 {
+        "No response".to_string()
+    } else {
+        format!("Status: {}", resp.status)
+    };
+
+    let error_note = if resp.curl_exit != 0 || !resp.stderr.trim().is_empty() {
+        format!("curl exit {}: {}", resp.curl_exit, resp.stderr.trim())
+    } else {
+        String::new()
+    };
+
+    let body_is_json = serde_json::from_str::<serde_json::Value>(&resp.body).is_ok();
+    let body_view: Element<'_, RequestsMessage> = if body_is_json {
+        text_editor(response_body_editor)
+            .highlight_with::<JsonHighlighter>((), json_highlighter::format_for)
+            .into()
+    } else {
+        text(resp.body.clone()).into()
+    };
+
+    scrollable(
+        column![
+            text(format!(
+                "{status_label}  ({} ms, {} bytes{})",
+                resp.duration_ms,
+                resp.body_bytes,
+                if resp.body_truncated { ", truncated" } else { "" }
+            ))
+            .color(class.color()),
+            text(error_note).color(StatusClass::NetworkFailure.color()),
+            text("Headers:"),
+            text(resp.headers.clone()),
+            text("Body:"),
+            body_view,
+        ]
+        .spacing(6),
+    )
+    .into()
 }
 
 fn sync_path_vars(tab: &mut RequestTabState) {
@@ -541,16 +690,29 @@ fn view_body(tab: &RequestTabState) -> Element<'_, RequestsMessage> {
     });
 
     let editor: Element<'_, RequestsMessage> = match tab.body_mode {
-        BodyMode::Raw | BodyMode::Binary => {
+        BodyMode::Raw => text_editor(&tab.raw_body)
+            .on_action(RequestsMessage::RawBodyAction)
+            .highlight_with::<JsonHighlighter>((), json_highlighter::format_for)
+            .height(Length::Fixed(200.0))
+            .into(),
+        // Binary bodies aren't JSON — no highlighter applied, matches the
+        // original textarea-with-no-highlighting behavior for this mode.
+        BodyMode::Binary => {
             text_editor(&tab.raw_body).on_action(RequestsMessage::RawBodyAction).height(Length::Fixed(200.0)).into()
         }
         BodyMode::FormData => request_kv_editor::view(&tab.form_data).map(RequestsMessage::FormData),
         BodyMode::UrlEncoded => request_kv_editor::view(&tab.urlencoded).map(RequestsMessage::UrlEncoded),
         BodyMode::GraphQl => column![
             text("Query:"),
-            text_editor(&tab.graphql_query).on_action(RequestsMessage::GraphqlQueryAction).height(Length::Fixed(150.0)),
+            text_editor(&tab.graphql_query)
+                .on_action(RequestsMessage::GraphqlQueryAction)
+                .highlight_with::<GraphqlHighlighter>((), graphql_highlighter::format_for)
+                .height(Length::Fixed(150.0)),
             text("Variables (JSON):"),
-            text_editor(&tab.graphql_vars).on_action(RequestsMessage::GraphqlVarsAction).height(Length::Fixed(100.0)),
+            text_editor(&tab.graphql_vars)
+                .on_action(RequestsMessage::GraphqlVarsAction)
+                .highlight_with::<JsonHighlighter>((), json_highlighter::format_for)
+                .height(Length::Fixed(100.0)),
         ]
         .spacing(6)
         .into(),
@@ -658,4 +820,53 @@ fn build_proxy_request(tab: &RequestTabState) -> Result<ProxyRequest, String> {
 
 fn reload_saved() -> Task<RequestsMessage> {
     Task::perform(requests::list_saved_requests(), RequestsMessage::SavedReloaded)
+}
+
+#[cfg(test)]
+mod phase2_tests {
+    use super::*;
+
+    #[test]
+    fn classify_status_2xx_is_success() {
+        assert_eq!(classify_status(200, 0), StatusClass::Success);
+        assert_eq!(classify_status(201, 0), StatusClass::Success);
+        assert_eq!(classify_status(299, 0), StatusClass::Success);
+    }
+
+    #[test]
+    fn classify_status_3xx_is_redirect() {
+        assert_eq!(classify_status(301, 0), StatusClass::Redirect);
+        assert_eq!(classify_status(304, 0), StatusClass::Redirect);
+    }
+
+    #[test]
+    fn classify_status_4xx_is_client_error() {
+        assert_eq!(classify_status(404, 0), StatusClass::ClientError);
+        assert_eq!(classify_status(401, 0), StatusClass::ClientError);
+    }
+
+    #[test]
+    fn classify_status_5xx_is_server_error() {
+        assert_eq!(classify_status(500, 0), StatusClass::ServerError);
+        assert_eq!(classify_status(503, 0), StatusClass::ServerError);
+    }
+
+    #[test]
+    fn classify_status_zero_with_nonzero_curl_exit_is_network_failure() {
+        assert_eq!(classify_status(0, 7), StatusClass::NetworkFailure);
+        assert_eq!(classify_status(0, 28), StatusClass::NetworkFailure);
+    }
+
+    #[test]
+    fn classify_status_zero_with_zero_curl_exit_is_other() {
+        // curl succeeded (exit 0) but somehow reported status 0 - an edge
+        // case, not a network failure, falls through to Other rather than
+        // being misclassified as a failure.
+        assert_eq!(classify_status(0, 0), StatusClass::Other);
+    }
+
+    #[test]
+    fn classify_status_1xx_is_other() {
+        assert_eq!(classify_status(100, 0), StatusClass::Other);
+    }
 }
