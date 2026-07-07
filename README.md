@@ -8,10 +8,6 @@ OG TestDesk is a native desktop developer desk — SQL workspace, HTTP request
 client, JSON inspector, scratch pad, appearance editor, calculator, JWT
 decoder, and an AI assistant — built in Rust with [iced](https://iced.rs).
 
-It is a from-scratch rewrite (not a fork) of an earlier Tauri/web-based
-version of this idea: no bundled webview, no HTML/JS frontend, no HTTP
-server — just a single native binary per OS.
-
 ## Project layout
 
 ```text
@@ -89,6 +85,3 @@ Release. This requires the repo to have a GitHub remote configured.
 | AI Assistant | Settings + single-profile chat via OpenAI-compatible/Ollama/Gemini providers. |
 | Scheduled Jobs | Not yet started. |
 
-Dropped from the original design: the `go/alias` shortcut/redirect feature,
-the Actix web server / browser mode, and Docker deployment — this project is
-native-desktop-only.
