@@ -1,5 +1,6 @@
 mod appdata;
 mod calculator_tab;
+mod inspector_tab;
 mod jwt_tab;
 mod requests_tab;
 mod scratchpad_tab;
@@ -11,6 +12,7 @@ use iced::widget::{button, column, container, row, text};
 use iced::{Element, Length, Task};
 
 use calculator_tab::{CalculatorMessage, CalculatorTab};
+use inspector_tab::{InspectorMessage, InspectorTab};
 use jwt_tab::{JwtMessage, JwtTab};
 use og_testdesk_core::sql::engine::SqlEngineState;
 use requests_tab::{RequestsMessage, RequestsTab};
@@ -31,6 +33,7 @@ struct App {
     active_tab: Tab,
     sql_tab: SqlTab,
     requests_tab: RequestsTab,
+    inspector_tab: InspectorTab,
     calculator_tab: CalculatorTab,
     jwt_tab: JwtTab,
     scratchpad_tab: ScratchpadTab,
@@ -41,6 +44,7 @@ enum Message {
     TabSelected(Tab),
     Sql(SqlMessage),
     Requests(RequestsMessage),
+    Inspector(InspectorMessage),
     Calculator(CalculatorMessage),
     Jwt(JwtMessage),
     Scratchpad(ScratchpadMessage),
@@ -51,6 +55,7 @@ impl App {
         let engine = Arc::new(SqlEngineState::new());
         let (sql_tab, sql_task) = SqlTab::new(engine);
         let (requests_tab, requests_task) = RequestsTab::new();
+        let (inspector_tab, inspector_task) = InspectorTab::new();
         let (calculator_tab, calculator_task) = CalculatorTab::new();
         let (jwt_tab, jwt_task) = JwtTab::new();
         let (scratchpad_tab, scratchpad_task) = ScratchpadTab::new();
@@ -59,6 +64,7 @@ impl App {
                 active_tab: Tab::Sql,
                 sql_tab,
                 requests_tab,
+                inspector_tab,
                 calculator_tab,
                 jwt_tab,
                 scratchpad_tab,
@@ -66,6 +72,7 @@ impl App {
             Task::batch([
                 sql_task.map(Message::Sql),
                 requests_task.map(Message::Requests),
+                inspector_task.map(Message::Inspector),
                 calculator_task.map(Message::Calculator),
                 jwt_task.map(Message::Jwt),
                 scratchpad_task.map(Message::Scratchpad),
@@ -81,6 +88,7 @@ impl App {
             }
             Message::Sql(msg) => self.sql_tab.update(msg).map(Message::Sql),
             Message::Requests(msg) => self.requests_tab.update(msg).map(Message::Requests),
+            Message::Inspector(msg) => self.inspector_tab.update(msg).map(Message::Inspector),
             Message::Calculator(msg) => {
                 self.calculator_tab.update(msg).map(Message::Calculator)
             }
@@ -109,7 +117,7 @@ impl App {
         let body: Element<'_, Message> = match self.active_tab {
             Tab::Sql => self.sql_tab.view().map(Message::Sql),
             Tab::Requests => self.requests_tab.view().map(Message::Requests),
-            Tab::Inspector => text("Inspector — coming soon").into(),
+            Tab::Inspector => self.inspector_tab.view().map(Message::Inspector),
             Tab::Calculator => self.calculator_tab.view().map(Message::Calculator),
             Tab::Jwt => self.jwt_tab.view().map(Message::Jwt),
             Tab::Scratchpad => self.scratchpad_tab.view().map(Message::Scratchpad),
