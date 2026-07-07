@@ -2961,6 +2961,7 @@ version = "0.1.0"
 dependencies = [
  "iced",
  "og_testdesk_core",
+ "serde_json",
  "tokio",
 ]
 
