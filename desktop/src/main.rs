@@ -1,7 +1,13 @@
 mod appdata;
+mod sql_tab;
+
+use std::sync::Arc;
 
 use iced::widget::{button, column, container, row, text};
 use iced::{Element, Length, Task};
+
+use og_testdesk_core::sql::engine::SqlEngineState;
+use sql_tab::{SqlMessage, SqlTab};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Tab {
@@ -12,28 +18,36 @@ enum Tab {
 
 struct App {
     active_tab: Tab,
+    sql_tab: SqlTab,
 }
 
 #[derive(Debug, Clone)]
 enum Message {
     TabSelected(Tab),
+    Sql(SqlMessage),
 }
 
 impl App {
     fn new() -> (Self, Task<Message>) {
+        let engine = Arc::new(SqlEngineState::new());
+        let (sql_tab, sql_task) = SqlTab::new(engine);
         (
             Self {
                 active_tab: Tab::Sql,
+                sql_tab,
             },
-            Task::none(),
+            sql_task.map(Message::Sql),
         )
     }
 
     fn update(&mut self, message: Message) -> Task<Message> {
         match message {
-            Message::TabSelected(tab) => self.active_tab = tab,
+            Message::TabSelected(tab) => {
+                self.active_tab = tab;
+                Task::none()
+            }
+            Message::Sql(msg) => self.sql_tab.update(msg).map(Message::Sql),
         }
-        Task::none()
     }
 
     fn view(&self) -> Element<'_, Message> {
@@ -48,10 +62,10 @@ impl App {
         ]
         .spacing(8);
 
-        let body = match self.active_tab {
-            Tab::Sql => text("SQL workspace — coming soon"),
-            Tab::Requests => text("Requests — coming soon"),
-            Tab::Inspector => text("Inspector — coming soon"),
+        let body: Element<'_, Message> = match self.active_tab {
+            Tab::Sql => self.sql_tab.view().map(Message::Sql),
+            Tab::Requests => text("Requests — coming soon").into(),
+            Tab::Inspector => text("Inspector — coming soon").into(),
         };
 
         container(column![nav, body].spacing(16).padding(16))

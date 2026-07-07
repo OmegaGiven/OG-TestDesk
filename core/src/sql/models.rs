@@ -5,7 +5,7 @@ fn default_db_type() -> String {
     "postgres".to_string()
 }
 
-#[derive(Serialize, Deserialize, Clone)]
+#[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct DbConnection {
     #[serde(default = "default_db_type")]
     pub db_type: String, // "postgres" or "sqlite"
@@ -57,7 +57,7 @@ pub struct SqlAlertRule {
     pub value: i64,
 }
 
-#[derive(Serialize, Deserialize, Clone)]
+#[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct SavedQuery {
     pub name: String,
     pub sql: String,
@@ -110,7 +110,7 @@ pub struct SqlJob {
 
 /// Result of running one SQL statement: column headers plus row data in both
 /// ordered (for grid display) and keyed (for CSV export) forms.
-#[derive(Clone, Default)]
+#[derive(Clone, Default, Debug)]
 pub struct SqlExecution {
     pub headers: Vec<String>,
     pub rows: Vec<Vec<String>>,
