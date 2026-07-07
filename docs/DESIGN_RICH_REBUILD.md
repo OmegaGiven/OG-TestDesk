@@ -27,10 +27,17 @@ Postico 2 and Postman's known feature sets.
    is a UI rebuild, not a backend rebuild — call `core::sql::engine` /
    `core::requests` directly, extend them only where a genuinely new
    capability is needed (e.g. per-column sort, FK-click navigation).
-2. **Don't reimplement what the ecosystem already solved.** `iced_table`
-   (data grid) and `iced_split` (resizable panes) exist, target our iced
-   0.13, and cover the two hardest custom-widget problems this rebuild
-   faces. Prototype against them before hand-rolling.
+2. **Don't reimplement what the ecosystem already solved — but verify the
+   `iced_core` version actually matches, not just that `cargo add`
+   succeeds.** `iced_table` targets our `iced = "0.13"` correctly and is
+   the answer for the data grid. `iced_split`/`iced-resizable-split` *look*
+   compatible (they add and even `cargo check` clean, since two `iced_core`
+   versions can coexist in the dependency graph) but actually depend on
+   `iced_core 0.14` — their widgets produce a different `Element` type than
+   ours and can't be used in `view()`. Confirmed during Phase 1: the
+   resizable editor/results split was hand-rolled instead (`mouse_area` +
+   a raw `CursorMoved`/`ButtonReleased` subscription). Don't re-attempt the
+   split crates unless the project's `iced` dependency is bumped past 0.13.
 3. **Ship in vertical slices.** Each phase below should leave the app in a
    runnable, demoable state — mirrors how the MVP tabs were built.
 4. **Close real gaps, not just parity.** Both research passes found things
@@ -203,8 +210,8 @@ From the research's gap list — build these in, don't treat as optional:
   styling, a clear improvement.
 - Headers tab, body tab (pretty-printed JSON via the same logic as the
   Inspector tab — share code, don't duplicate), time/size display.
-- Resizable split between request builder and response (via `iced_split`,
-  see §3.1), and between response headers/body panels.
+- Resizable split between request builder and response (hand-rolled
+  divider, see §3.1), and between response headers/body panels.
 - "Open in Inspector" cross-tool action (hand the response body to the
   Inspector tab's state).
 
@@ -242,7 +249,7 @@ The original had **none** of these; add them from the start.
 1. **Multi-tab workspace + builder tabs** (Params/Path/Auth/Headers/Body)
    using the shared key/value row component and `iced_aw` tabs.
 2. **Syntax-highlighted body editor + response viewer** with graduated
-   status coloring and resizable split (`iced_split`).
+   status coloring and a hand-rolled resizable split (see §3.1).
 3. **Environments with real scoping** + `{{var}}` substitution.
 4. **Collections sidebar** (folders, search, context-menu actions) +
    history as a searchable list.
@@ -259,9 +266,14 @@ These come up in both Part 1 and Part 2 — build them as standalone
 components so neither tool reinvents the other's solution.
 
 ### 3.1 Resizable split panes
-Use the `iced_split` crate (confirmed compatible with our `iced = "0.13"`
-dependency). Needed for: SQL editor/output split, SQL sidebar sections,
-Requests builder/response split, Requests headers/body split.
+`iced_split`/`iced-resizable-split` do not actually target `iced 0.13`
+(see the note in Guiding Principles) — hand-roll instead: a thin draggable
+divider (`mouse_area` + a window-level `CursorMoved`/`ButtonReleased`
+subscription converting drag delta into a split-ratio state, applied via
+`Length::FillPortion`). Built once in SQL Phase 1 (`sql_tab.rs`'s
+editor/results split) — extract it into a shared component before reusing
+for: SQL sidebar sections, Requests builder/response split, Requests
+headers/body split.
 
 ### 3.2 Key/value row editor
 One component (add row / remove row / enable-disable checkbox per row),
@@ -310,7 +322,7 @@ Confirmed available and compatible with this project's `iced = "0.13"`:
 | Dropdown/combobox-style menus | `iced_aw::menu`, `iced_aw::drop_down` |
 | Date picker (timestamp cell editor) | `iced_aw::date_picker` |
 | Selection list | `iced_aw::selection_list` |
-| Resizable split panes | `iced_split` (or `iced-resizable-split`) |
+| Resizable split panes | Hand-rolled (`mouse_area` + subscription) — `iced_split` targets `iced_core 0.14`, incompatible |
 | Data grid (SQL results) | `iced_table` |
 | Multi-line code editor | `iced::widget::text_editor` (built in) |
 | Syntax highlighting | `iced`'s `Highlighter` trait on `text_editor` (custom impl per language) |

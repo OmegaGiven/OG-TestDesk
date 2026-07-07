@@ -1,17 +1,23 @@
 use std::sync::Arc;
 
-use iced::widget::{button, column, container, row, scrollable, text, text_input};
+use iced::widget::{button, column, container, mouse_area, row, scrollable, text, text_editor, text_input};
 use iced::{Element, Length, Task};
 
 use og_testdesk_core::sql::engine::{self, SqlEngineState};
 use og_testdesk_core::sql::models::{AddConnForm, DbConnection, SavedQuery, SqlExecution, SqlForm};
 
+use crate::sql_grid::{GridMessage, ResultsGrid};
+use crate::sql_highlighter::{SqlHighlighter, format_for};
+
+const SPLIT_REFERENCE_HEIGHT: f32 = 700.0;
+
 #[derive(Debug, Clone)]
 pub enum SqlMessage {
     ConnectionSelected(String),
-    EditorChanged(String),
+    EditorAction(text_editor::Action),
     RunPressed,
     QueryFinished(Arc<SqlExecution>),
+    Grid(GridMessage),
 
     NewConnNickname(String),
     NewConnDbType(String),
@@ -27,14 +33,19 @@ pub enum SqlMessage {
     SaveQueryPressed,
     SavedQueriesReloaded(Vec<SavedQuery>),
     LoadSavedQuery(String),
+
+    SplitDragStart,
+    SplitCursorMoved(f32),
+    SplitDragEnd,
 }
 
 pub struct SqlTab {
     engine: Arc<SqlEngineState>,
     connections: Vec<DbConnection>,
     selected_connection: Option<String>,
-    editor_text: String,
-    last_execution: Option<SqlExecution>,
+    editor: text_editor::Content,
+    last_error: Option<String>,
+    grid: ResultsGrid,
     running: bool,
 
     new_conn_nickname: String,
@@ -46,6 +57,10 @@ pub struct SqlTab {
 
     saved_queries: Vec<SavedQuery>,
     save_query_name: String,
+
+    split_ratio: f32,
+    resizing: bool,
+    drag_last_y: Option<f32>,
 }
 
 impl SqlTab {
@@ -54,8 +69,9 @@ impl SqlTab {
             engine: engine.clone(),
             connections: Vec::new(),
             selected_connection: None,
-            editor_text: String::new(),
-            last_execution: None,
+            editor: text_editor::Content::new(),
+            last_error: None,
+            grid: ResultsGrid::new(Vec::new(), Vec::new()),
             running: false,
 
             new_conn_nickname: String::new(),
@@ -67,9 +83,25 @@ impl SqlTab {
 
             saved_queries: Vec::new(),
             save_query_name: String::new(),
+
+            split_ratio: 0.4,
+            resizing: false,
+            drag_last_y: None,
         };
         let task = reload_connections(engine);
         (tab, task)
+    }
+
+    pub fn subscription(&self) -> iced::Subscription<SqlMessage> {
+        iced::event::listen_with(|event, _status, _window| match event {
+            iced::Event::Mouse(iced::mouse::Event::CursorMoved { position }) => {
+                Some(SqlMessage::SplitCursorMoved(position.y))
+            }
+            iced::Event::Mouse(iced::mouse::Event::ButtonReleased(iced::mouse::Button::Left)) => {
+                Some(SqlMessage::SplitDragEnd)
+            }
+            _ => None,
+        })
     }
 
     pub fn update(&mut self, message: SqlMessage) -> Task<SqlMessage> {
@@ -78,12 +110,13 @@ impl SqlTab {
                 self.selected_connection = Some(nickname.clone());
                 return reload_saved_queries(nickname);
             }
-            SqlMessage::EditorChanged(text) => self.editor_text = text,
+            SqlMessage::EditorAction(action) => self.editor.perform(action),
             SqlMessage::RunPressed => {
                 if let Some(connection) = self.selected_connection.clone() {
                     self.running = true;
+                    self.last_error = None;
                     let engine = self.engine.clone();
-                    let sql = self.editor_text.clone();
+                    let sql = self.editor.text();
                     return Task::perform(
                         async move {
                             let form = SqlForm {
@@ -106,7 +139,16 @@ impl SqlTab {
             }
             SqlMessage::QueryFinished(execution) => {
                 self.running = false;
-                self.last_execution = Some((*execution).clone());
+                if let Some(err) = &execution.error {
+                    self.last_error = Some(err.clone());
+                    self.grid = ResultsGrid::new(Vec::new(), Vec::new());
+                } else {
+                    self.last_error = None;
+                    self.grid = ResultsGrid::new(execution.headers.clone(), execution.rows.clone());
+                }
+            }
+            SqlMessage::Grid(grid_message) => {
+                return self.grid.update(grid_message).map(SqlMessage::Grid);
             }
 
             SqlMessage::NewConnNickname(v) => self.new_conn_nickname = v,
@@ -148,7 +190,7 @@ impl SqlTab {
                 if let Some(connection) = self.selected_connection.clone() {
                     if !self.save_query_name.trim().is_empty() {
                         let name = self.save_query_name.clone();
-                        let sql = self.editor_text.clone();
+                        let sql = self.editor.text();
                         self.save_query_name.clear();
                         return Task::perform(
                             async move {
@@ -161,7 +203,25 @@ impl SqlTab {
                 }
             }
             SqlMessage::SavedQueriesReloaded(queries) => self.saved_queries = queries,
-            SqlMessage::LoadSavedQuery(sql) => self.editor_text = sql,
+            SqlMessage::LoadSavedQuery(sql) => self.editor = text_editor::Content::with_text(&sql),
+
+            SqlMessage::SplitDragStart => {
+                self.resizing = true;
+                self.drag_last_y = None;
+            }
+            SqlMessage::SplitCursorMoved(y) => {
+                if self.resizing {
+                    if let Some(last_y) = self.drag_last_y {
+                        let delta = (y - last_y) / SPLIT_REFERENCE_HEIGHT;
+                        self.split_ratio = (self.split_ratio + delta).clamp(0.15, 0.85);
+                    }
+                    self.drag_last_y = Some(y);
+                }
+            }
+            SqlMessage::SplitDragEnd => {
+                self.resizing = false;
+                self.drag_last_y = None;
+            }
         }
         Task::none()
     }
@@ -223,12 +283,17 @@ impl SqlTab {
         .width(Length::Fixed(280.0));
 
         let run_label = if self.running { "Running..." } else { "Run" };
-        let editor = column![
+        let editor_widget = text_editor(&self.editor)
+            .on_action(SqlMessage::EditorAction)
+            .highlight_with::<SqlHighlighter>((), format_for)
+            .height(Length::Fill);
+
+        let editor_pane = column![
             text(format!(
                 "Editor (connection: {})",
                 self.selected_connection.as_deref().unwrap_or("none selected")
             )),
-            text_input("SELECT 1", &self.editor_text).on_input(SqlMessage::EditorChanged),
+            editor_widget,
             row![
                 button(text(run_label)).on_press(SqlMessage::RunPressed),
                 text_input("query name", &self.save_query_name)
@@ -239,40 +304,40 @@ impl SqlTab {
         ]
         .spacing(8);
 
-        let results: Element<'_, SqlMessage> = match &self.last_execution {
-            Some(SqlExecution { error: Some(err), .. }) => text(err.clone()).into(),
-            Some(execution) => {
-                let header = row(execution
-                    .headers
-                    .iter()
-                    .map(|h| text(h.clone()).width(Length::Fixed(140.0)).into())
-                    .collect::<Vec<Element<'_, SqlMessage>>>())
-                .spacing(4);
+        let divider = mouse_area(
+            container(text(""))
+                .width(Length::Fill)
+                .height(Length::Fixed(6.0))
+                .style(|theme: &iced::Theme| container::Style {
+                    background: Some(theme.extended_palette().background.strong.color.into()),
+                    ..Default::default()
+                }),
+        )
+        .on_press(SqlMessage::SplitDragStart);
 
-                let body = execution.rows.iter().fold(
-                    column![header].spacing(4),
-                    |col, row_values| {
-                        col.push(
-                            row(row_values
-                                .iter()
-                                .map(|v| text(v.clone()).width(Length::Fixed(140.0)).into())
-                                .collect::<Vec<Element<'_, SqlMessage>>>())
-                            .spacing(4),
-                        )
-                    },
-                );
-                scrollable(body).into()
-            }
-            None => text("Run a query to see results").into(),
+        let results_pane: Element<'_, SqlMessage> = if let Some(err) = &self.last_error {
+            container(text(err.clone()).color(iced::Color::from_rgb8(0xe0, 0x5a, 0x5a)))
+                .padding(8)
+                .into()
+        } else {
+            self.grid.view().map(SqlMessage::Grid)
         };
 
-        container(
-            row![sidebar, column![editor, results].spacing(16).padding(16)]
-                .spacing(16),
-        )
-        .width(Length::Fill)
-        .height(Length::Fill)
-        .into()
+        let editor_portion = (self.split_ratio * 1000.0) as u16;
+        let results_portion = ((1.0 - self.split_ratio) * 1000.0) as u16;
+
+        let main_area = column![
+            container(editor_pane)
+                .height(Length::FillPortion(editor_portion.max(1))),
+            divider,
+            container(results_pane)
+                .height(Length::FillPortion(results_portion.max(1))),
+        ];
+
+        container(row![sidebar, main_area.width(Length::Fill).padding(16)].spacing(16))
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .into()
     }
 }
 

@@ -6,6 +6,8 @@ mod inspector_tab;
 mod jwt_tab;
 mod requests_tab;
 mod scratchpad_tab;
+mod sql_grid;
+mod sql_highlighter;
 mod sql_tab;
 
 use std::sync::Arc;
@@ -119,6 +121,10 @@ impl App {
         }
     }
 
+    fn subscription(&self) -> iced::Subscription<Message> {
+        self.sql_tab.subscription().map(Message::Sql)
+    }
+
     fn view(&self) -> Element<'_, Message> {
         let nav_button = |label: &'static str, tab: Tab| {
             button(text(label)).on_press(Message::TabSelected(tab))
@@ -164,5 +170,7 @@ fn main() -> iced::Result {
         }
     });
 
-    iced::application("OG TestDesk", App::update, App::view).run_with(App::new)
+    iced::application("OG TestDesk", App::update, App::view)
+        .subscription(App::subscription)
+        .run_with(App::new)
 }
