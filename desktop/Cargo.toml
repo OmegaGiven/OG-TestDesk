@@ -15,4 +15,13 @@ identifier = "com.omegagiven.ogtestdesk"
 description = "OG TestDesk: native developer desk (SQL, API requests, JSON inspector, and dev tools)."
 authors = ["OmegaGiven"]
 out-dir = "../dist"
-icons = ["icons/icon.png"]
+icons = [
+    "icons/32x32.png",
+    "icons/44x44.png",
+    "icons/64x64.png",
+    "icons/128x128.png",
+    "icons/256x256.png",
+    "icons/512x512.png",
+    "icons/1024x1024.png",
+    "icons/icon.ico",
+]
