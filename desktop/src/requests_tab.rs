@@ -310,6 +310,7 @@ pub struct CurlPanelState {
     pub open: bool,
     pub import_text: String,
     pub import_error: Option<String>,
+    pub snippet_lang: SnippetLang,
 }
 
 impl CurlPanelState {
@@ -318,6 +319,35 @@ impl CurlPanelState {
             open: false,
             import_text: String::new(),
             import_error: None,
+            snippet_lang: SnippetLang::Curl,
+        }
+    }
+}
+
+/// Which code-generation language the export panel currently shows.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SnippetLang {
+    Curl,
+    RustReqwest,
+    JsFetch,
+}
+
+impl SnippetLang {
+    const ALL: [SnippetLang; 3] = [SnippetLang::Curl, SnippetLang::RustReqwest, SnippetLang::JsFetch];
+
+    fn label(&self) -> &'static str {
+        match self {
+            SnippetLang::Curl => "curl",
+            SnippetLang::RustReqwest => "Rust (reqwest)",
+            SnippetLang::JsFetch => "JS (fetch)",
+        }
+    }
+
+    fn generate(&self, method: &str, url: &str, headers: &[(String, String)], body: Option<&str>) -> String {
+        match self {
+            SnippetLang::Curl => generate_curl_command(method, url, headers, body),
+            SnippetLang::RustReqwest => crate::codegen::generate_rust_reqwest(method, url, headers, body),
+            SnippetLang::JsFetch => crate::codegen::generate_js_fetch(method, url, headers, body),
         }
     }
 }
@@ -328,6 +358,15 @@ pub enum CurlMessage {
     ImportTextChanged(String),
     ImportPressed,
     CopyPressed,
+    SnippetLangSelected(SnippetLang),
+}
+
+#[derive(Debug, Clone)]
+pub enum CookiesMessage {
+    ToggleOpen,
+    Loaded(Vec<crate::codegen::CookieEntry>),
+    ClearPressed,
+    Cleared,
 }
 
 /// State for the Postman collection import panel: pick a `.json` export,
@@ -443,6 +482,7 @@ pub enum RequestsMessage {
     History(HistoryMessage),
     Curl(CurlMessage),
     Postman(PostmanImportMessage),
+    Cookies(CookiesMessage),
 
     SplitDragStart,
     SplitCursorMoved(f32),
@@ -470,6 +510,9 @@ pub struct RequestsTab {
     env: EnvManagerState,
     curl: CurlPanelState,
     postman: PostmanImportState,
+    cookie_jar_path: String,
+    cookies_open: bool,
+    cookies: Vec<crate::codegen::CookieEntry>,
 }
 
 impl RequestsTab {
@@ -495,6 +538,9 @@ impl RequestsTab {
             env: EnvManagerState::blank(),
             curl: CurlPanelState::blank(),
             postman: PostmanImportState::blank(),
+            cookie_jar_path: default_cookie_jar_path(),
+            cookies_open: false,
+            cookies: Vec::new(),
         };
         let load_env = Task::perform(requests::get_request_variables(), |vars| {
             RequestsMessage::Env(EnvMessage::Loaded(vars))
@@ -659,6 +705,7 @@ impl RequestsTab {
             RequestsMessage::History(msg) => return self.update_history(msg),
             RequestsMessage::Curl(msg) => return self.update_curl(msg),
             RequestsMessage::Postman(msg) => return self.update_postman(msg),
+            RequestsMessage::Cookies(msg) => return self.update_cookies(msg),
 
             RequestsMessage::SplitDragStart => {
                 self.resizing = true;
@@ -684,12 +731,14 @@ impl RequestsTab {
     fn send_request(&mut self) -> Task<RequestsMessage> {
         let global = request_kv_editor::active_pairs(&self.env.global).into_iter().collect::<HashMap<_, _>>();
         let active_set_values = self.env.active_set_values();
+        let cookie_jar_path = self.cookie_jar_path.clone();
         let tab = self.current();
         tab.send_error = None;
         let local = request_kv_editor::active_pairs(&tab.local_vars).into_iter().collect::<HashMap<_, _>>();
         let env_values = merge_scopes(&global, active_set_values.as_ref(), &local);
         match build_proxy_request(tab, &env_values) {
-            Ok(payload) => {
+            Ok(mut payload) => {
+                payload.cookie_jar_path = Some(cookie_jar_path);
                 tab.sending = true;
                 Task::perform(
                     async move {
@@ -735,6 +784,7 @@ impl RequestsTab {
             form_data: vec![],
             graphql: None,
             request_id: None,
+            cookie_jar_path: None,
         };
         Task::perform(
             async move {
@@ -1023,14 +1073,16 @@ impl RequestsTab {
                 Err(err) => self.curl.import_error = Some(err),
             },
             CurlMessage::CopyPressed => {
+                let lang = self.curl.snippet_lang;
                 let tab = self.current();
                 let headers = request_kv_editor::active_pairs(&tab.headers);
                 let body = matches!(tab.body_mode, BodyMode::Raw | BodyMode::Binary)
                     .then(|| tab.raw_body.text())
                     .filter(|b| !b.is_empty());
-                let command = generate_curl_command(&tab.method, &tab.full_url(), &headers, body.as_deref());
+                let command = lang.generate(&tab.method, &tab.full_url(), &headers, body.as_deref());
                 return iced::clipboard::write(command);
             }
+            CurlMessage::SnippetLangSelected(lang) => self.curl.snippet_lang = lang,
         }
         Task::none()
     }
@@ -1038,6 +1090,40 @@ impl RequestsTab {
     /// Picks a `.json` file, parses it, and imports it via
     /// `core::requests::import_postman_collection`, refreshing the
     /// collections tree/saved-requests list on success.
+    fn update_cookies(&mut self, message: CookiesMessage) -> Task<RequestsMessage> {
+        match message {
+            CookiesMessage::ToggleOpen => {
+                self.cookies_open = !self.cookies_open;
+                if self.cookies_open {
+                    let jar_path = self.cookie_jar_path.clone();
+                    return Task::perform(
+                        async move {
+                            let contents = tokio::task::spawn_blocking(move || {
+                                std::fs::read_to_string(&jar_path).unwrap_or_default()
+                            })
+                            .await
+                            .unwrap_or_default();
+                            crate::codegen::parse_netscape_cookie_jar(&contents)
+                        },
+                        |cookies| RequestsMessage::Cookies(CookiesMessage::Loaded(cookies)),
+                    );
+                }
+            }
+            CookiesMessage::Loaded(cookies) => self.cookies = cookies,
+            CookiesMessage::ClearPressed => {
+                let jar_path = self.cookie_jar_path.clone();
+                return Task::perform(
+                    async move {
+                        let _ = tokio::task::spawn_blocking(move || std::fs::remove_file(&jar_path)).await;
+                    },
+                    |_| RequestsMessage::Cookies(CookiesMessage::Cleared),
+                );
+            }
+            CookiesMessage::Cleared => self.cookies.clear(),
+        }
+        Task::none()
+    }
+
     fn update_postman(&mut self, message: PostmanImportMessage) -> Task<RequestsMessage> {
         match message {
             PostmanImportMessage::ToggleOpen => {
@@ -1272,8 +1358,9 @@ impl RequestsTab {
         };
         let env_toggle_label = if self.env.open { "Hide environments" } else { "Environments" };
         let history_toggle_label = if self.history_open { "Hide history" } else { "History" };
-        let curl_toggle_label = if self.curl.open { "Hide curl" } else { "Curl" };
+        let curl_toggle_label = if self.curl.open { "Hide curl" } else { "Code" };
         let postman_toggle_label = if self.postman.open { "Hide Postman import" } else { "Postman import" };
+        let cookies_toggle_label = if self.cookies_open { "Hide cookies" } else { "Cookies" };
         let url_row = row![
             method_row,
             text_input("https://example.com/{id}", &tab.full_url()).on_input(RequestsMessage::UrlChanged),
@@ -1282,6 +1369,7 @@ impl RequestsTab {
             button(text(history_toggle_label)).on_press(RequestsMessage::History(HistoryMessage::ToggleOpen)),
             button(text(curl_toggle_label)).on_press(RequestsMessage::Curl(CurlMessage::ToggleOpen)),
             button(text(postman_toggle_label)).on_press(RequestsMessage::Postman(PostmanImportMessage::ToggleOpen)),
+            button(text(cookies_toggle_label)).on_press(RequestsMessage::Cookies(CookiesMessage::ToggleOpen)),
         ]
         .spacing(8);
 
@@ -1344,6 +1432,9 @@ impl RequestsTab {
         }
         if self.postman.open {
             builder = builder.push(view_postman_panel(&self.postman));
+        }
+        if self.cookies_open {
+            builder = builder.push(view_cookies_panel(&self.cookies));
         }
         builder = builder.push(section_row).push(section_body);
         if let Some(err) = &tab.send_error {
@@ -1502,6 +1593,40 @@ fn view_env_manager(env: &EnvManagerState) -> Element<'_, RequestsMessage> {
         .into()
 }
 
+/// Displays the app-wide cookie jar's contents (parsed from the Netscape
+/// cookie file curl reads/writes via `-b`/`-c`) with a "Clear cookies"
+/// action that deletes the jar file.
+fn view_cookies_panel(cookies: &[crate::codegen::CookieEntry]) -> Element<'_, RequestsMessage> {
+    let rows = if cookies.is_empty() {
+        column![text("No cookies stored yet.").size(12)]
+    } else {
+        cookies.iter().fold(column![].spacing(4), |col, cookie| {
+            col.push(text(format!(
+                "{}{}  {} = {}",
+                cookie.domain,
+                cookie.path,
+                cookie.name,
+                cookie.value
+            )).size(12))
+        })
+    };
+
+    container(
+        column![
+            text("Cookie jar").size(14),
+            rows,
+            button(text("Clear cookies")).on_press(RequestsMessage::Cookies(CookiesMessage::ClearPressed)),
+        ]
+        .spacing(8)
+        .padding(10),
+    )
+    .style(|theme: &iced::Theme| container::Style {
+        background: Some(theme.extended_palette().background.weak.color.into()),
+        ..Default::default()
+    })
+    .into()
+}
+
 /// Curl import (paste a command, populates the current tab) and export
 /// ("View as curl" of the current tab's raw builder state, plus a Copy
 /// button using `iced::clipboard::write`).
@@ -1526,9 +1651,20 @@ fn view_curl_panel<'a>(curl: &'a CurlPanelState, tab: &'a RequestTabState) -> El
     let body = matches!(tab.body_mode, BodyMode::Raw | BodyMode::Binary)
         .then(|| tab.raw_body.text())
         .filter(|b| !b.is_empty());
-    let generated = generate_curl_command(&tab.method, &tab.full_url(), &headers, body.as_deref());
+    let generated = curl.snippet_lang.generate(&tab.method, &tab.full_url(), &headers, body.as_deref());
+
+    let lang_row = row(SnippetLang::ALL.iter().map(|lang| {
+        let is_active = *lang == curl.snippet_lang;
+        let label = if is_active { format!("> {}", lang.label()) } else { lang.label().to_string() };
+        button(text(label))
+            .on_press(RequestsMessage::Curl(CurlMessage::SnippetLangSelected(*lang)))
+            .into()
+    }))
+    .spacing(6);
+
     let export_section = column![
-        text("This tab as curl:").size(12),
+        text("This tab as code:").size(12),
+        lang_row,
         text(generated).size(12),
         button(text("Copy")).on_press(RequestsMessage::Curl(CurlMessage::CopyPressed)),
     ]
@@ -1790,7 +1926,23 @@ fn build_proxy_request(tab: &RequestTabState, env_values: &HashMap<String, Strin
         form_data,
         graphql,
         request_id: None,
+        // Filled in by the caller (`send_request`) with the app-wide
+        // cookie jar path; left `None` here since `build_proxy_request`
+        // is also exercised directly in tests without a jar.
+        cookie_jar_path: None,
     })
+}
+
+/// Resolves the per-app cookie jar file path, alongside the SQLite
+/// database in the OS app-data directory (same directory `appdata.rs`
+/// points `OGTESTDESK_DB_PATH` at).
+fn default_cookie_jar_path() -> String {
+    let db_path = og_testdesk_core::app_db::db_path();
+    let dir = std::path::Path::new(&db_path)
+        .parent()
+        .map(|p| p.to_path_buf())
+        .unwrap_or_default();
+    dir.join("cookies.jar").to_string_lossy().into_owned()
 }
 
 fn reload_collections() -> Task<RequestsMessage> {

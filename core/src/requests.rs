@@ -72,6 +72,11 @@ pub struct ProxyRequest {
     pub form_data: Vec<(String, String)>,
     pub graphql: Option<GraphqlPayload>,
     pub request_id: Option<String>,
+    /// Path to a Netscape-format cookie jar file. When set, curl is told to
+    /// both send cookies from this file (`-b`) and write any `Set-Cookie`
+    /// responses back into it (`-c`), using the same path for both so it
+    /// behaves as a persistent, self-updating jar across requests.
+    pub cookie_jar_path: Option<String>,
 }
 
 pub struct GraphqlPayload {
@@ -534,6 +539,10 @@ pub fn run_proxy_request(payload: ProxyRequest) -> io::Result<ProxyResponse> {
         .arg("60")
         .arg("-X")
         .arg(&payload.method);
+
+    if let Some(jar_path) = &payload.cookie_jar_path {
+        cmd.arg("-b").arg(jar_path).arg("-c").arg(jar_path);
+    }
 
     for (key, value) in &payload.headers {
         if !key.trim().is_empty() {
