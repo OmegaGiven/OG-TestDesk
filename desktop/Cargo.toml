@@ -24,4 +24,5 @@ icons = [
     "icons/512x512.png",
     "icons/1024x1024.png",
     "icons/icon.ico",
+    "icons/icon.icns",
 ]
