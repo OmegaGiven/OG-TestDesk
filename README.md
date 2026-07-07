@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="desktop/icons/icon.png" alt="OG TestDesk icon" width="160" height="160" />
+</p>
+
 # OG TestDesk
 
 OG TestDesk is a native desktop developer desk — SQL workspace, HTTP request
