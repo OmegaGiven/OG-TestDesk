@@ -1,0 +1,9 @@
+[package]
+name = "og_testdesk_desktop"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+og_testdesk_core = { path = "../core" }
+iced = { version = "0.13", features = ["tokio"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
