@@ -32,14 +32,14 @@ pub struct SavedRequest {
     pub folder: Option<String>,
 }
 
-#[derive(Serialize, Deserialize, Clone, Default)]
+#[derive(Serialize, Deserialize, Clone, Default, Debug)]
 pub struct RequestVariableSet {
     pub name: String,
     #[serde(default)]
     pub values: HashMap<String, String>,
 }
 
-#[derive(Serialize, Deserialize, Clone, Default)]
+#[derive(Serialize, Deserialize, Clone, Default, Debug)]
 pub struct RequestVariables {
     #[serde(default)]
     pub active_set: String,
@@ -201,6 +201,15 @@ fn normalize_request_variables(mut variables: RequestVariables) -> RequestVariab
         });
     }
 
+    let normalized_global = variables
+        .global
+        .drain()
+        .filter_map(|(key, value)| {
+            let key = key.trim();
+            if key.is_empty() { None } else { Some((key.to_string(), value)) }
+        })
+        .collect::<HashMap<_, _>>();
+
     let mut normalized_sets = Vec::new();
     for mut set in variables.sets {
         let name = set.name.trim();
@@ -245,7 +254,7 @@ fn normalize_request_variables(mut variables: RequestVariables) -> RequestVariab
     RequestVariables {
         active_set,
         sets: normalized_sets,
-        global: HashMap::new(),
+        global: normalized_global,
     }
 }
 

@@ -4,11 +4,14 @@ use std::sync::Arc;
 use iced::widget::{button, column, container, mouse_area, row, scrollable, text, text_editor, text_input};
 use iced::{Element, Length, Task};
 
-use og_testdesk_core::requests::{self, GraphqlPayload, ProxyRequest, ProxyResponse, SavedRequest};
+use og_testdesk_core::requests::{
+    self, GraphqlPayload, ProxyRequest, ProxyResponse, RequestVariableSet, RequestVariables, SavedRequest,
+};
 
 use crate::graphql_highlighter::{self, GraphqlHighlighter};
 use crate::json_highlighter::{self, JsonHighlighter};
 use crate::request_auth::{AuthMessage, AuthState};
+use crate::request_env::{merge_scopes, scan_env_variables, substitute_env_variables};
 use crate::request_kv_editor::{self, KvEditorMessage, KvRow};
 use crate::request_url::{build_url_with_params, parse_query_params, scan_path_variables, substitute_path_variables};
 
@@ -65,6 +68,7 @@ pub enum BuilderSection {
     Auth,
     Headers,
     Body,
+    Variables,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -105,6 +109,7 @@ pub struct RequestTabState {
     pub params: Vec<KvRow>,
     pub path_var_values: HashMap<String, String>,
     pub headers: Vec<KvRow>,
+    pub local_vars: Vec<KvRow>,
     pub auth: AuthState,
     pub section: BuilderSection,
     pub body_mode: BodyMode,
@@ -131,6 +136,7 @@ impl RequestTabState {
             params: vec![KvRow::default()],
             path_var_values: HashMap::new(),
             headers: vec![KvRow::default()],
+            local_vars: vec![KvRow::default()],
             auth: AuthState::default(),
             section: BuilderSection::Params,
             body_mode: BodyMode::Raw,
@@ -177,6 +183,92 @@ impl RequestTabState {
     }
 }
 
+/// One named environment set as edited in the environment manager panel —
+/// mirrors `core::requests::RequestVariableSet` but keeps its values as
+/// editable [`KvRow`]s instead of a plain map.
+pub struct EnvSetState {
+    pub name: String,
+    pub rows: Vec<KvRow>,
+}
+
+/// Workspace-level (not per-tab) environment manager: global variables, a
+/// list of named environment sets, and which one is active. Persisted via
+/// `core::requests::{get_request_variables, save_request_variables_value}`.
+pub struct EnvManagerState {
+    pub open: bool,
+    pub global: Vec<KvRow>,
+    pub sets: Vec<EnvSetState>,
+    pub active_set: String,
+    pub new_set_name: String,
+}
+
+impl EnvManagerState {
+    fn blank() -> Self {
+        Self {
+            open: false,
+            global: vec![KvRow::default()],
+            sets: Vec::new(),
+            active_set: String::new(),
+            new_set_name: String::new(),
+        }
+    }
+
+    fn load_from(&mut self, vars: RequestVariables) {
+        self.global = vars
+            .global
+            .into_iter()
+            .map(|(k, v)| KvRow::new(k, v))
+            .collect();
+        request_kv_editor::ensure_trailing_blank_row(&mut self.global);
+        self.sets = vars
+            .sets
+            .into_iter()
+            .map(|set| {
+                let mut rows: Vec<KvRow> = set.values.into_iter().map(|(k, v)| KvRow::new(k, v)).collect();
+                request_kv_editor::ensure_trailing_blank_row(&mut rows);
+                EnvSetState { name: set.name, rows }
+            })
+            .collect();
+        self.active_set = vars.active_set;
+    }
+
+    fn to_core(&self) -> RequestVariables {
+        RequestVariables {
+            active_set: self.active_set.clone(),
+            sets: self
+                .sets
+                .iter()
+                .map(|set| RequestVariableSet {
+                    name: set.name.clone(),
+                    values: request_kv_editor::active_pairs(&set.rows).into_iter().collect(),
+                })
+                .collect(),
+            global: request_kv_editor::active_pairs(&self.global).into_iter().collect(),
+        }
+    }
+
+    fn active_set_values(&self) -> Option<HashMap<String, String>> {
+        self.sets
+            .iter()
+            .find(|s| s.name == self.active_set)
+            .map(|s| request_kv_editor::active_pairs(&s.rows).into_iter().collect())
+    }
+}
+
+#[derive(Debug, Clone)]
+pub enum EnvMessage {
+    ToggleOpen,
+    Loaded(RequestVariables),
+    Saved,
+    Global(KvEditorMessage),
+    SetRows(usize, KvEditorMessage),
+    NewSetNameChanged(String),
+    CreateSet,
+    DeleteSet(usize),
+    RenameSet(usize, String),
+    SetActive(String),
+}
+
 #[derive(Debug, Clone)]
 pub enum RequestsMessage {
     NewTab,
@@ -190,8 +282,10 @@ pub enum RequestsMessage {
     Headers(KvEditorMessage),
     FormData(KvEditorMessage),
     UrlEncoded(KvEditorMessage),
+    LocalVars(KvEditorMessage),
     PathVarChanged(String, String),
     Auth(AuthMessage),
+    Env(EnvMessage),
     BodyModeSelected(BodyMode),
     RawBodyAction(text_editor::Action),
     GraphqlQueryAction(text_editor::Action),
@@ -220,6 +314,7 @@ pub struct RequestsTab {
     split_ratio: f32,
     resizing: bool,
     drag_last_y: Option<f32>,
+    env: EnvManagerState,
 }
 
 impl RequestsTab {
@@ -232,8 +327,12 @@ impl RequestsTab {
             split_ratio: 0.55,
             resizing: false,
             drag_last_y: None,
+            env: EnvManagerState::blank(),
         };
-        (tab, reload_saved())
+        let load_env = Task::perform(requests::get_request_variables(), |vars| {
+            RequestsMessage::Env(EnvMessage::Loaded(vars))
+        });
+        (tab, Task::batch([reload_saved(), load_env]))
     }
 
     /// Mirrors `SqlTab::subscription`'s split-drag tracking exactly (see
@@ -295,6 +394,7 @@ impl RequestsTab {
             RequestsMessage::Headers(msg) => request_kv_editor::update(&mut self.current().headers, msg),
             RequestsMessage::FormData(msg) => request_kv_editor::update(&mut self.current().form_data, msg),
             RequestsMessage::UrlEncoded(msg) => request_kv_editor::update(&mut self.current().urlencoded, msg),
+            RequestsMessage::LocalVars(msg) => request_kv_editor::update(&mut self.current().local_vars, msg),
             RequestsMessage::PathVarChanged(name, value) => {
                 self.current().path_var_values.insert(name, value);
             }
@@ -304,6 +404,7 @@ impl RequestsTab {
                 }
                 crate::request_auth::update(&mut self.current().auth, msg);
             }
+            RequestsMessage::Env(msg) => return self.update_env(msg),
             RequestsMessage::BodyModeSelected(mode) => self.current().body_mode = mode,
             RequestsMessage::RawBodyAction(action) => self.current().raw_body.perform(action),
             RequestsMessage::GraphqlQueryAction(action) => self.current().graphql_query.perform(action),
@@ -373,9 +474,13 @@ impl RequestsTab {
     }
 
     fn send_request(&mut self) -> Task<RequestsMessage> {
+        let global = request_kv_editor::active_pairs(&self.env.global).into_iter().collect::<HashMap<_, _>>();
+        let active_set_values = self.env.active_set_values();
         let tab = self.current();
         tab.send_error = None;
-        match build_proxy_request(tab) {
+        let local = request_kv_editor::active_pairs(&tab.local_vars).into_iter().collect::<HashMap<_, _>>();
+        let env_values = merge_scopes(&global, active_set_values.as_ref(), &local);
+        match build_proxy_request(tab, &env_values) {
             Ok(payload) => {
                 tab.sending = true;
                 Task::perform(
@@ -443,6 +548,69 @@ impl RequestsTab {
                 }
             },
             RequestsMessage::OAuthTokenReceived,
+        )
+    }
+
+    /// Applies an [`EnvMessage`], then (for anything that changes persisted
+    /// state) saves via `save_request_variables_value` — fire-and-forget,
+    /// same pattern as `scratchpad_tab.rs`'s save-on-every-change.
+    fn update_env(&mut self, message: EnvMessage) -> Task<RequestsMessage> {
+        match message {
+            EnvMessage::ToggleOpen => {
+                self.env.open = !self.env.open;
+                return Task::none();
+            }
+            EnvMessage::Loaded(vars) => {
+                self.env.load_from(vars);
+                return Task::none();
+            }
+            EnvMessage::Saved => return Task::none(),
+            EnvMessage::Global(msg) => request_kv_editor::update(&mut self.env.global, msg),
+            EnvMessage::SetRows(i, msg) => {
+                if let Some(set) = self.env.sets.get_mut(i) {
+                    request_kv_editor::update(&mut set.rows, msg);
+                }
+            }
+            EnvMessage::NewSetNameChanged(v) => {
+                self.env.new_set_name = v;
+                return Task::none();
+            }
+            EnvMessage::CreateSet => {
+                let name = self.env.new_set_name.trim().to_string();
+                if name.is_empty() || self.env.sets.iter().any(|s| s.name == name) {
+                    return Task::none();
+                }
+                self.env.sets.push(EnvSetState {
+                    name,
+                    rows: vec![KvRow::default()],
+                });
+                self.env.new_set_name.clear();
+            }
+            EnvMessage::DeleteSet(i) => {
+                if i < self.env.sets.len() {
+                    let removed_name = self.env.sets.remove(i).name;
+                    if self.env.active_set == removed_name {
+                        self.env.active_set.clear();
+                    }
+                }
+            }
+            EnvMessage::RenameSet(i, new_name) => {
+                if let Some(set) = self.env.sets.get_mut(i) {
+                    let old_name = set.name.clone();
+                    set.name = new_name.clone();
+                    if self.env.active_set == old_name {
+                        self.env.active_set = new_name;
+                    }
+                }
+            }
+            EnvMessage::SetActive(name) => self.env.active_set = name,
+        }
+        let vars = self.env.to_core();
+        Task::perform(
+            async move {
+                let _ = requests::save_request_variables_value(vars).await;
+            },
+            |_| RequestsMessage::Env(EnvMessage::Saved),
         )
     }
 
@@ -514,9 +682,17 @@ impl RequestsTab {
         ]
         .spacing(6);
 
+        let env_indicator = if self.env.active_set.is_empty() {
+            text("No environment active").size(12)
+        } else {
+            text(format!("Env: {}", self.env.active_set)).size(12)
+        };
+        let env_toggle_label = if self.env.open { "Hide environments" } else { "Environments" };
         let url_row = row![
             method_row,
             text_input("https://example.com/{id}", &tab.full_url()).on_input(RequestsMessage::UrlChanged),
+            env_indicator,
+            button(text(env_toggle_label)).on_press(RequestsMessage::Env(EnvMessage::ToggleOpen)),
         ]
         .spacing(8);
 
@@ -526,6 +702,7 @@ impl RequestsTab {
             section_button("Auth", BuilderSection::Auth, tab.section),
             section_button("Headers", BuilderSection::Headers, tab.section),
             section_button("Body", BuilderSection::Body, tab.section),
+            section_button("Vars", BuilderSection::Variables, tab.section),
         ]
         .spacing(6);
 
@@ -535,16 +712,42 @@ impl RequestsTab {
             BuilderSection::Auth => crate::request_auth::view(&tab.auth).map(RequestsMessage::Auth),
             BuilderSection::Headers => request_kv_editor::view(&tab.headers).map(RequestsMessage::Headers),
             BuilderSection::Body => view_body(tab),
+            BuilderSection::Variables => {
+                let detected = scan_env_variables(&format!(
+                    "{} {} {}",
+                    tab.full_url(),
+                    request_kv_editor::active_pairs(&tab.headers)
+                        .iter()
+                        .map(|(_, v)| v.clone())
+                        .collect::<Vec<_>>()
+                        .join(" "),
+                    tab.raw_body.text(),
+                ));
+                let detected_line = if detected.is_empty() {
+                    "No {{env}} variables detected in this request yet.".to_string()
+                } else {
+                    format!("Detected: {}", detected.join(", "))
+                };
+                column![
+                    text(detected_line).size(12),
+                    text("Local overrides (this request tab only, not saved):").size(12),
+                    request_kv_editor::view(&tab.local_vars).map(RequestsMessage::LocalVars),
+                ]
+                .spacing(6)
+                .into()
+            }
         };
 
         let send_label = if tab.sending { "Sending..." } else { "Send" };
         let mut builder = column![
             tab_bar,
             url_row,
-            section_row,
-            section_body,
         ]
         .spacing(10);
+        if self.env.open {
+            builder = builder.push(view_env_manager(&self.env));
+        }
+        builder = builder.push(section_row).push(section_body);
         if let Some(err) = &tab.send_error {
             builder = builder.push(text(err.clone()).color(iced::Color::from_rgb8(0xe0, 0x5a, 0x5a)));
         }
@@ -660,6 +863,55 @@ fn sync_path_vars(tab: &mut RequestTabState) {
     }
 }
 
+/// Workspace-level environment manager panel: global variables, named
+/// environment sets (create/rename/delete/activate), each with its own
+/// key/value rows via the shared `request_kv_editor`.
+fn view_env_manager(env: &EnvManagerState) -> Element<'_, RequestsMessage> {
+    let global_section = column![
+        text("Global variables").size(14),
+        request_kv_editor::view(&env.global).map(|m| RequestsMessage::Env(EnvMessage::Global(m))),
+    ]
+    .spacing(6);
+
+    let new_set_row = row![
+        text_input("new environment name", &env.new_set_name)
+            .on_input(|v| RequestsMessage::Env(EnvMessage::NewSetNameChanged(v))),
+        button(text("+ New environment")).on_press(RequestsMessage::Env(EnvMessage::CreateSet)),
+    ]
+    .spacing(8);
+
+    let sets_section = env.sets.iter().enumerate().fold(
+        column![text("Environments").size(14), new_set_row].spacing(8),
+        |col, (i, set)| {
+            let is_active = env.active_set == set.name;
+            let activate_label = if is_active { "Active" } else { "Make active" };
+            let header = row![
+                text_input("environment name", &set.name)
+                    .on_input(move |v| RequestsMessage::Env(EnvMessage::RenameSet(i, v)))
+                    .width(Length::FillPortion(1)),
+                button(text(activate_label)).on_press(RequestsMessage::Env(EnvMessage::SetActive(set.name.clone()))),
+                button(text("Delete")).on_press(RequestsMessage::Env(EnvMessage::DeleteSet(i))),
+            ]
+            .spacing(8);
+            col.push(
+                column![
+                    header,
+                    request_kv_editor::view(&set.rows).map(move |m| RequestsMessage::Env(EnvMessage::SetRows(i, m))),
+                ]
+                .spacing(4)
+                .padding(8),
+            )
+        },
+    );
+
+    container(column![global_section, sets_section].spacing(16).padding(10))
+        .style(|theme: &iced::Theme| container::Style {
+            background: Some(theme.extended_palette().background.weak.color.into()),
+            ..Default::default()
+        })
+        .into()
+}
+
 fn view_path_vars(tab: &RequestTabState) -> Element<'_, RequestsMessage> {
     let names = scan_path_variables(&tab.full_url());
     if names.is_empty() {
@@ -748,9 +1000,10 @@ fn headers_from_text(raw: &str) -> Vec<KvRow> {
 
 /// Assembles a `ProxyRequest` from a tab's builder state, resolving query
 /// params, path variables, auth contributions, and the active body mode.
-/// Returns an error message (rather than sending) if a `{path}` variable is
-/// left unresolved.
-fn build_proxy_request(tab: &RequestTabState) -> Result<ProxyRequest, String> {
+/// Returns an error message (rather than sending) if a `{path}` variable or
+/// an `{{env}}` variable (resolved against `env_values`, the merged
+/// local/active-set/global scopes) is left unresolved.
+fn build_proxy_request(tab: &RequestTabState, env_values: &HashMap<String, String>) -> Result<ProxyRequest, String> {
     let mut query_pairs = request_kv_editor::active_pairs(&tab.params);
     query_pairs.extend(tab.auth.effective_query_params());
     let base_with_query = if query_pairs.is_empty() {
@@ -773,15 +1026,15 @@ fn build_proxy_request(tab: &RequestTabState) -> Result<ProxyRequest, String> {
         let list = missing.iter().map(|s| s.as_str()).collect::<Vec<_>>().join(", ");
         return Err(format!("Missing path variable value(s): {list}"));
     }
-    let resolved_url = substitute_path_variables(&base_with_query, &tab.path_var_values);
+    let path_resolved_url = substitute_path_variables(&base_with_query, &tab.path_var_values);
 
     let mut headers = request_kv_editor::active_pairs(&tab.headers);
     headers.extend(tab.auth.effective_headers());
 
-    let (body, body_mode, form_data, graphql) = match tab.body_mode {
-        BodyMode::Raw => (tab.raw_body.text(), Some("raw".to_string()), vec![], None),
-        BodyMode::Binary => (tab.raw_body.text(), Some("binary".to_string()), vec![], None),
-        BodyMode::FormData => (String::new(), Some("form-data".to_string()), request_kv_editor::active_pairs(&tab.form_data), None),
+    let (raw_body_text, body_mode, form_data, graphql_query, graphql_vars_text) = match tab.body_mode {
+        BodyMode::Raw => (tab.raw_body.text(), Some("raw".to_string()), vec![], None, None),
+        BodyMode::Binary => (tab.raw_body.text(), Some("binary".to_string()), vec![], None, None),
+        BodyMode::FormData => (String::new(), Some("form-data".to_string()), request_kv_editor::active_pairs(&tab.form_data), None, None),
         BodyMode::UrlEncoded => {
             let pairs = request_kv_editor::active_pairs(&tab.urlencoded);
             let encoded = pairs
@@ -789,28 +1042,65 @@ fn build_proxy_request(tab: &RequestTabState) -> Result<ProxyRequest, String> {
                 .map(|(k, v)| format!("{}={}", crate::request_url::urlencode(k), crate::request_url::urlencode(v)))
                 .collect::<Vec<_>>()
                 .join("&");
-            (encoded, Some("raw".to_string()), vec![], None)
+            (encoded, Some("raw".to_string()), vec![], None, None)
         }
-        BodyMode::GraphQl => {
-            let variables = serde_json::from_str::<serde_json::Value>(&tab.graphql_vars.text()).ok();
-            (
-                String::new(),
-                Some("graphql".to_string()),
-                vec![],
-                Some(GraphqlPayload {
-                    query: tab.graphql_query.text(),
-                    variables,
-                    operation_name: None,
-                }),
-            )
-        }
+        BodyMode::GraphQl => (
+            String::new(),
+            Some("graphql".to_string()),
+            vec![],
+            Some(tab.graphql_query.text()),
+            Some(tab.graphql_vars.text()),
+        ),
     };
+
+    // {{env}} substitution: merge every string that reaches the network
+    // (URL, header values, body/GraphQL text) so unresolved names surface
+    // as one combined error rather than sending literal `{{name}}` text.
+    let mut missing = Vec::new();
+    let (resolved_url, url_missing) = substitute_env_variables(&path_resolved_url, env_values);
+    missing.extend(url_missing);
+
+    let mut resolved_headers = Vec::with_capacity(headers.len());
+    for (k, v) in headers {
+        let (resolved_v, header_missing) = substitute_env_variables(&v, env_values);
+        missing.extend(header_missing);
+        resolved_headers.push((k, resolved_v));
+    }
+
+    let (resolved_body, body_missing) = substitute_env_variables(&raw_body_text, env_values);
+    missing.extend(body_missing);
+
+    let resolved_graphql_query = graphql_query.map(|q| {
+        let (resolved, q_missing) = substitute_env_variables(&q, env_values);
+        missing.extend(q_missing);
+        resolved
+    });
+    let resolved_graphql_vars_text = graphql_vars_text.map(|v| {
+        let (resolved, v_missing) = substitute_env_variables(&v, env_values);
+        missing.extend(v_missing);
+        resolved
+    });
+
+    missing.sort();
+    missing.dedup();
+    if !missing.is_empty() {
+        let list = missing.join(", ");
+        return Err(format!("Missing environment variable value(s): {list}"));
+    }
+
+    let graphql = resolved_graphql_query.map(|query| GraphqlPayload {
+        variables: resolved_graphql_vars_text
+            .as_deref()
+            .and_then(|v| serde_json::from_str::<serde_json::Value>(v).ok()),
+        query,
+        operation_name: None,
+    });
 
     Ok(ProxyRequest {
         method: tab.method.clone(),
         url: resolved_url,
-        headers,
-        body,
+        headers: resolved_headers,
+        body: resolved_body,
         body_mode,
         form_data,
         graphql,

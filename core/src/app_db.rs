@@ -185,6 +185,18 @@ async fn create_schema(pool: &SqlitePool) -> Result<(), sqlx::Error> {
 
     sqlx::query(
         r#"
+        CREATE TABLE IF NOT EXISTS request_global_variables (
+            key TEXT NOT NULL PRIMARY KEY,
+            value TEXT NOT NULL DEFAULT '',
+            updated_at INTEGER NOT NULL DEFAULT (unixepoch())
+        )
+        "#,
+    )
+    .execute(pool)
+    .await?;
+
+    sqlx::query(
+        r#"
         CREATE TABLE IF NOT EXISTS request_history (
             id TEXT NOT NULL PRIMARY KEY,
             position INTEGER NOT NULL DEFAULT 0,
@@ -1135,8 +1147,19 @@ async fn get_request_variables(pool: &SqlitePool) -> Option<Value> {
         .fetch_all(pool)
         .await
         .ok()?;
-    if set_rows.is_empty() {
+    let global_rows = sqlx::query("SELECT key, value FROM request_global_variables ORDER BY key")
+        .fetch_all(pool)
+        .await
+        .unwrap_or_default();
+    if set_rows.is_empty() && global_rows.is_empty() {
         return None;
+    }
+    let mut global = Map::new();
+    for row in global_rows {
+        global.insert(
+            row.try_get::<String, _>("key").unwrap_or_default(),
+            Value::String(row.try_get::<String, _>("value").unwrap_or_default()),
+        );
     }
 
     let mut active_set = String::new();
@@ -1178,7 +1201,7 @@ async fn get_request_variables(pool: &SqlitePool) -> Option<Value> {
     Some(json!({
         "active_set": active_set,
         "sets": sets,
-        "global": {},
+        "global": global,
     }))
 }
 
@@ -1189,6 +1212,27 @@ async fn put_request_variables(pool: &SqlitePool, value: &Value) -> Result<(), s
     sqlx::query("DELETE FROM request_variable_sets")
         .execute(pool)
         .await?;
+    sqlx::query("DELETE FROM request_global_variables")
+        .execute(pool)
+        .await?;
+
+    if let Some(global) = value.get("global").and_then(Value::as_object) {
+        for (key, global_value) in global {
+            if key.trim().is_empty() {
+                continue;
+            }
+            sqlx::query(
+                r#"
+                INSERT INTO request_global_variables (key, value, updated_at)
+                VALUES (?, ?, unixepoch())
+                "#,
+            )
+            .bind(key)
+            .bind(value_as_string(global_value))
+            .execute(pool)
+            .await?;
+        }
+    }
 
     let active_set = string_field(value, "active_set");
     if let Some(sets) = value.get("sets").and_then(Value::as_array) {
