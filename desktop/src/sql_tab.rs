@@ -10,8 +10,8 @@ use og_testdesk_core::sql::engine::{
 };
 use og_testdesk_core::sql::helpers::find_connection;
 use og_testdesk_core::sql::models::{
-    AddConnForm, DbConnection, SavedQuery, SqlAlertRule, SqlExecution, SqlForm,
-    SqlRelationshipSchema, SqlTimezoneInfo, TableBrowseFilter, TableUpdateChange,
+    AddConnForm, DbConnection, EditConnectionForm, SavedQuery, SqlAlertRule, SqlExecution,
+    SqlForm, SqlRelationshipSchema, SqlTimezoneInfo, TableBrowseFilter, TableUpdateChange,
 };
 
 const HISTORY_LIMIT: i64 = 200;
@@ -24,8 +24,29 @@ use crate::sql_highlighter::{
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum SqlViewMode {
+    /// Connection manager shown before a connection is opened, or reachable
+    /// via "Manage connections" from the editor. See App Shell Phase 3:
+    /// selecting a connection here is a simplified "select + switch view"
+    /// rather than spawning a real per-connection tab group (that's a
+    /// larger `SqlTab` restructuring left for a future phase).
+    ConnectionLanding,
     QueryEditor,
     RelationshipDiagram,
+}
+
+/// In-progress edit of a saved connection, prefilled from its current
+/// values. Password is left blank in the draft (matches
+/// `update_connection`'s "blank means keep existing" semantics) rather
+/// than round-tripping the real secret back into a plain text field.
+#[derive(Clone)]
+struct EditConnDraft {
+    original_nickname: String,
+    db_type: String,
+    host: String,
+    db_name: String,
+    user: String,
+    password: String,
+    nickname: String,
 }
 
 const SPLIT_REFERENCE_HEIGHT: f32 = 700.0;
@@ -158,6 +179,21 @@ pub enum SqlMessage {
     DeleteConnection(String),
     ConnectionsReloaded(Vec<DbConnection>),
 
+    EditConnectionStart(String),
+    EditConnDbTypeChanged(String),
+    EditConnHostChanged(String),
+    EditConnDbNameChanged(String),
+    EditConnUserChanged(String),
+    EditConnPasswordChanged(String),
+    EditConnNicknameChanged(String),
+    EditConnectionSave,
+    EditConnectionCancel,
+
+    CreateSqliteDbPressed,
+    SqliteDbPathChosen(Option<String>),
+
+    GoToLanding,
+
     SaveQueryNameChanged(String),
     SaveQueryFolderChanged(String),
     SaveQueryPressed,
@@ -258,6 +294,9 @@ pub struct SqlTab {
     new_conn_user: String,
     new_conn_password: String,
 
+    editing_connection: Option<EditConnDraft>,
+    sqlite_create_status: Option<String>,
+
     saved_queries: Vec<SavedQuery>,
     saved_folders: Vec<String>,
     save_query_name: String,
@@ -336,6 +375,9 @@ impl SqlTab {
             new_conn_user: String::new(),
             new_conn_password: String::new(),
 
+            editing_connection: None,
+            sqlite_create_status: None,
+
             saved_queries: Vec::new(),
             saved_folders: Vec::new(),
             save_query_name: String::new(),
@@ -371,7 +413,7 @@ impl SqlTab {
             find_matches: Vec::new(),
             find_current: 0,
 
-            view_mode: SqlViewMode::QueryEditor,
+            view_mode: SqlViewMode::ConnectionLanding,
             erd_filter: String::new(),
             erd_highlighted: None,
 
@@ -426,6 +468,7 @@ impl SqlTab {
         match message {
             SqlMessage::ConnectionSelected(nickname) => {
                 self.selected_connection = Some(nickname.clone());
+                self.view_mode = SqlViewMode::QueryEditor;
                 self.schema = None;
                 self.schema_error = None;
                 self.browse = None;
@@ -565,6 +608,109 @@ impl SqlTab {
                 return reload_connections(self.engine.clone());
             }
             SqlMessage::ConnectionsReloaded(connections) => self.connections = connections,
+
+            SqlMessage::EditConnectionStart(nickname) => {
+                if let Some(conn) = self.connections.iter().find(|c| c.nickname == nickname) {
+                    self.editing_connection = Some(EditConnDraft {
+                        original_nickname: conn.nickname.clone(),
+                        db_type: conn.db_type.clone(),
+                        host: conn.host.clone(),
+                        db_name: conn.db_name.clone(),
+                        user: conn.user.clone(),
+                        password: String::new(),
+                        nickname: conn.nickname.clone(),
+                    });
+                }
+            }
+            SqlMessage::EditConnDbTypeChanged(v) => {
+                if let Some(draft) = &mut self.editing_connection {
+                    draft.db_type = v;
+                }
+            }
+            SqlMessage::EditConnHostChanged(v) => {
+                if let Some(draft) = &mut self.editing_connection {
+                    draft.host = v;
+                }
+            }
+            SqlMessage::EditConnDbNameChanged(v) => {
+                if let Some(draft) = &mut self.editing_connection {
+                    draft.db_name = v;
+                }
+            }
+            SqlMessage::EditConnUserChanged(v) => {
+                if let Some(draft) = &mut self.editing_connection {
+                    draft.user = v;
+                }
+            }
+            SqlMessage::EditConnPasswordChanged(v) => {
+                if let Some(draft) = &mut self.editing_connection {
+                    draft.password = v;
+                }
+            }
+            SqlMessage::EditConnNicknameChanged(v) => {
+                if let Some(draft) = &mut self.editing_connection {
+                    draft.nickname = v;
+                }
+            }
+            SqlMessage::EditConnectionCancel => self.editing_connection = None,
+            SqlMessage::EditConnectionSave => {
+                if let Some(draft) = self.editing_connection.take() {
+                    let form = EditConnectionForm {
+                        original_nickname: draft.original_nickname,
+                        db_type: Some(draft.db_type),
+                        host: draft.host,
+                        db_name: draft.db_name,
+                        user: draft.user,
+                        password: draft.password,
+                        nickname: draft.nickname,
+                    };
+                    let _ = engine::update_connection(&self.engine, form);
+                    return reload_connections(self.engine.clone());
+                }
+            }
+
+            SqlMessage::CreateSqliteDbPressed => {
+                return Task::perform(
+                    async move {
+                        tokio::task::spawn_blocking(move || {
+                            rfd::FileDialog::new()
+                                .add_filter("SQLite database", &["sqlite", "db"])
+                                .set_file_name("new.sqlite")
+                                .save_file()
+                        })
+                        .await
+                        .ok()
+                        .flatten()
+                        .map(|path| path.display().to_string())
+                    },
+                    SqlMessage::SqliteDbPathChosen,
+                );
+            }
+            SqlMessage::SqliteDbPathChosen(path) => {
+                let Some(path) = path else {
+                    self.sqlite_create_status = Some("Cancelled.".to_string());
+                    return Task::none();
+                };
+                let nickname = std::path::Path::new(&path)
+                    .file_stem()
+                    .and_then(|s| s.to_str())
+                    .filter(|s| !s.trim().is_empty())
+                    .unwrap_or("New SQLite DB")
+                    .to_string();
+                let form = AddConnForm {
+                    db_type: Some("sqlite".to_string()),
+                    host: path,
+                    db_name: String::new(),
+                    user: String::new(),
+                    password: String::new(),
+                    nickname,
+                };
+                engine::add_connection(&self.engine, form);
+                self.sqlite_create_status = None;
+                return reload_connections(self.engine.clone());
+            }
+
+            SqlMessage::GoToLanding => self.view_mode = SqlViewMode::ConnectionLanding,
 
             SqlMessage::SaveQueryNameChanged(v) => self.save_query_name = v,
             SqlMessage::SaveQueryFolderChanged(v) => self.save_query_folder = v,
@@ -977,7 +1123,9 @@ impl SqlTab {
             SqlMessage::ToggleErdView => {
                 self.view_mode = match self.view_mode {
                     SqlViewMode::QueryEditor => SqlViewMode::RelationshipDiagram,
-                    SqlViewMode::RelationshipDiagram => SqlViewMode::QueryEditor,
+                    SqlViewMode::RelationshipDiagram | SqlViewMode::ConnectionLanding => {
+                        SqlViewMode::QueryEditor
+                    }
                 };
             }
             SqlMessage::ErdFilterChanged(v) => self.erd_filter = v,
@@ -1197,12 +1345,107 @@ impl SqlTab {
         }
     }
 
+    /// Connection manager landing screen (App Shell Phase 3): list/add/
+    /// edit/delete saved connections, "Create SQLite database", and
+    /// "Open" to select + switch into the query editor. See the
+    /// `SqlViewMode::ConnectionLanding` doc comment for the scoping note
+    /// on why "Open" doesn't yet spawn a real per-connection tab group.
+    fn view_connection_landing(&self) -> Element<'_, SqlMessage> {
+        let mut list = column![text("Saved connections").size(20)].spacing(8);
+
+        if self.connections.is_empty() {
+            list = list.push(text("No saved connections yet.").size(13));
+        }
+
+        for conn in &self.connections {
+            if let Some(draft) = &self.editing_connection {
+                if draft.original_nickname == conn.nickname {
+                    list = list.push(self.view_edit_connection_form(draft));
+                    continue;
+                }
+            }
+            list = list.push(
+                row![
+                    text(format!("{} ({})", conn.nickname, conn.db_type)).width(Length::Fixed(240.0)),
+                    button(text("Open")).on_press(SqlMessage::ConnectionSelected(conn.nickname.clone())),
+                    button(text("Edit")).on_press(SqlMessage::EditConnectionStart(conn.nickname.clone())),
+                    button(text("Delete")).on_press(SqlMessage::DeleteConnection(conn.nickname.clone())),
+                ]
+                .spacing(8),
+            );
+        }
+
+        let add_connection_form = column![
+            text("Add connection").size(16),
+            text_input("nickname", &self.new_conn_nickname).on_input(SqlMessage::NewConnNickname),
+            row![
+                button(text("postgres")).on_press(SqlMessage::NewConnDbType("postgres".into())),
+                button(text("sqlite")).on_press(SqlMessage::NewConnDbType("sqlite".into())),
+                text(format!("selected: {}", self.new_conn_db_type)),
+            ]
+            .spacing(6),
+            text_input("host / sqlite path", &self.new_conn_host).on_input(SqlMessage::NewConnHost),
+            text_input("db name", &self.new_conn_db_name).on_input(SqlMessage::NewConnDbName),
+            text_input("user", &self.new_conn_user).on_input(SqlMessage::NewConnUser),
+            text_input("password", &self.new_conn_password)
+                .on_input(SqlMessage::NewConnPassword)
+                .secure(true),
+            button(text("+ Add connection")).on_press(SqlMessage::AddConnectionPressed),
+        ]
+        .spacing(6);
+
+        let sqlite_status: Element<'_, SqlMessage> = match &self.sqlite_create_status {
+            Some(status) => text(status.clone()).size(12).into(),
+            None => text("").size(12).into(),
+        };
+        let create_sqlite = column![
+            text("Create SQLite database").size(16),
+            text("Pick a path for a brand-new .sqlite file — it's created on first connect.").size(12),
+            button(text("Create SQLite database...")).on_press(SqlMessage::CreateSqliteDbPressed),
+            sqlite_status,
+        ]
+        .spacing(6);
+
+        scrollable(
+            column![list, row![add_connection_form, create_sqlite].spacing(32)]
+                .spacing(24)
+                .padding(16),
+        )
+        .into()
+    }
+
+    fn view_edit_connection_form(&self, draft: &EditConnDraft) -> Element<'_, SqlMessage> {
+        column![
+            text(format!("Editing: {}", draft.original_nickname)).size(14),
+            row![
+                button(text("postgres")).on_press(SqlMessage::EditConnDbTypeChanged("postgres".into())),
+                button(text("sqlite")).on_press(SqlMessage::EditConnDbTypeChanged("sqlite".into())),
+                text(format!("selected: {}", draft.db_type)),
+            ]
+            .spacing(6),
+            text_input("nickname", &draft.nickname).on_input(SqlMessage::EditConnNicknameChanged),
+            text_input("host / sqlite path", &draft.host).on_input(SqlMessage::EditConnHostChanged),
+            text_input("db name", &draft.db_name).on_input(SqlMessage::EditConnDbNameChanged),
+            text_input("user", &draft.user).on_input(SqlMessage::EditConnUserChanged),
+            text_input("password (leave blank to keep existing)", &draft.password)
+                .on_input(SqlMessage::EditConnPasswordChanged)
+                .secure(true),
+            row![
+                button(text("Save")).on_press(SqlMessage::EditConnectionSave),
+                button(text("Cancel")).on_press(SqlMessage::EditConnectionCancel),
+            ]
+            .spacing(8),
+        ]
+        .spacing(6)
+        .into()
+    }
+
     /// Returns `Some(task)` if the click was on an FK cell and should
     /// navigate to the referenced table instead of the default grid
     /// handling (sort etc). Returns `None` for a plain-cell click.
     fn view_schema_tree(&self) -> Element<'_, SqlMessage> {
         let diagram_label = match self.view_mode {
-            SqlViewMode::QueryEditor => "View diagram",
+            SqlViewMode::QueryEditor | SqlViewMode::ConnectionLanding => "View diagram",
             SqlViewMode::RelationshipDiagram => "Back to editor",
         };
         let mut col = column![row![
@@ -1628,46 +1871,9 @@ impl SqlTab {
     }
 
     pub fn view(&self) -> Element<'_, SqlMessage> {
-        let connections_list = self.connections.iter().fold(
-            column![text("Connections").size(16)].spacing(4),
-            |col, conn| {
-                let selected = self.selected_connection.as_deref() == Some(conn.nickname.as_str());
-                let label = if selected {
-                    format!("> {} ({})", conn.nickname, conn.db_type)
-                } else {
-                    format!("{} ({})", conn.nickname, conn.db_type)
-                };
-                col.push(
-                    row![
-                        button(text(label))
-                            .on_press(SqlMessage::ConnectionSelected(conn.nickname.clone())),
-                        button(text("delete"))
-                            .on_press(SqlMessage::DeleteConnection(conn.nickname.clone())),
-                    ]
-                    .spacing(6),
-                )
-            },
-        );
-
-        let add_connection_form = column![
-            text("Add connection").size(16),
-            text_input("nickname", &self.new_conn_nickname)
-                .on_input(SqlMessage::NewConnNickname),
-            row![
-                button(text("postgres")).on_press(SqlMessage::NewConnDbType("postgres".into())),
-                button(text("sqlite")).on_press(SqlMessage::NewConnDbType("sqlite".into())),
-                text(format!("selected: {}", self.new_conn_db_type)),
-            ]
-            .spacing(6),
-            text_input("host / sqlite path", &self.new_conn_host).on_input(SqlMessage::NewConnHost),
-            text_input("db name", &self.new_conn_db_name).on_input(SqlMessage::NewConnDbName),
-            text_input("user", &self.new_conn_user).on_input(SqlMessage::NewConnUser),
-            text_input("password", &self.new_conn_password)
-                .on_input(SqlMessage::NewConnPassword)
-                .secure(true),
-            button(text("+ Add connection")).on_press(SqlMessage::AddConnectionPressed),
-        ]
-        .spacing(6);
+        if self.view_mode == SqlViewMode::ConnectionLanding {
+            return self.view_connection_landing();
+        }
 
         let schema_tree = self.view_schema_tree();
         let saved_queries_tree = self.view_saved_queries_tree();
@@ -1676,8 +1882,15 @@ impl SqlTab {
 
         let sidebar = scrollable(
             column![
-                connections_list,
-                add_connection_form,
+                row![
+                    text(format!(
+                        "Connection: {}",
+                        self.selected_connection.as_deref().unwrap_or("none")
+                    ))
+                    .size(13),
+                    button(text("Manage connections")).on_press(SqlMessage::GoToLanding),
+                ]
+                .spacing(8),
                 schema_tree,
                 saved_queries_tree,
                 history_panel,
@@ -1847,6 +2060,8 @@ impl SqlTab {
                 main_area.width(Length::Fill).padding(16).into()
             }
             SqlViewMode::RelationshipDiagram => self.view_erd(),
+            // Unreachable: `view()` returns early for this case above.
+            SqlViewMode::ConnectionLanding => column![].into(),
         };
 
         container(row![sidebar, main_content].spacing(16))
