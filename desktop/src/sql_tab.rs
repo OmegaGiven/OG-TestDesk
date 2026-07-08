@@ -283,6 +283,11 @@ pub enum SqlMessage {
     RunCronNow(String),
     CronTick,
     CronRunFinished(String, Arc<SqlExecution>),
+
+    ToggleSchedulePanel,
+    ToggleRunningQueries,
+    SaveToFilePressed,
+    SaveToFileFinished(Result<String, String>),
 }
 
 pub struct SqlTab {
@@ -360,6 +365,10 @@ pub struct SqlTab {
     cron_interval_unit: String,
     cron_alert_comparator: String,
     cron_alert_value: String,
+
+    schedule_panel_open: bool,
+    running_queries_open: bool,
+    save_to_file_status: Option<Result<String, String>>,
 }
 
 impl SqlTab {
@@ -446,6 +455,10 @@ impl SqlTab {
             cron_interval_unit: "minutes".to_string(),
             cron_alert_comparator: ">".to_string(),
             cron_alert_value: String::new(),
+
+            schedule_panel_open: false,
+            running_queries_open: false,
+            save_to_file_status: None,
         };
         let task = Task::batch([reload_connections(engine), load_cron_tasks()]);
         (tab, task)
@@ -593,13 +606,16 @@ impl SqlTab {
                 }
             }
             SqlMessage::Grid(grid_message) => {
-                if let GridMessage::CellClicked(row_index, col_index) = grid_message {
-                    if let Some(task) = self.handle_cell_clicked(row_index, col_index) {
-                        return task;
+                if let GridMessage::CellClicked(display_row_index, col_index) = grid_message {
+                    if let Some(row_index) = self.grid.original_row_index(display_row_index) {
+                        if let Some(task) = self.handle_cell_clicked(row_index, col_index) {
+                            return task;
+                        }
+                        if self.browse.is_some() {
+                            return self.update(SqlMessage::StartEditRow(row_index));
+                        }
                     }
-                    if self.browse.is_some() {
-                        return self.update(SqlMessage::StartEditRow(row_index));
-                    }
+                    return Task::none();
                 }
                 return self.grid.update(grid_message).map(SqlMessage::Grid);
             }
@@ -1364,6 +1380,38 @@ impl SqlTab {
                 self.cron_activity.insert(0, summary);
                 self.cron_activity.truncate(50);
             }
+
+            SqlMessage::ToggleSchedulePanel => {
+                self.schedule_panel_open = !self.schedule_panel_open;
+            }
+            SqlMessage::ToggleRunningQueries => {
+                self.running_queries_open = !self.running_queries_open;
+            }
+            SqlMessage::SaveToFilePressed => {
+                let sql = self.editor.text();
+                return Task::perform(
+                    async move {
+                        let path = tokio::task::spawn_blocking(move || {
+                            rfd::FileDialog::new()
+                                .set_file_name("query.sql")
+                                .add_filter("SQL", &["sql"])
+                                .save_file()
+                        })
+                        .await
+                        .map_err(|err| format!("File dialog task failed: {err}"))?;
+                        let Some(path) = path else {
+                            return Err("Save cancelled.".to_string());
+                        };
+                        std::fs::write(&path, sql)
+                            .map_err(|err| format!("Failed to write file: {err}"))?;
+                        Ok(path.display().to_string())
+                    },
+                    SqlMessage::SaveToFileFinished,
+                );
+            }
+            SqlMessage::SaveToFileFinished(result) => {
+                self.save_to_file_status = Some(result);
+            }
         }
         Task::none()
     }
@@ -1803,6 +1851,50 @@ impl SqlTab {
         .into()
     }
 
+    /// Unified output-area toolbar: filter/columns/widen (delegated to the
+    /// grid), CSV export, revert (discard in-progress inline edits), and a
+    /// running-queries indicator. "Revert" only ever has something to act
+    /// on today when a table-browse row edit is in progress
+    /// (`editing_row`) — inline editing of arbitrary query results doesn't
+    /// exist yet (`StartEditRow` is gated on `self.browse.is_some()`), so
+    /// this button naturally does nothing when there's nothing to revert.
+    /// "Running queries" is an honest placeholder: `RunPressed` always
+    /// calls the synchronous `execute_sql` path, never `run_background`,
+    /// so there is no real concurrent-jobs list to show yet — this reflects
+    /// the single in-flight run via `self.running` rather than a job list.
+    fn view_output_toolbar(&self) -> Element<'_, SqlMessage> {
+        let grid_toolbar = self.grid.view_toolbar().map(SqlMessage::Grid);
+        let csv_bar = self.view_csv_export_bar();
+
+        let revert_button: Element<'_, SqlMessage> = if self.editing_row.is_some() {
+            button(text("Revert")).on_press(SqlMessage::CancelRowEdit).into()
+        } else {
+            column![].into()
+        };
+
+        let running_label = if self.running {
+            "Running queries (1)"
+        } else {
+            "Running queries"
+        };
+        let mut running_button = row![button(text(running_label)).on_press(SqlMessage::ToggleRunningQueries)];
+        if self.running_queries_open {
+            let status = if self.running {
+                "A query is currently running."
+            } else {
+                "Nothing running."
+            };
+            running_button = running_button.push(text(status).size(11));
+        }
+
+        column![
+            row![grid_toolbar, csv_bar, revert_button].spacing(12),
+            running_button.spacing(8),
+        ]
+        .spacing(6)
+        .into()
+    }
+
     fn view_cron_panel(&self) -> Element<'_, SqlMessage> {
         let mut col = column![text("Scheduled queries").size(16)].spacing(4);
 
@@ -2016,11 +2108,11 @@ impl SqlTab {
         let schema_tree = self.view_schema_tree();
         let saved_queries_tree = self.view_saved_queries_tree();
         let history_panel = self.view_history_panel();
-        let cron_panel = self.view_cron_panel();
 
         // Three fixed sections top-to-bottom per the app shell spec:
-        // Tables & Functions, Saved queries, History. Cron/alerts trails
-        // after as a fourth, non-spec section rather than being dropped.
+        // Tables & Functions, Saved queries, History. Cron/alerts moved out
+        // of the sidebar to a Schedule-toggled panel near the editor (see
+        // `schedule_panel_open`) so the sidebar stays strictly three-part.
         let sidebar = scrollable(
             column![
                 row![
@@ -2037,8 +2129,6 @@ impl SqlTab {
                 saved_queries_tree,
                 iced::widget::horizontal_rule(1),
                 history_panel,
-                iced::widget::horizontal_rule(1),
-                cron_panel
             ]
             .spacing(16),
         )
@@ -2131,19 +2221,41 @@ impl SqlTab {
             .into()
         };
 
+        let save_to_file_status: Element<'_, SqlMessage> = match &self.save_to_file_status {
+            None => text("").size(11).into(),
+            Some(Ok(path)) => text(format!("Saved to {path}"))
+                .size(11)
+                .color(iced::Color::from_rgb8(0x5a, 0xc0, 0x7a))
+                .into(),
+            Some(Err(err)) => text(err.clone())
+                .size(11)
+                .color(iced::Color::from_rgb8(0xe0, 0x5a, 0x5a))
+                .into(),
+        };
+
+        let schedule_panel: Element<'_, SqlMessage> = if self.schedule_panel_open {
+            container(self.view_cron_panel()).padding(8).into()
+        } else {
+            column![].into()
+        };
+
         let editor_pane = column![
-            row![
-                text(format!(
-                    "Editor (connection: {})",
-                    self.selected_connection.as_deref().unwrap_or("none selected")
-                )),
-                self.view_timezone_pill(),
-            ]
-            .spacing(12),
+            text(format!(
+                "Editor (connection: {})",
+                self.selected_connection.as_deref().unwrap_or("none selected")
+            )),
             find_bar,
             editor_widget,
             autocomplete_popup,
             variables_bar,
+            // Below the editor, per the app-shell spec: timezone, then the
+            // Schedule entry point, then Run/Save/Save-to-file.
+            row![
+                self.view_timezone_pill(),
+                button(text("Schedule")).on_press(SqlMessage::ToggleSchedulePanel),
+            ]
+            .spacing(12),
+            schedule_panel,
             row![
                 button(text(run_label)).on_press(SqlMessage::RunPressed),
                 text_input("query name", &self.save_query_name)
@@ -2151,8 +2263,10 @@ impl SqlTab {
                 text_input("folder (optional)", &self.save_query_folder)
                     .on_input(SqlMessage::SaveQueryFolderChanged),
                 button(text("Save query")).on_press(SqlMessage::SaveQueryPressed),
+                button(text("Save to file")).on_press(SqlMessage::SaveToFilePressed),
             ]
             .spacing(8),
+            save_to_file_status,
         ]
         .spacing(8);
 
@@ -2173,11 +2287,11 @@ impl SqlTab {
                 .into()
         } else {
             let grid_view = self.grid.view().map(SqlMessage::Grid);
-            let csv_bar = self.view_csv_export_bar();
+            let output_toolbar = self.view_output_toolbar();
             if self.browse.is_some() {
                 column![
                     self.view_browse_toolbar(),
-                    csv_bar,
+                    output_toolbar,
                     grid_view,
                     self.view_row_edit_form(),
                     self.view_new_row_form(),
@@ -2185,7 +2299,7 @@ impl SqlTab {
                 .spacing(8)
                 .into()
             } else {
-                column![csv_bar, grid_view].spacing(8).into()
+                column![output_toolbar, grid_view].spacing(8).into()
             }
         };
 
