@@ -148,7 +148,7 @@ pub struct SqlRelationshipSchema {
     pub relationships: Vec<SqlForeignKeyInfo>,
 }
 
-#[derive(Serialize, Clone)]
+#[derive(Serialize, Clone, Debug)]
 pub struct DbFunctionInfo {
     pub name: String,
     pub schema: String,

@@ -10,8 +10,9 @@ use og_testdesk_core::sql::engine::{
 };
 use og_testdesk_core::sql::helpers::find_connection;
 use og_testdesk_core::sql::models::{
-    AddConnForm, DbConnection, EditConnectionForm, SavedQuery, SqlAlertRule, SqlExecution,
-    SqlForm, SqlRelationshipSchema, SqlTimezoneInfo, TableBrowseFilter, TableUpdateChange,
+    AddConnForm, DbConnection, DbFunctionInfo, EditConnectionForm, SavedQuery, SqlAlertRule,
+    SqlExecution, SqlForm, SqlRelationshipSchema, SqlTimezoneInfo, TableBrowseFilter,
+    TableUpdateChange,
 };
 
 const HISTORY_LIMIT: i64 = 200;
@@ -212,6 +213,10 @@ pub enum SqlMessage {
     DeleteQueryPressed(String),
     MoveQueryFieldChanged(String, String),
     MoveQueryPressed(String),
+    ExportQueriesPressed,
+    ImportQueriesPressed,
+    ImportExportFinished(Result<String, String>),
+    FileDroppedForImport(std::path::PathBuf),
 
     HistoryReloaded(Vec<SqlRunHistoryRecord>),
     HistoryFilterChanged(String),
@@ -226,6 +231,8 @@ pub enum SqlMessage {
 
     RefreshSchema,
     SchemaLoaded(Result<SqlRelationshipSchema, String>),
+    FunctionsLoaded(Result<Vec<DbFunctionInfo>, String>),
+    LoadFunctionDefinition(String),
     ToggleTableExpanded(String),
     BrowseTable(String),
     BrowseFiltered(String, String, String),
@@ -319,6 +326,11 @@ pub struct SqlTab {
     expanded_tables: HashSet<String>,
     browse: Option<BrowseState>,
 
+    functions: Option<Vec<DbFunctionInfo>>,
+    function_error: Option<String>,
+
+    import_export_status: Option<Result<String, String>>,
+
     editing_row: Option<(usize, HashMap<String, String>)>,
     new_row: Option<HashMap<String, String>>,
 
@@ -400,6 +412,11 @@ impl SqlTab {
             expanded_tables: HashSet::new(),
             browse: None,
 
+            functions: None,
+            function_error: None,
+
+            import_export_status: None,
+
             editing_row: None,
             new_row: None,
 
@@ -450,6 +467,15 @@ impl SqlTab {
             iced::Event::Mouse(iced::mouse::Event::ButtonReleased(iced::mouse::Button::Left)) => {
                 Some(SqlMessage::SplitDragEnd)
             }
+            // Real OS-level drag-and-drop import for the saved-queries panel
+            // (App Shell Phase 4). iced 0.13 only reports FileDropped at the
+            // window level (no per-widget drop zones), so any file dropped
+            // while a connection is selected is treated as a saved-query
+            // import — see `SqlMessage::FileDroppedForImport`'s handler for
+            // the actual scoping (it's a no-op with no connection selected).
+            iced::Event::Window(iced::window::Event::FileDropped(path)) => {
+                Some(SqlMessage::FileDroppedForImport(path))
+            }
             iced::Event::Keyboard(iced::keyboard::Event::KeyPressed { key, modifiers, .. }) => {
                 if modifiers.command() {
                     if let iced::keyboard::Key::Character(c) = key.as_ref() {
@@ -471,6 +497,8 @@ impl SqlTab {
                 self.view_mode = SqlViewMode::QueryEditor;
                 self.schema = None;
                 self.schema_error = None;
+                self.functions = None;
+                self.function_error = None;
                 self.browse = None;
                 self.editing_row = None;
                 self.new_row = None;
@@ -479,6 +507,7 @@ impl SqlTab {
                     reload_saved_queries(nickname.clone()),
                     reload_saved_folders(nickname.clone()),
                     reload_schema(self.engine.clone(), nickname.clone()),
+                    reload_functions(self.engine.clone(), nickname.clone()),
                     reload_history(nickname.clone()),
                     reload_timezone(self.engine.clone(), nickname),
                 ]);
@@ -806,6 +835,61 @@ impl SqlTab {
                 }
             }
 
+            SqlMessage::ExportQueriesPressed => {
+                if let Some(connection) = self.selected_connection.clone() {
+                    return Task::perform(
+                        async move {
+                            let export = engine::export_queries(&connection).await;
+                            let json = serde_json::to_string_pretty(&export)
+                                .map_err(|err| format!("Failed to serialize queries: {err}"))?;
+                            let path = tokio::task::spawn_blocking(move || {
+                                rfd::FileDialog::new()
+                                    .set_file_name("saved_queries.json")
+                                    .add_filter("JSON", &["json"])
+                                    .save_file()
+                            })
+                            .await
+                            .map_err(|err| format!("File dialog task failed: {err}"))?;
+                            let Some(path) = path else {
+                                return Err("Export cancelled.".to_string());
+                            };
+                            std::fs::write(&path, json)
+                                .map_err(|err| format!("Failed to write file: {err}"))?;
+                            Ok(format!("Exported to {}", path.display()))
+                        },
+                        SqlMessage::ImportExportFinished,
+                    );
+                }
+            }
+            SqlMessage::ImportQueriesPressed => {
+                if let Some(connection) = self.selected_connection.clone() {
+                    return Task::perform(
+                        async move { pick_and_import_queries(connection).await },
+                        SqlMessage::ImportExportFinished,
+                    );
+                }
+            }
+            SqlMessage::FileDroppedForImport(path) => {
+                if let Some(connection) = self.selected_connection.clone() {
+                    return Task::perform(
+                        async move { import_queries_from_path(connection, path).await },
+                        SqlMessage::ImportExportFinished,
+                    );
+                }
+            }
+            SqlMessage::ImportExportFinished(result) => {
+                let connection = self.selected_connection.clone();
+                self.import_export_status = Some(result.clone());
+                if result.is_ok() {
+                    if let Some(connection) = connection {
+                        return Task::batch([
+                            reload_saved_queries(connection.clone()),
+                            reload_saved_folders(connection),
+                        ]);
+                    }
+                }
+            }
+
             SqlMessage::HistoryReloaded(history) => self.history = history,
             SqlMessage::HistoryFilterChanged(v) => self.history_filter = v,
             SqlMessage::LoadHistoryEntry(id) => {
@@ -861,7 +945,10 @@ impl SqlTab {
 
             SqlMessage::RefreshSchema => {
                 if let Some(connection) = self.selected_connection.clone() {
-                    return reload_schema(self.engine.clone(), connection);
+                    return Task::batch([
+                        reload_schema(self.engine.clone(), connection.clone()),
+                        reload_functions(self.engine.clone(), connection),
+                    ]);
                 }
             }
             SqlMessage::SchemaLoaded(Ok(schema)) => {
@@ -871,6 +958,21 @@ impl SqlTab {
             SqlMessage::SchemaLoaded(Err(err)) => {
                 self.schema = None;
                 self.schema_error = Some(err);
+            }
+            SqlMessage::FunctionsLoaded(Ok(functions)) => {
+                self.functions = Some(functions);
+                self.function_error = None;
+            }
+            SqlMessage::FunctionsLoaded(Err(err)) => {
+                self.functions = None;
+                self.function_error = Some(err);
+            }
+            SqlMessage::LoadFunctionDefinition(signature) => {
+                if let Some(functions) = &self.functions {
+                    if let Some(function) = functions.iter().find(|f| f.signature == signature) {
+                        self.editor = text_editor::Content::with_text(&function.definition);
+                    }
+                }
             }
             SqlMessage::ToggleTableExpanded(table) => {
                 if !self.expanded_tables.remove(&table) {
@@ -1445,11 +1547,11 @@ impl SqlTab {
     /// handling (sort etc). Returns `None` for a plain-cell click.
     fn view_schema_tree(&self) -> Element<'_, SqlMessage> {
         let diagram_label = match self.view_mode {
-            SqlViewMode::QueryEditor | SqlViewMode::ConnectionLanding => "View diagram",
+            SqlViewMode::QueryEditor | SqlViewMode::ConnectionLanding => "Open relationships",
             SqlViewMode::RelationshipDiagram => "Back to editor",
         };
         let mut col = column![row![
-            text("Schema").size(16),
+            text("Tables & Functions").size(16),
             button(text("Refresh")).on_press(SqlMessage::RefreshSchema),
             button(text(diagram_label)).on_press(SqlMessage::ToggleErdView),
         ]
@@ -1493,6 +1595,28 @@ impl SqlTab {
             }
         }
 
+        col = col.push(text("Functions").size(14));
+        if let Some(err) = &self.function_error {
+            col = col.push(text(err.clone()).color(iced::Color::from_rgb8(0xe0, 0x5a, 0x5a)).size(12));
+        } else {
+            match &self.functions {
+                None => col = col.push(text("Loading...").size(12)),
+                Some(functions) if functions.is_empty() => {
+                    // Empty is expected/normal for SQLite (Postgres-only
+                    // feature, see `fetch_function_list`), not an error.
+                    col = col.push(text("No functions").size(12));
+                }
+                Some(functions) => {
+                    for function in functions {
+                        col = col.push(
+                            button(text(function.signature.clone()).size(12))
+                                .on_press(SqlMessage::LoadFunctionDefinition(function.signature.clone())),
+                        );
+                    }
+                }
+            }
+        }
+
         col.into()
     }
 
@@ -1501,7 +1625,13 @@ impl SqlTab {
         let matches = |name: &str| filter.is_empty() || name.to_lowercase().contains(&filter);
 
         let mut col = column![
-            text("Saved queries").size(16),
+            row![
+                text("Saved queries").size(16),
+                button(text("Import")).on_press(SqlMessage::ImportQueriesPressed),
+                button(text("Export")).on_press(SqlMessage::ExportQueriesPressed),
+            ]
+            .spacing(8),
+            text("Drop a .sql or .json file here to import").size(11),
             text_input("filter queries", &self.query_filter).on_input(SqlMessage::QueryFilterChanged),
             row![
                 text_input("new folder name", &self.new_folder_name)
@@ -1511,6 +1641,14 @@ impl SqlTab {
             .spacing(6),
         ]
         .spacing(4);
+
+        if let Some(status) = &self.import_export_status {
+            let (message, color) = match status {
+                Ok(msg) => (msg.clone(), iced::Color::from_rgb8(0x5a, 0xc0, 0x7a)),
+                Err(msg) => (msg.clone(), iced::Color::from_rgb8(0xe0, 0x5a, 0x5a)),
+            };
+            col = col.push(text(message).size(11).color(color));
+        }
 
         let query_row = |q: &SavedQuery| -> Element<'_, SqlMessage> {
             if let Some((original, editing_name)) = &self.renaming_query {
@@ -1880,6 +2018,9 @@ impl SqlTab {
         let history_panel = self.view_history_panel();
         let cron_panel = self.view_cron_panel();
 
+        // Three fixed sections top-to-bottom per the app shell spec:
+        // Tables & Functions, Saved queries, History. Cron/alerts trails
+        // after as a fourth, non-spec section rather than being dropped.
         let sidebar = scrollable(
             column![
                 row![
@@ -1892,8 +2033,11 @@ impl SqlTab {
                 ]
                 .spacing(8),
                 schema_tree,
+                iced::widget::horizontal_rule(1),
                 saved_queries_tree,
+                iced::widget::horizontal_rule(1),
                 history_panel,
+                iced::widget::horizontal_rule(1),
                 cron_panel
             ]
             .spacing(16),
@@ -2096,6 +2240,66 @@ fn reload_schema(engine: Arc<SqlEngineState>, connection: String) -> Task<SqlMes
         },
         SqlMessage::SchemaLoaded,
     )
+}
+
+fn reload_functions(engine: Arc<SqlEngineState>, connection: String) -> Task<SqlMessage> {
+    Task::perform(
+        async move {
+            let conns = engine.connections();
+            let Some(conn) = find_connection(&connection, &conns).cloned() else {
+                return Err("Connection not found".to_string());
+            };
+            engine::fetch_function_list(&conn, &engine).await
+        },
+        SqlMessage::FunctionsLoaded,
+    )
+}
+
+/// Opens a native file picker and imports the chosen file's contents as
+/// saved queries via `engine::import_queries` (accepts either a
+/// `SavedQueryExport` bundle or a plain `Vec<SavedQuery>` JSON array).
+async fn pick_and_import_queries(connection: String) -> Result<String, String> {
+    let path = tokio::task::spawn_blocking(move || {
+        rfd::FileDialog::new()
+            .add_filter("JSON", &["json"])
+            .add_filter("SQL", &["sql"])
+            .pick_file()
+    })
+    .await
+    .map_err(|err| format!("File dialog task failed: {err}"))?;
+    let Some(path) = path else {
+        return Err("Import cancelled.".to_string());
+    };
+    import_queries_from_path(connection, path).await
+}
+
+/// Shared import logic for both the "Import" button and drag-and-drop
+/// (`iced::window::Event::FileDropped`, real OS-level drop support
+/// confirmed present in iced 0.13's window event set). A dropped `.sql`
+/// file (not a JSON bundle) is wrapped as a single saved query named
+/// after the file stem, since `import_queries` only understands JSON.
+async fn import_queries_from_path(connection: String, path: std::path::PathBuf) -> Result<String, String> {
+    let contents = tokio::task::spawn_blocking(move || std::fs::read_to_string(&path))
+        .await
+        .map_err(|err| format!("File read task failed: {err}"))?
+        .map_err(|err| format!("Failed to read file: {err}"))?;
+
+    let trimmed = contents.trim_start();
+    let payload = if trimmed.starts_with('{') || trimmed.starts_with('[') {
+        contents
+    } else {
+        // Plain .sql file: wrap as a single unnamed saved query.
+        serde_json::to_string(&serde_json::json!([{
+            "name": "Imported query",
+            "sql": contents,
+            "folder": null,
+        }]))
+        .map_err(|err| format!("Failed to wrap SQL file: {err}"))?
+    };
+
+    engine::import_queries(&connection, &payload, "rename")
+        .await
+        .map(|_| "Imported saved queries.".to_string())
 }
 
 fn browse_task(
