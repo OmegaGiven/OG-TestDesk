@@ -2,6 +2,7 @@ mod appdata;
 mod ai_tab;
 mod appearance_tab;
 mod calculator_tab;
+mod floating_tool;
 mod graphql_highlighter;
 mod inspector_tab;
 mod json_highlighter;
@@ -20,14 +21,16 @@ mod sql_grid;
 mod sql_highlighter;
 mod sql_tab;
 
+use std::collections::HashMap;
 use std::sync::Arc;
 
-use iced::widget::{button, column, container, row, scrollable, stack, text, Space};
-use iced::{Element, Length, Task};
+use iced::widget::{button, column, container, mouse_area, row, scrollable, stack, text, Space};
+use iced::{window, Element, Length, Point, Task};
 
 use ai_tab::{AiMessage, AiTab};
 use appearance_tab::{AppearanceMessage, AppearanceTab};
 use calculator_tab::{CalculatorMessage, CalculatorTab};
+use floating_tool::{PanelState, ToolKind, WindowMode};
 use inspector_tab::{InspectorMessage, InspectorTab};
 use jwt_tab::{JwtMessage, JwtTab};
 use og_testdesk_core::sql::engine::SqlEngineState;
@@ -35,25 +38,19 @@ use requests_tab::{RequestsMessage, RequestsTab};
 use scratchpad_tab::{ScratchpadMessage, ScratchpadTab};
 use sql_tab::{SqlMessage, SqlTab};
 
-/// The three fixed carousel sections plus the tools currently reached via
-/// the hamburger menu. Kept as one enum (rather than splitting
-/// section/tool) since `active_tab` still drives a single "what's the main
-/// body right now" switch — the hamburger menu just changes how you get to
-/// Calculator/Jwt/Scratchpad/Appearance/Ai, not their own internal shape.
+/// The three fixed carousel sections. Calculator stays on this same
+/// section-routing mechanism (out of scope for the window/panel toggle
+/// per the design doc); Appearance/Jwt/Scratchpad/Ai used to live here too
+/// but now route through `ToolKind`/`WindowMode` instead.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Tab {
     Sql,
     Requests,
     Inspector,
     Calculator,
-    Jwt,
-    Scratchpad,
-    Appearance,
-    Ai,
 }
 
 impl Tab {
-    /// The three main carousel sections, in nav order.
     const SECTIONS: [Tab; 3] = [Tab::Sql, Tab::Requests, Tab::Inspector];
 
     fn label(&self) -> &'static str {
@@ -62,10 +59,6 @@ impl Tab {
             Tab::Requests => "Requests",
             Tab::Inspector => "Inspector",
             Tab::Calculator => "Calculator",
-            Tab::Jwt => "JWT Decoder",
-            Tab::Scratchpad => "Scratch Pad",
-            Tab::Appearance => "Appearance",
-            Tab::Ai => "AI Assistant",
         }
     }
 }
@@ -82,6 +75,11 @@ enum Overlay {
 }
 
 struct App {
+    /// Kept for future phases that need to address the main window
+    /// specifically (e.g. closing/repositioning it) — `view`/`title`
+    /// currently distinguish it implicitly via absence from `tool_windows`.
+    #[allow(dead_code)]
+    main_window: window::Id,
     active_tab: Tab,
     overlay: Overlay,
     /// Total (sql history + requests history) entry count as of the last
@@ -89,6 +87,15 @@ struct App {
     /// have arrived since. Session-scoped, not persisted (this is a tray,
     /// not a durable inbox, per the design doc).
     notifications_seen: usize,
+
+    window_mode: WindowMode,
+    /// Native mode: which real OS windows are currently open, and which
+    /// tool each belongs to.
+    tool_windows: HashMap<window::Id, ToolKind>,
+    /// Panel mode: open/closed + position for each tool's floating panel.
+    panels: HashMap<ToolKind, PanelState>,
+    dragging_panel: Option<ToolKind>,
+    drag_last_pos: Option<Point>,
 
     sql_tab: SqlTab,
     requests_tab: RequestsTab,
@@ -107,6 +114,17 @@ enum Message {
     ToggleDocs,
     ToggleHamburger,
     CloseOverlay,
+
+    WindowModeLoaded(WindowMode),
+    WindowModeToggled,
+    OpenTool(ToolKind),
+    WindowOpened(window::Id, ToolKind),
+    WindowClosed(window::Id),
+    TogglePanel(ToolKind),
+    PanelDragStart(ToolKind),
+    PanelCursorMoved(Point),
+    PanelDragEnd,
+
     Sql(SqlMessage),
     Requests(RequestsMessage),
     Inspector(InspectorMessage),
@@ -128,11 +146,31 @@ impl App {
         let (scratchpad_tab, scratchpad_task) = ScratchpadTab::new();
         let (appearance_tab, appearance_task) = AppearanceTab::new();
         let (ai_tab, ai_task) = AiTab::new();
+
+        let (main_window, open_main) = window::open(window::Settings::default());
+
+        let panels = ToolKind::ALL.iter().map(|kind| (*kind, PanelState::new(*kind))).collect();
+
+        let load_window_mode = Task::perform(
+            async move {
+                og_testdesk_core::app_db::get_json::<WindowMode>("settings", "window_mode")
+                    .await
+                    .unwrap_or_default()
+            },
+            Message::WindowModeLoaded,
+        );
+
         (
             Self {
+                main_window,
                 active_tab: Tab::Sql,
                 overlay: Overlay::None,
                 notifications_seen: 0,
+                window_mode: WindowMode::default(),
+                tool_windows: HashMap::new(),
+                panels,
+                dragging_panel: None,
+                drag_last_pos: None,
                 sql_tab,
                 requests_tab,
                 inspector_tab,
@@ -143,6 +181,8 @@ impl App {
                 ai_tab,
             },
             Task::batch([
+                open_main.map(|_id| Message::CloseOverlay),
+                load_window_mode,
                 sql_task.map(Message::Sql),
                 requests_task.map(Message::Requests),
                 inspector_task.map(Message::Inspector),
@@ -157,6 +197,13 @@ impl App {
 
     fn notification_total(&self) -> usize {
         self.sql_tab.recent_history().len() + self.requests_tab.recent_history().len()
+    }
+
+    fn title(&self, window: window::Id) -> String {
+        match self.tool_windows.get(&window) {
+            Some(kind) => format!("OG TestDesk — {}", kind.label()),
+            None => "OG TestDesk".to_string(),
+        }
     }
 
     fn update(&mut self, message: Message) -> Task<Message> {
@@ -195,6 +242,84 @@ impl App {
                 self.overlay = Overlay::None;
                 Task::none()
             }
+
+            Message::WindowModeLoaded(mode) => {
+                self.window_mode = mode;
+                Task::none()
+            }
+            Message::WindowModeToggled => {
+                self.window_mode = self.window_mode.toggled();
+                let mode = self.window_mode;
+                Task::perform(
+                    async move {
+                        let _ = og_testdesk_core::app_db::put_json("settings", "window_mode", &mode).await;
+                    },
+                    |_| Message::CloseOverlay,
+                )
+            }
+            Message::OpenTool(kind) => {
+                self.overlay = Overlay::None;
+                match self.window_mode {
+                    WindowMode::Native => {
+                        if self.tool_windows.values().any(|open_kind| *open_kind == kind) {
+                            // Already open. iced 0.13 has no window-focus
+                            // task, so this is a no-op rather than a
+                            // second copy of the same tool.
+                            return Task::none();
+                        }
+                        let (width, height) = kind.default_window_size();
+                        let (_id, open) = window::open(window::Settings {
+                            size: iced::Size::new(width, height),
+                            ..Default::default()
+                        });
+                        open.map(move |id| Message::WindowOpened(id, kind))
+                    }
+                    WindowMode::Panel => {
+                        if let Some(panel) = self.panels.get_mut(&kind) {
+                            panel.open = true;
+                        }
+                        Task::none()
+                    }
+                }
+            }
+            Message::WindowOpened(id, kind) => {
+                self.tool_windows.insert(id, kind);
+                Task::none()
+            }
+            Message::WindowClosed(id) => {
+                self.tool_windows.remove(&id);
+                Task::none()
+            }
+            Message::TogglePanel(kind) => {
+                if let Some(panel) = self.panels.get_mut(&kind) {
+                    panel.open = !panel.open;
+                }
+                Task::none()
+            }
+            Message::PanelDragStart(kind) => {
+                self.dragging_panel = Some(kind);
+                self.drag_last_pos = None;
+                Task::none()
+            }
+            Message::PanelCursorMoved(pos) => {
+                if let Some(kind) = self.dragging_panel {
+                    if let Some(last) = self.drag_last_pos {
+                        let delta = (pos.x - last.x, pos.y - last.y);
+                        if let Some(panel) = self.panels.get_mut(&kind) {
+                            panel.position.0 += delta.0;
+                            panel.position.1 += delta.1;
+                        }
+                    }
+                    self.drag_last_pos = Some(pos);
+                }
+                Task::none()
+            }
+            Message::PanelDragEnd => {
+                self.dragging_panel = None;
+                self.drag_last_pos = None;
+                Task::none()
+            }
+
             Message::Sql(msg) => self.sql_tab.update(msg).map(Message::Sql),
             Message::Requests(msg) => self.requests_tab.update(msg).map(Message::Requests),
             Message::Inspector(msg) => self.inspector_tab.update(msg).map(Message::Inspector),
@@ -216,7 +341,24 @@ impl App {
         iced::Subscription::batch([
             self.sql_tab.subscription().map(Message::Sql),
             self.requests_tab.subscription().map(Message::Requests),
+            window::close_events().map(Message::WindowClosed),
+            self.panel_drag_subscription(),
         ])
+    }
+
+    fn panel_drag_subscription(&self) -> iced::Subscription<Message> {
+        if self.dragging_panel.is_none() {
+            return iced::Subscription::none();
+        }
+        iced::event::listen_with(|event, _status, _window| match event {
+            iced::Event::Mouse(iced::mouse::Event::CursorMoved { position }) => {
+                Some(Message::PanelCursorMoved(position))
+            }
+            iced::Event::Mouse(iced::mouse::Event::ButtonReleased(iced::mouse::Button::Left)) => {
+                Some(Message::PanelDragEnd)
+            }
+            _ => None,
+        })
     }
 
     fn view_nav(&self) -> Element<'_, Message> {
@@ -321,7 +463,8 @@ impl App {
             ),
             text(
                 "The hamburger menu (\u{2630}) opens Appearance, JWT Decoder, \
-                 AI Assistant, and Scratch Pad."
+                 AI Assistant, and Scratch Pad — as real windows or in-app \
+                 panels, switchable from the hamburger menu itself."
             ),
         ]
         .spacing(10);
@@ -330,22 +473,99 @@ impl App {
     }
 
     fn view_hamburger_popup(&self) -> Element<'_, Message> {
+        let mode_row = row![
+            text("Window mode:"),
+            button(text(self.window_mode.label())).on_press(Message::WindowModeToggled),
+        ]
+        .spacing(8);
+
         // The written spec only names Appearance/JWT/AI/Scratch Pad for
         // this menu; Calculator predates this redesign and has no other
         // entry point, so it's folded in here too rather than left
         // unreachable — flagged as a judgment call, not a literal spec item.
-        let tools = [Tab::Appearance, Tab::Jwt, Tab::Ai, Tab::Scratchpad, Tab::Calculator];
-        let list = tools.iter().fold(column![].spacing(4), |col, tab| {
+        let tools = ToolKind::ALL.iter().fold(column![].spacing(4), |col, kind| {
             col.push(
-                button(text(tab.label()))
-                    .on_press(Message::TabSelected(*tab))
+                button(text(kind.label()))
+                    .on_press(Message::OpenTool(*kind))
                     .width(Length::Fill),
             )
         });
-        popup_card(list, Length::Fixed(220.0))
+        let calculator = button(text(Tab::Calculator.label()))
+            .on_press(Message::TabSelected(Tab::Calculator))
+            .width(Length::Fill);
+
+        popup_card(
+            column![mode_row, tools, calculator].spacing(10),
+            Length::Fixed(240.0),
+        )
     }
 
-    fn view(&self) -> Element<'_, Message> {
+    /// Renders one tool's raw content (no main nav chrome) — used for both
+    /// a real tool window's full view and a panel's inner content.
+    fn view_tool(&self, kind: ToolKind) -> Element<'_, Message> {
+        match kind {
+            ToolKind::Appearance => self.appearance_tab.view().map(Message::Appearance),
+            ToolKind::Jwt => self.jwt_tab.view().map(Message::Jwt),
+            ToolKind::Ai => self.ai_tab.view().map(Message::Ai),
+            ToolKind::Scratchpad => self.scratchpad_tab.view().map(Message::Scratchpad),
+        }
+    }
+
+    fn view_panel(&self, kind: ToolKind, state: &PanelState) -> Element<'_, Message> {
+        let header = container(
+            row![
+                text(kind.label()),
+                Space::with_width(Length::Fill),
+                button(text("x")).on_press(Message::TogglePanel(kind)),
+            ]
+            .spacing(8)
+            .padding(6),
+        )
+        .style(|theme: &iced::Theme| {
+            let palette = theme.extended_palette();
+            container::Style {
+                background: Some(palette.background.strong.color.into()),
+                ..Default::default()
+            }
+        });
+
+        let drag_handle = mouse_area(header).on_press(Message::PanelDragStart(kind));
+
+        let body = container(self.view_tool(kind))
+            .width(Length::Fixed(360.0))
+            .height(Length::Fixed(420.0))
+            .padding(8)
+            .style(|theme: &iced::Theme| {
+                let palette = theme.extended_palette();
+                container::Style {
+                    background: Some(palette.background.weak.color.into()),
+                    border: iced::Border {
+                        color: palette.background.strong.color,
+                        width: 1.0,
+                        radius: 8.0.into(),
+                    },
+                    ..Default::default()
+                }
+            });
+
+        container(column![drag_handle, body])
+            .padding(iced::Padding {
+                top: state.position.1,
+                left: state.position.0,
+                ..Default::default()
+            })
+            .into()
+    }
+
+    fn view(&self, window: window::Id) -> Element<'_, Message> {
+        if let Some(kind) = self.tool_windows.get(&window) {
+            return container(self.view_tool(*kind))
+                .width(Length::Fill)
+                .height(Length::Fill)
+                .padding(12)
+                .into();
+        }
+
         let nav = self.view_nav();
 
         let body: Element<'_, Message> = match self.active_tab {
@@ -353,46 +573,59 @@ impl App {
             Tab::Requests => self.requests_tab.view().map(Message::Requests),
             Tab::Inspector => self.inspector_tab.view().map(Message::Inspector),
             Tab::Calculator => self.calculator_tab.view().map(Message::Calculator),
-            Tab::Jwt => self.jwt_tab.view().map(Message::Jwt),
-            Tab::Scratchpad => self.scratchpad_tab.view().map(Message::Scratchpad),
-            Tab::Appearance => self.appearance_tab.view().map(Message::Appearance),
-            Tab::Ai => self.ai_tab.view().map(Message::Ai),
         };
 
         let main_content = container(column![nav, body].spacing(16).padding(16))
             .width(Length::Fill)
             .height(Length::Fill);
 
-        if self.overlay == Overlay::None {
-            return main_content.into();
+        let mut layers: Vec<Element<'_, Message>> = vec![main_content.into()];
+
+        if self.window_mode == WindowMode::Panel {
+            for kind in ToolKind::ALL {
+                if let Some(state) = self.panels.get(&kind) {
+                    if state.open {
+                        layers.push(self.view_panel(kind, state));
+                    }
+                }
+            }
         }
 
-        let popup = match self.overlay {
-            Overlay::Notifications => self.view_notifications_popup(),
-            Overlay::Docs => self.view_docs_popup(),
-            Overlay::Hamburger => self.view_hamburger_popup(),
-            Overlay::None => unreachable!(),
-        };
+        if self.overlay != Overlay::None {
+            let popup = match self.overlay {
+                Overlay::Notifications => self.view_notifications_popup(),
+                Overlay::Docs => self.view_docs_popup(),
+                Overlay::Hamburger => self.view_hamburger_popup(),
+                Overlay::None => unreachable!(),
+            };
 
-        // Full-window click-catcher behind the popup: click anywhere outside
-        // the card to dismiss it, same as a native menu/popover.
-        let backdrop = button(text(""))
-            .on_press(Message::CloseOverlay)
-            .width(Length::Fill)
-            .height(Length::Fill)
-            .style(|_theme, _status| button::Style {
-                background: Some(iced::Color::TRANSPARENT.into()),
-                ..Default::default()
-            });
+            // Full-window click-catcher behind the popup: click anywhere
+            // outside the card to dismiss it, same as a native menu/popover.
+            let backdrop = button(text(""))
+                .on_press(Message::CloseOverlay)
+                .width(Length::Fill)
+                .height(Length::Fill)
+                .style(|_theme, _status| button::Style {
+                    background: Some(iced::Color::TRANSPARENT.into()),
+                    ..Default::default()
+                });
 
-        let overlay_layer = container(popup)
-            .width(Length::Fill)
-            .height(Length::Fill)
-            .padding(16)
-            .align_x(iced::alignment::Horizontal::Right)
-            .align_y(iced::alignment::Vertical::Top);
+            let overlay_layer = container(popup)
+                .width(Length::Fill)
+                .height(Length::Fill)
+                .padding(16)
+                .align_x(iced::alignment::Horizontal::Right)
+                .align_y(iced::alignment::Vertical::Top);
 
-        stack![main_content, backdrop, overlay_layer].into()
+            layers.push(backdrop.into());
+            layers.push(overlay_layer.into());
+        }
+
+        if layers.len() == 1 {
+            layers.remove(0)
+        } else {
+            stack(layers).into()
+        }
     }
 }
 
@@ -428,7 +661,7 @@ fn main() -> iced::Result {
         }
     });
 
-    iced::application("OG TestDesk", App::update, App::view)
+    iced::daemon(App::title, App::update, App::view)
         .subscription(App::subscription)
         .run_with(App::new)
 }
