@@ -516,6 +516,13 @@ pub struct RequestsTab {
 }
 
 impl RequestsTab {
+    /// Read-only view of recent send history for the notifications popup
+    /// (main.rs shell, App Shell Phase 1) — newest-first, matching how
+    /// `request_history::push_capped` inserts entries.
+    pub fn recent_history(&self) -> &[HistoryEntry] {
+        &self.history
+    }
+
     pub fn new() -> (Self, Task<RequestsMessage>) {
         let tab = Self {
             tabs: vec![RequestTabState::blank()],

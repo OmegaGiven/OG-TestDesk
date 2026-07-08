@@ -312,6 +312,13 @@ pub struct SqlTab {
 }
 
 impl SqlTab {
+    /// Read-only view of recent run history for the notifications popup
+    /// (main.rs shell, App Shell Phase 1) — most-recent-first, already the
+    /// order `history` is stored/rendered in elsewhere in this file.
+    pub fn recent_history(&self) -> &[SqlRunHistoryRecord] {
+        &self.history
+    }
+
     pub fn new(engine: Arc<SqlEngineState>) -> (Self, Task<SqlMessage>) {
         let tab = Self {
             engine: engine.clone(),
