@@ -1,5 +1,64 @@
 import { writable, derived, get } from 'svelte/store';
 import { api } from './api.js';
+import { applyColorTheme, fontStack, FONT_SANS, FONT_MONO } from './themes.js';
+
+/* ------------------------------------------------------------ appearance */
+
+const APPEARANCE_KEY = 'ogtestdesk.appearance';
+export const APPEARANCE_DEFAULT = {
+  radius: 8,
+  gutter: 0,
+  density: 1,
+  navPad: 6,
+  navGap: 5,
+  fontSans: 'system',
+  fontMono: 'system',
+  fontScale: 1,
+  colorTheme: 'default'
+};
+
+function initialAppearance() {
+  try {
+    return { ...APPEARANCE_DEFAULT, ...JSON.parse(localStorage.getItem(APPEARANCE_KEY) || '{}') };
+  } catch {
+    return { ...APPEARANCE_DEFAULT };
+  }
+}
+export const appearance = writable(initialAppearance());
+
+/** 'light' | 'dark' — from the data-theme attribute, else the OS preference. */
+export function effectiveMode() {
+  try {
+    const dt = document.documentElement.getAttribute('data-theme');
+    if (dt === 'light' || dt === 'dark') return dt;
+    return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+  } catch {
+    return 'light';
+  }
+}
+
+export function applyAppearance(a) {
+  const root = document.documentElement;
+  root.style.setProperty('--radius', `${a.radius}px`);
+  root.style.setProperty('--radius-sm', `${Math.max(2, a.radius - 3)}px`);
+  root.style.setProperty('--app-gutter', `${a.gutter}px`);
+  root.style.setProperty('--density', String(a.density));
+  root.style.setProperty('--nav-pad', `${a.navPad ?? 6}px`);
+  root.style.setProperty('--nav-gap', `${a.navGap ?? 5}px`);
+  root.style.setProperty('--font-sans', fontStack(FONT_SANS, a.fontSans));
+  root.style.setProperty('--font-mono', fontStack(FONT_MONO, a.fontMono));
+  // Whole-UI scale (like browser zoom) — covers fonts + spacing everywhere.
+  root.style.zoom = String(a.fontScale ?? 1);
+  if (a.gutter > 0) root.dataset.gutter = '1';
+  else delete root.dataset.gutter;
+  applyColorTheme(a.colorTheme || 'default', effectiveMode());
+  try {
+    localStorage.setItem(APPEARANCE_KEY, JSON.stringify(a));
+  } catch {}
+}
+appearance.subscribe((a) => {
+  if (typeof document !== 'undefined') applyAppearance(a);
+});
 
 /* ------------------------------------------------------------------ theme */
 
@@ -12,6 +71,7 @@ function initialTheme() {
   }
 }
 export const theme = writable(initialTheme());
+
 export function applyTheme(t) {
   const root = document.documentElement;
   if (t === 'system') root.removeAttribute('data-theme');
@@ -19,10 +79,17 @@ export function applyTheme(t) {
   try {
     localStorage.setItem(THEME_KEY, t);
   } catch {}
+  // colour theme depends on light/dark, re-apply
+  if (typeof document !== 'undefined') applyColorTheme(get(appearance).colorTheme, effectiveMode());
 }
 theme.subscribe((t) => {
   if (typeof document !== 'undefined') applyTheme(t);
 });
+if (typeof window !== 'undefined' && window.matchMedia) {
+  window.matchMedia('(prefers-color-scheme: dark)').addEventListener?.('change', () => {
+    if (get(theme) === 'system') applyColorTheme(get(appearance).colorTheme, effectiveMode());
+  });
+}
 
 /* ------------------------------------------------------------------ toasts */
 
@@ -295,34 +362,3 @@ export function loadFromHistory(kind, entry, resolved = null) {
   activeTool.set(kind === 'sql' ? 'sql' : 'requests');
 }
 
-/* ------------------------------------------------------------ appearance */
-
-const APPEARANCE_KEY = 'ogtestdesk.appearance';
-const APPEARANCE_DEFAULT = { radius: 8, gutter: 0, density: 1, navPad: 6, navGap: 5 };
-
-function initialAppearance() {
-  try {
-    return { ...APPEARANCE_DEFAULT, ...JSON.parse(localStorage.getItem(APPEARANCE_KEY) || '{}') };
-  } catch {
-    return { ...APPEARANCE_DEFAULT };
-  }
-}
-export const appearance = writable(initialAppearance());
-
-export function applyAppearance(a) {
-  const root = document.documentElement;
-  root.style.setProperty('--radius', `${a.radius}px`);
-  root.style.setProperty('--radius-sm', `${Math.max(2, a.radius - 3)}px`);
-  root.style.setProperty('--app-gutter', `${a.gutter}px`);
-  root.style.setProperty('--density', String(a.density));
-  root.style.setProperty('--nav-pad', `${a.navPad ?? 6}px`);
-  root.style.setProperty('--nav-gap', `${a.navGap ?? 5}px`);
-  if (a.gutter > 0) root.dataset.gutter = '1';
-  else delete root.dataset.gutter;
-  try {
-    localStorage.setItem(APPEARANCE_KEY, JSON.stringify(a));
-  } catch {}
-}
-appearance.subscribe((a) => {
-  if (typeof document !== 'undefined') applyAppearance(a);
-});

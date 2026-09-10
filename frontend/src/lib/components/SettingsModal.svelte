@@ -2,7 +2,27 @@
   import Modal from './Modal.svelte';
   import { onMount } from 'svelte';
   import { api } from '../api.js';
-  import { connections, appearance, toast, toastError } from '../stores.js';
+  import {
+    connections,
+    appearance,
+    APPEARANCE_DEFAULT,
+    effectiveMode,
+    toast,
+    toastError
+  } from '../stores.js';
+  import { COLOR_THEMES, FONT_SANS, FONT_MONO } from '../themes.js';
+
+  const THEME_KEYS = Object.keys(COLOR_THEMES);
+  const SWATCH_BASE = {
+    light: { s: '#ffffff', a: '#0c447c', b: '#27500a' },
+    dark: { s: '#26262b', a: '#85b7eb', b: '#97c459' }
+  };
+  function swatchBg(key, i) {
+    const mode = effectiveMode();
+    const varName = ['--surface-2', '--tool-sql-text', '--tool-requests-text'][i];
+    const preset = (COLOR_THEMES[key] || {})[mode] || {};
+    return preset[varName] || SWATCH_BASE[mode][['s', 'a', 'b'][i]];
+  }
 
   let cfg = null; // {enabled, port, token, allow_write, allow_http}
   let status = { running: false, port: null };
@@ -80,6 +100,47 @@
     <section class="sec">
       <h3>Appearance</h3>
       <p class="muted">Applies instantly. Stored on this device.</p>
+
+      <div class="slider">
+        <label>Colour theme</label>
+        <div class="theme-swatches">
+          {#each THEME_KEYS as key}
+            <button
+              class="tsw"
+              class:sel={($appearance.colorTheme || 'default') === key}
+              title={COLOR_THEMES[key].label}
+              on:click={() => ($appearance.colorTheme = key)}
+            >
+              <span class="tsw-p" style="background:{swatchBg(key, 0)}" />
+              <span class="tsw-p" style="background:{swatchBg(key, 1)}" />
+              <span class="tsw-p" style="background:{swatchBg(key, 2)}" />
+              <span class="tsw-label">{COLOR_THEMES[key].label}</span>
+            </button>
+          {/each}
+        </div>
+      </div>
+
+      <div class="row">
+        <div class="field">
+          <label for="fs">Interface font</label>
+          <select id="fs" class="select" bind:value={$appearance.fontSans}>
+            {#each FONT_SANS as [k, label]}<option value={k}>{label}</option>{/each}
+          </select>
+        </div>
+        <div class="field">
+          <label for="fm">Editor / mono font</label>
+          <select id="fm" class="select" bind:value={$appearance.fontMono}>
+            {#each FONT_MONO as [k, label]}<option value={k}>{label}</option>{/each}
+          </select>
+        </div>
+      </div>
+
+      <div class="slider">
+        <label>Text scale</label>
+        <input type="range" min="0.8" max="1.4" step="0.05" bind:value={$appearance.fontScale} />
+        <span class="v">{Math.round(($appearance.fontScale ?? 1) * 100)}%</span>
+      </div>
+
       <div class="slider">
         <label>Corner radius</label>
         <input type="range" min="0" max="18" bind:value={$appearance.radius} />
@@ -100,11 +161,7 @@
         <input type="range" min="1" max="14" bind:value={$appearance.navGap} />
         <span class="v">{$appearance.navGap}px</span>
       </div>
-      <button
-        class="btn sm"
-        on:click={() =>
-          appearance.set({ radius: 8, gutter: 0, density: 1, navPad: 6, navGap: 5 })}
-      >Reset</button>
+      <button class="btn sm" on:click={() => appearance.set({ ...APPEARANCE_DEFAULT })}>Reset</button>
     </section>
 
     <section class="sec">
@@ -281,6 +338,36 @@
   .tok {
     display: flex;
     gap: 5px;
+  }
+  .theme-swatches {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+    flex: 1;
+  }
+  .tsw {
+    display: flex;
+    align-items: center;
+    gap: 3px;
+    padding: 3px 8px 3px 3px;
+    border: 1px solid var(--border-strong);
+    border-radius: var(--radius-sm);
+    background: var(--surface-2);
+    cursor: pointer;
+  }
+  .tsw.sel {
+    border-color: var(--text-primary);
+    box-shadow: 0 0 0 1px var(--text-primary);
+  }
+  .tsw-p {
+    width: 12px;
+    height: 18px;
+    border-radius: 2px;
+  }
+  .tsw-label {
+    font-size: 11px;
+    margin-left: 4px;
+    color: var(--text-primary);
   }
   .slider {
     display: flex;
