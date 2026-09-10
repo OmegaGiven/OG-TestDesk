@@ -55,6 +55,36 @@ fn now() -> i64 {
     chrono::Utc::now().timestamp()
 }
 
+/// Best-effort detection of a tiling window manager, where the OS min/max
+/// window controls are meaningless.
+fn is_tiling_wm() -> bool {
+    use std::env::var;
+    if var("SWAYSOCK").is_ok()
+        || var("I3SOCK").is_ok()
+        || var("HYPRLAND_INSTANCE_SIGNATURE").is_ok()
+    {
+        return true;
+    }
+    const TILERS: &[&str] = &[
+        "sway", "i3", "hyprland", "river", "dwm", "bspwm", "qtile", "xmonad", "awesome",
+        "herbstluftwm", "wmii", "spectrwm", "niri", "dk", "leftwm", "cwm",
+    ];
+    let de = var("XDG_CURRENT_DESKTOP").unwrap_or_default().to_ascii_lowercase();
+    let sess = var("DESKTOP_SESSION").unwrap_or_default().to_ascii_lowercase();
+    let wm = var("XDG_SESSION_DESKTOP").unwrap_or_default().to_ascii_lowercase();
+    TILERS
+        .iter()
+        .any(|t| de.contains(t) || sess.contains(t) || wm.contains(t))
+}
+
+#[tauri::command]
+fn window_environment() -> serde_json::Value {
+    serde_json::json!({
+        "tiling": is_tiling_wm(),
+        "os": std::env::consts::OS,
+    })
+}
+
 // ----------------------------------------------------------------- connections
 
 #[tauri::command]
@@ -628,6 +658,7 @@ async fn main() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
+            window_environment,
             connections_list,
             connection_save,
             connection_delete,

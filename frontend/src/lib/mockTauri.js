@@ -429,6 +429,7 @@ if (typeof window !== 'undefined' && !window.__TAURI_INTERNALS__) {
         duration_ms: 128,
         size_bytes: 292
       }),
+    window_environment: () => ok({ tiling: false, os: 'linux' }),
     state_get: ({ key }) => ok(state[key] ?? null),
     state_set: ({ key, value }) => {
       state[key] = value;

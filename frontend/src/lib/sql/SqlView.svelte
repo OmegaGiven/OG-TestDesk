@@ -20,10 +20,10 @@
     historyLoad,
     appearance,
     savedQueries,
-    reloadSavedQueries
+    reloadSavedQueries,
+    connMenuOpen
   } from '../stores.js';
 
-  let sidebarConnId = null;
   let sqOpen =
     typeof location !== 'undefined' && new URLSearchParams(location.search).has('savedqueries');
   let consumedHistory = null;
@@ -55,10 +55,11 @@
   let dragging = false;
 
   $: conns = $connections;
-  $: if (!sidebarConnId && conns[0]) sidebarConnId = conns[0].id;
-  $: sidebarConn = conns.find((c) => c.id === sidebarConnId);
   $: tab = $activeSqlTab;
   $: tabConn = tab ? conns.find((c) => c.id === tab.connection_id) : null;
+  // schema tree + fallbacks follow the active tab's connection
+  $: sidebarConn = tabConn || conns[0];
+  $: sidebarConnId = sidebarConn?.id;
 
   // ---- SQL variables: {{name}} tokens filled from slots above the editor
   const VAR_RE = /\{\{\s*([A-Za-z_]\w*)\s*\}\}/g;
@@ -247,25 +248,14 @@
 
 <div class="sql">
   <aside class="sidebar">
-    <div class="conn-list">
-      <div class="sec-head">
-        <span>Connections</span>
-        <button class="btn ghost sm" on:click={() => (modal = { existing: null })}>+ New</button>
-      </div>
-      {#each conns as c (c.id)}
-        <div class="conn-item" class:active={sidebarConnId === c.id}>
-          <button class="ci-main" on:click={() => (sidebarConnId = c.id)}>
-            <span class="dot" style="background:{c.color || 'var(--conn-slate)'}" />
-            <span class="ci-name">{c.nickname}</span>
-            <span class="ci-kind">{c.kind}</span>
-          </button>
-          <button class="gear" title="Edit" on:click={() => (modal = { existing: c })}>⚙</button>
-          <button class="plus" title="New query" on:click={() => newSqlTab(c.id)}>+</button>
-        </div>
-      {/each}
-      {#if conns.length === 0}
-        <div class="none">No connections yet.</div>
+    <div class="sb-head">
+      {#if sidebarConn}
+        <span class="dot" style="background:{sidebarConn.color || 'var(--conn-slate)'}" />
+        <span class="sb-conn">{sidebarConn.nickname}</span>
       {/if}
+      <button class="btn ghost sm" title="Switch / manage connections" on:click={() => connMenuOpen.set(true)}>
+        {sidebarConn ? 'Switch ▾' : 'Connections ▾'}
+      </button>
     </div>
 
     <div class="sq-section" class:open={sqOpen}>
@@ -423,11 +413,24 @@
     flex-direction: column;
     overflow: hidden;
   }
-  .conn-list {
+  .sb-head {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 7px 8px;
     border-bottom: 1px solid var(--border);
-    padding-bottom: 6px;
-    max-height: 38%;
-    overflow: auto;
+    flex-shrink: 0;
+  }
+  .sb-conn {
+    font-size: 12px;
+    font-weight: 700;
+    color: var(--text-primary);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    flex: 1;
+  }
+  .sb-head .btn {
     flex-shrink: 0;
   }
   .sec-head {
@@ -474,61 +477,11 @@
     overflow: hidden;
     border-top: 1px solid var(--border);
   }
-  .conn-item {
-    display: flex;
-    align-items: center;
-    padding: 0 4px;
-  }
-  .conn-item.active {
-    background: color-mix(in srgb, var(--tool-sql-text) 12%, transparent);
-  }
-  .ci-main {
-    flex: 1;
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    background: none;
-    border: none;
-    cursor: pointer;
-    padding: 6px 4px;
-    text-align: left;
-    overflow: hidden;
-  }
   .dot {
     width: 8px;
     height: 8px;
     border-radius: 50%;
     flex-shrink: 0;
-  }
-  .ci-name {
-    font-size: 12px;
-    font-weight: 600;
-    color: var(--text-primary);
-    overflow: hidden;
-    text-overflow: ellipsis;
-  }
-  .ci-kind {
-    font-size: 9px;
-    color: var(--text-muted);
-    text-transform: uppercase;
-  }
-  .gear,
-  .plus {
-    background: none;
-    border: none;
-    color: var(--text-muted);
-    cursor: pointer;
-    padding: 4px 5px;
-    font-size: 12px;
-  }
-  .gear:hover,
-  .plus:hover {
-    color: var(--text-primary);
-  }
-  .none {
-    padding: 8px;
-    font-size: 11px;
-    color: var(--text-muted);
   }
   .schema-host {
     flex: 1;

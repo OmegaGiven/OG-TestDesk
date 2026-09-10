@@ -5,6 +5,9 @@ import { invoke } from '@tauri-apps/api/core';
 const call = (cmd, args) => invoke(cmd, args);
 
 export const api = {
+  // window / environment
+  windowEnvironment: () => call('window_environment'),
+
   // connections
   connectionsList: () => call('connections_list'),
   connectionSave: (config, password) => call('connection_save', { config, password }),

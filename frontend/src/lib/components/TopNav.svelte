@@ -11,7 +11,8 @@
     activeRequestTabId,
     newRequestTab,
     closeRequestTab,
-    persistRequestTab
+    persistRequestTab,
+    connMenuOpen
   } from '../stores.js';
   import { api } from '../api.js';
 
@@ -64,7 +65,16 @@
     class:active={$activeTool === 'sql'}
     style="--tint: var(--tool-sql-tint); --tint-text: var(--tool-sql-text);"
   >
-    <button class="tool-label" on:click={() => activeTool.set('sql')}>SQL</button>
+    <button
+      class="tool-label"
+      title="Connections"
+      on:click={() => {
+        activeTool.set('sql');
+        connMenuOpen.update((v) => !v);
+      }}
+    >
+      SQL <span class="caret">▾</span>
+    </button>
     {#each $connections as conn (conn.id)}
       <div class="conn">
         <span class="dot" style="background: {conn.color || 'var(--conn-slate)'}" />
@@ -160,6 +170,10 @@
   }
   .tool.active {
     box-shadow: 0 0 0 1.5px var(--tint-text) inset;
+  }
+  .caret {
+    font-size: 7px;
+    opacity: 0.6;
   }
   .tool-label {
     font-size: 12px;

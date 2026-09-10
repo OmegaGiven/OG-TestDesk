@@ -2,11 +2,16 @@
   // Custom min / max / close for frameless windows (Windows & Linux).
   // Not rendered on macOS — the OS traffic lights overlay the top bar there.
   import { onMount } from 'svelte';
+  import { api } from '../api.js';
 
   let win = null;
   let maximized = false;
+  let tiling = false; // tiling WM → hide min/max, keep close
 
   onMount(async () => {
+    try {
+      tiling = !!(await api.windowEnvironment()).tiling;
+    } catch {}
     try {
       const mod = await import('@tauri-apps/api/window');
       win = mod.getCurrentWindow();
@@ -31,24 +36,26 @@
 
 {#if win}
   <div class="wc">
-    <button class="wc-btn" title="Minimize" on:click={act('minimize')} aria-label="Minimize">
-      <svg width="10" height="10" viewBox="0 0 10 10"><line x1="1" y1="5" x2="9" y2="5" /></svg>
-    </button>
-    <button
-      class="wc-btn"
-      title={maximized ? 'Restore' : 'Maximize'}
-      on:click={act('toggleMaximize')}
-      aria-label="Maximize"
-    >
-      {#if maximized}
-        <svg width="10" height="10" viewBox="0 0 10 10">
-          <rect x="2.5" y="1" width="6" height="6" />
-          <rect x="1" y="3" width="6" height="6" fill="var(--surface-1)" />
-        </svg>
-      {:else}
-        <svg width="10" height="10" viewBox="0 0 10 10"><rect x="1" y="1" width="8" height="8" /></svg>
-      {/if}
-    </button>
+    {#if !tiling}
+      <button class="wc-btn" title="Minimize" on:click={act('minimize')} aria-label="Minimize">
+        <svg width="10" height="10" viewBox="0 0 10 10"><line x1="1" y1="5" x2="9" y2="5" /></svg>
+      </button>
+      <button
+        class="wc-btn"
+        title={maximized ? 'Restore' : 'Maximize'}
+        on:click={act('toggleMaximize')}
+        aria-label="Maximize"
+      >
+        {#if maximized}
+          <svg width="10" height="10" viewBox="0 0 10 10">
+            <rect x="2.5" y="1" width="6" height="6" />
+            <rect x="1" y="3" width="6" height="6" fill="var(--surface-1)" />
+          </svg>
+        {:else}
+          <svg width="10" height="10" viewBox="0 0 10 10"><rect x="1" y="1" width="8" height="8" /></svg>
+        {/if}
+      </button>
+    {/if}
     <button class="wc-btn close" title="Close" on:click={act('close')} aria-label="Close">
       <svg width="10" height="10" viewBox="0 0 10 10">
         <line x1="1" y1="1" x2="9" y2="9" /><line x1="9" y1="1" x2="1" y2="9" />

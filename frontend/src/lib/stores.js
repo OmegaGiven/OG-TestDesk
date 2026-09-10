@@ -136,6 +136,10 @@ export async function loadSchemas(conn, force = false) {
   return schemas;
 }
 
+/* ------------------------------------------------------- connections menu */
+
+export const connMenuOpen = writable(false);
+
 /* ----------------------------------------------------------- saved queries */
 
 export const savedQueries = writable([]);

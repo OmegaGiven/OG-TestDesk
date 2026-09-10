@@ -9,6 +9,7 @@
   import HelpModal from '../lib/components/HelpModal.svelte';
   import ActivityModal from '../lib/components/ActivityModal.svelte';
   import WindowControls from '../lib/components/WindowControls.svelte';
+  import ConnectionsMenu from '../lib/sql/ConnectionsMenu.svelte';
   import { appearance, applyAppearance } from '../lib/stores.js';
 
   const isMac =
@@ -57,6 +58,7 @@
     //   ?tool=requests|inspector   ?run  (auto-run the active SQL tab)
     const q = new URLSearchParams(location.search);
     if (q.has('theme')) theme.set(q.get('theme'));
+    if (q.has('connmenu')) (await import('../lib/stores.js')).connMenuOpen.set(true);
     if (q.has('colortheme')) appearance.update((a) => ({ ...a, colorTheme: q.get('colortheme') }));
     if (q.has('settings')) settingsOpen = true;
     if (q.has('help')) helpOpen = true;
@@ -130,6 +132,8 @@
 {#if activityOpen}
   <ActivityModal on:close={() => (activityOpen = false)} />
 {/if}
+
+<ConnectionsMenu />
 
 <Toasts />
 
