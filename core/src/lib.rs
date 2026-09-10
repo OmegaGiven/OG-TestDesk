@@ -12,6 +12,7 @@ pub use drivers::{
 };
 pub use requests::{apply_environment, HttpRequest, HttpResponse};
 pub use storage::metadata::{
-    Environment, HistoryEntry, MetadataStore, QueryTab, RequestCollection, SavedQuery, SavedRequest,
+    Environment, HistoryEntry, MetadataStore, QueryTab, RequestCollection, RequestHistoryEntry,
+    SavedQuery, SavedRequest, Schedule,
 };
 pub use storage::secrets::SecretsStore;

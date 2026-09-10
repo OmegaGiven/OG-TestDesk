@@ -51,7 +51,45 @@ CREATE TABLE IF NOT EXISTS query_history (
     duration_ms   INTEGER,
     row_count     INTEGER,
     success       INTEGER NOT NULL DEFAULT 1,
+    error         TEXT,
+    result_json   TEXT,          -- serialized QueryResult, only when small
     ran_at        INTEGER NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS request_history (
+    id               TEXT PRIMARY KEY,
+    saved_request_id TEXT,
+    name             TEXT,
+    method           TEXT NOT NULL,
+    url              TEXT NOT NULL,
+    headers_json     TEXT NOT NULL DEFAULT '{}',
+    body             TEXT,
+    status           INTEGER,
+    duration_ms      INTEGER,
+    size_bytes       INTEGER,
+    success          INTEGER NOT NULL DEFAULT 1,
+    error            TEXT,
+    response_json    TEXT,        -- serialized HttpResponse, only when small
+    sent_at          INTEGER NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS schedules (
+    id                   TEXT PRIMARY KEY,
+    name                 TEXT NOT NULL,
+    kind                 TEXT NOT NULL,           -- 'sql' | 'request'
+    connection_id        TEXT,
+    sql_text             TEXT,
+    saved_request_id     TEXT,
+    request_method       TEXT,
+    request_url          TEXT,
+    request_headers_json TEXT,
+    request_body         TEXT,
+    schedule_expr        TEXT NOT NULL,           -- cron, or 'every:<seconds>'
+    enabled              INTEGER NOT NULL DEFAULT 1,
+    last_run             INTEGER,
+    last_status          TEXT,
+    next_run             INTEGER,
+    created_at           INTEGER NOT NULL
 );
 
 CREATE TABLE IF NOT EXISTS request_collections (
@@ -135,7 +173,57 @@ pub struct HistoryEntry {
     pub duration_ms: Option<i64>,
     pub row_count: Option<i64>,
     pub success: bool,
+    #[serde(default)]
+    pub error: Option<String>,
+    /// Serialized `QueryResult` — only kept for small result sets.
+    #[serde(default)]
+    pub result_json: Option<String>,
     pub ran_at: i64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RequestHistoryEntry {
+    pub id: String,
+    #[serde(default)]
+    pub saved_request_id: Option<String>,
+    #[serde(default)]
+    pub name: Option<String>,
+    pub method: String,
+    pub url: String,
+    pub headers_json: String,
+    pub body: Option<String>,
+    pub status: Option<i64>,
+    pub duration_ms: Option<i64>,
+    pub size_bytes: Option<i64>,
+    pub success: bool,
+    #[serde(default)]
+    pub error: Option<String>,
+    /// Serialized `HttpResponse` — only kept when small.
+    #[serde(default)]
+    pub response_json: Option<String>,
+    pub sent_at: i64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Schedule {
+    pub id: String,
+    pub name: String,
+    /// "sql" | "request"
+    pub kind: String,
+    pub connection_id: Option<String>,
+    pub sql_text: Option<String>,
+    pub saved_request_id: Option<String>,
+    pub request_method: Option<String>,
+    pub request_url: Option<String>,
+    pub request_headers_json: Option<String>,
+    pub request_body: Option<String>,
+    /// cron expression, or "every:<seconds>"
+    pub schedule_expr: String,
+    pub enabled: bool,
+    pub last_run: Option<i64>,
+    pub last_status: Option<String>,
+    pub next_run: Option<i64>,
+    pub created_at: i64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -177,6 +265,13 @@ impl MetadataStore {
             .await?;
         sqlx::query("PRAGMA foreign_keys = ON").execute(&pool).await?;
         sqlx::query(SCHEMA).execute(&pool).await?;
+        // Additive migrations for databases created before a column existed.
+        for stmt in [
+            "ALTER TABLE query_history ADD COLUMN error TEXT",
+            "ALTER TABLE query_history ADD COLUMN result_json TEXT",
+        ] {
+            let _ = sqlx::query(stmt).execute(&pool).await; // ignore "duplicate column"
+        }
         Ok(Self { pool })
     }
 
@@ -318,8 +413,9 @@ impl MetadataStore {
     pub async fn add_history(&self, e: &HistoryEntry) -> Result<()> {
         sqlx::query(
             "INSERT INTO query_history
-                (id, connection_id, sql_text, duration_ms, row_count, success, ran_at)
-             VALUES (?,?,?,?,?,?,?)",
+                (id, connection_id, sql_text, duration_ms, row_count, success, error,
+                 result_json, ran_at)
+             VALUES (?,?,?,?,?,?,?,?,?)",
         )
         .bind(&e.id)
         .bind(&e.connection_id)
@@ -327,10 +423,11 @@ impl MetadataStore {
         .bind(e.duration_ms)
         .bind(e.row_count)
         .bind(e.success as i64)
+        .bind(&e.error)
+        .bind(&e.result_json)
         .bind(e.ran_at)
         .execute(&self.pool)
         .await?;
-        // keep last 500
         sqlx::query(
             "DELETE FROM query_history WHERE id NOT IN
                 (SELECT id FROM query_history ORDER BY ran_at DESC LIMIT 500)",
@@ -342,7 +439,8 @@ impl MetadataStore {
 
     pub async fn recent_history(&self, limit: i64) -> Result<Vec<HistoryEntry>> {
         let rows = sqlx::query(
-            "SELECT id, connection_id, sql_text, duration_ms, row_count, success, ran_at
+            "SELECT id, connection_id, sql_text, duration_ms, row_count, success, error,
+                    result_json, ran_at
              FROM query_history ORDER BY ran_at DESC LIMIT ?",
         )
         .bind(limit)
@@ -357,9 +455,180 @@ impl MetadataStore {
                 duration_ms: r.get("duration_ms"),
                 row_count: r.get("row_count"),
                 success: r.get::<i64, _>("success") != 0,
+                error: r.get("error"),
+                result_json: r.get("result_json"),
                 ran_at: r.get("ran_at"),
             })
             .collect())
+    }
+
+    // ------------------------------------------------------- request history
+
+    pub async fn add_request_history(&self, e: &RequestHistoryEntry) -> Result<()> {
+        sqlx::query(
+            "INSERT INTO request_history
+                (id, saved_request_id, name, method, url, headers_json, body, status,
+                 duration_ms, size_bytes, success, error, response_json, sent_at)
+             VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+        )
+        .bind(&e.id)
+        .bind(&e.saved_request_id)
+        .bind(&e.name)
+        .bind(&e.method)
+        .bind(&e.url)
+        .bind(&e.headers_json)
+        .bind(&e.body)
+        .bind(e.status)
+        .bind(e.duration_ms)
+        .bind(e.size_bytes)
+        .bind(e.success as i64)
+        .bind(&e.error)
+        .bind(&e.response_json)
+        .bind(e.sent_at)
+        .execute(&self.pool)
+        .await?;
+        sqlx::query(
+            "DELETE FROM request_history WHERE id NOT IN
+                (SELECT id FROM request_history ORDER BY sent_at DESC LIMIT 500)",
+        )
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    pub async fn recent_request_history(&self, limit: i64) -> Result<Vec<RequestHistoryEntry>> {
+        let rows = sqlx::query(
+            "SELECT id, saved_request_id, name, method, url, headers_json, body, status,
+                    duration_ms, size_bytes, success, error, response_json, sent_at
+             FROM request_history ORDER BY sent_at DESC LIMIT ?",
+        )
+        .bind(limit)
+        .fetch_all(&self.pool)
+        .await?;
+        Ok(rows
+            .into_iter()
+            .map(|r| RequestHistoryEntry {
+                id: r.get("id"),
+                saved_request_id: r.get("saved_request_id"),
+                name: r.get("name"),
+                method: r.get("method"),
+                url: r.get("url"),
+                headers_json: r.get("headers_json"),
+                body: r.get("body"),
+                status: r.get("status"),
+                duration_ms: r.get("duration_ms"),
+                size_bytes: r.get("size_bytes"),
+                success: r.get::<i64, _>("success") != 0,
+                error: r.get("error"),
+                response_json: r.get("response_json"),
+                sent_at: r.get("sent_at"),
+            })
+            .collect())
+    }
+
+    // ---------------------------------------------------------- schedules
+
+    pub async fn list_schedules(&self) -> Result<Vec<Schedule>> {
+        let rows = sqlx::query(
+            "SELECT id, name, kind, connection_id, sql_text, saved_request_id, request_method,
+                    request_url, request_headers_json, request_body, schedule_expr, enabled,
+                    last_run, last_status, next_run, created_at
+             FROM schedules ORDER BY created_at",
+        )
+        .fetch_all(&self.pool)
+        .await?;
+        Ok(rows.into_iter().map(row_to_schedule).collect())
+    }
+
+    pub async fn get_schedule(&self, id: &str) -> Result<Option<Schedule>> {
+        let row = sqlx::query(
+            "SELECT id, name, kind, connection_id, sql_text, saved_request_id, request_method,
+                    request_url, request_headers_json, request_body, schedule_expr, enabled,
+                    last_run, last_status, next_run, created_at
+             FROM schedules WHERE id = ?",
+        )
+        .bind(id)
+        .fetch_optional(&self.pool)
+        .await?;
+        Ok(row.map(row_to_schedule))
+    }
+
+    pub async fn due_schedules(&self, now_ts: i64) -> Result<Vec<Schedule>> {
+        let rows = sqlx::query(
+            "SELECT id, name, kind, connection_id, sql_text, saved_request_id, request_method,
+                    request_url, request_headers_json, request_body, schedule_expr, enabled,
+                    last_run, last_status, next_run, created_at
+             FROM schedules WHERE enabled = 1 AND next_run IS NOT NULL AND next_run <= ?",
+        )
+        .bind(now_ts)
+        .fetch_all(&self.pool)
+        .await?;
+        Ok(rows.into_iter().map(row_to_schedule).collect())
+    }
+
+    pub async fn upsert_schedule(&self, s: &Schedule) -> Result<()> {
+        sqlx::query(
+            "INSERT INTO schedules
+                (id, name, kind, connection_id, sql_text, saved_request_id, request_method,
+                 request_url, request_headers_json, request_body, schedule_expr, enabled,
+                 last_run, last_status, next_run, created_at)
+             VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,
+                 COALESCE((SELECT created_at FROM schedules WHERE id = ?), ?))
+             ON CONFLICT(id) DO UPDATE SET
+                name=excluded.name, kind=excluded.kind, connection_id=excluded.connection_id,
+                sql_text=excluded.sql_text, saved_request_id=excluded.saved_request_id,
+                request_method=excluded.request_method, request_url=excluded.request_url,
+                request_headers_json=excluded.request_headers_json,
+                request_body=excluded.request_body, schedule_expr=excluded.schedule_expr,
+                enabled=excluded.enabled, next_run=excluded.next_run",
+        )
+        .bind(&s.id)
+        .bind(&s.name)
+        .bind(&s.kind)
+        .bind(&s.connection_id)
+        .bind(&s.sql_text)
+        .bind(&s.saved_request_id)
+        .bind(&s.request_method)
+        .bind(&s.request_url)
+        .bind(&s.request_headers_json)
+        .bind(&s.request_body)
+        .bind(&s.schedule_expr)
+        .bind(s.enabled as i64)
+        .bind(s.last_run)
+        .bind(&s.last_status)
+        .bind(s.next_run)
+        .bind(&s.id)
+        .bind(now())
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    pub async fn mark_schedule_run(
+        &self,
+        id: &str,
+        ran_at: i64,
+        status: &str,
+        next_run: Option<i64>,
+    ) -> Result<()> {
+        sqlx::query(
+            "UPDATE schedules SET last_run = ?, last_status = ?, next_run = ? WHERE id = ?",
+        )
+        .bind(ran_at)
+        .bind(status)
+        .bind(next_run)
+        .bind(id)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    pub async fn delete_schedule(&self, id: &str) -> Result<()> {
+        sqlx::query("DELETE FROM schedules WHERE id = ?")
+            .bind(id)
+            .execute(&self.pool)
+            .await?;
+        Ok(())
     }
 
     // -------------------------------------------------------- saved queries
@@ -576,6 +845,27 @@ impl MetadataStore {
         .execute(&self.pool)
         .await?;
         Ok(())
+    }
+}
+
+fn row_to_schedule(r: sqlx::sqlite::SqliteRow) -> Schedule {
+    Schedule {
+        id: r.get("id"),
+        name: r.get("name"),
+        kind: r.get("kind"),
+        connection_id: r.get("connection_id"),
+        sql_text: r.get("sql_text"),
+        saved_request_id: r.get("saved_request_id"),
+        request_method: r.get("request_method"),
+        request_url: r.get("request_url"),
+        request_headers_json: r.get("request_headers_json"),
+        request_body: r.get("request_body"),
+        schedule_expr: r.get("schedule_expr"),
+        enabled: r.get::<i64, _>("enabled") != 0,
+        last_run: r.get("last_run"),
+        last_status: r.get("last_status"),
+        next_run: r.get("next_run"),
+        created_at: r.get("created_at"),
     }
 }
 

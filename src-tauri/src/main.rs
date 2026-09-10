@@ -1,6 +1,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod mcp;
+mod scheduler;
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -144,11 +145,27 @@ async fn query_run(
         duration_ms: result.as_ref().ok().map(|r| r.duration_ms as i64),
         row_count: result.as_ref().ok().map(|r| r.row_count as i64),
         success: result.is_ok(),
+        error: result.as_ref().err().map(|e| e.to_string()),
+        result_json: result.as_ref().ok().and_then(|r| {
+            (r.row_count <= 2000).then(|| serde_json::to_string(r).ok()).flatten()
+        }),
         ran_at: now(),
     };
     let _ = state.metadata.add_history(&entry).await;
 
     result.map_err(err)
+}
+
+#[tauri::command]
+async fn history_request_recent(
+    state: State<'_, AppState>,
+    limit: Option<i64>,
+) -> R<Vec<og_testdesk_core::RequestHistoryEntry>> {
+    state
+        .metadata
+        .recent_request_history(limit.unwrap_or(100))
+        .await
+        .map_err(err)
 }
 
 // --------------------------------------------------------------------- tabs
@@ -292,6 +309,8 @@ async fn request_send(
     state: State<'_, AppState>,
     mut request: HttpRequest,
     apply_env: Option<bool>,
+    saved_request_id: Option<String>,
+    name: Option<String>,
 ) -> R<HttpResponse> {
     if apply_env.unwrap_or(true) {
         let mut vars: HashMap<String, String> = HashMap::new();
@@ -312,7 +331,29 @@ async fn request_send(
             apply_environment(&mut request, &vars);
         }
     }
-    http_requests::send(&request).await.map_err(err)
+
+    let result = http_requests::send(&request).await;
+    let entry = og_testdesk_core::RequestHistoryEntry {
+        id: new_id(),
+        saved_request_id,
+        name,
+        method: request.method.clone(),
+        url: request.url.clone(),
+        headers_json: serde_json::to_string(&request.headers).unwrap_or_default(),
+        body: request.body.clone(),
+        status: result.as_ref().ok().map(|r| r.status as i64),
+        duration_ms: result.as_ref().ok().map(|r| r.duration_ms as i64),
+        size_bytes: result.as_ref().ok().map(|r| r.size_bytes as i64),
+        success: result.as_ref().map(|r| r.status < 400).unwrap_or(false),
+        error: result.as_ref().err().map(|e| e.to_string()),
+        response_json: result.as_ref().ok().and_then(|r| {
+            (r.size_bytes <= 512 * 1024).then(|| serde_json::to_string(r).ok()).flatten()
+        }),
+        sent_at: now(),
+    };
+    let _ = state.metadata.add_request_history(&entry).await;
+
+    result.map_err(err)
 }
 
 // ----------------------------------------------------------------------- mcp
@@ -410,6 +451,55 @@ async fn start_mcp(state: &State<'_, AppState>) -> R<()> {
     Ok(())
 }
 
+// ----------------------------------------------------------------- schedules
+
+#[tauri::command]
+async fn schedules_list(state: State<'_, AppState>) -> R<Vec<og_testdesk_core::Schedule>> {
+    state.metadata.list_schedules().await.map_err(err)
+}
+
+#[tauri::command]
+async fn schedule_save(
+    state: State<'_, AppState>,
+    mut schedule: og_testdesk_core::Schedule,
+) -> R<og_testdesk_core::Schedule> {
+    if schedule.id.is_empty() {
+        schedule.id = new_id();
+    }
+    if scheduler::next_run_after(&schedule.schedule_expr, now()).is_none() {
+        return Err(format!("invalid schedule expression: {}", schedule.schedule_expr));
+    }
+    schedule.next_run = if schedule.enabled {
+        scheduler::next_run_after(&schedule.schedule_expr, now())
+    } else {
+        None
+    };
+    state.metadata.upsert_schedule(&schedule).await.map_err(err)?;
+    Ok(schedule)
+}
+
+#[tauri::command]
+async fn schedule_delete(state: State<'_, AppState>, id: String) -> R<()> {
+    state.metadata.delete_schedule(&id).await.map_err(err)
+}
+
+#[tauri::command]
+async fn schedule_run_now(state: State<'_, AppState>, id: String) -> R<String> {
+    let sched = state
+        .metadata
+        .get_schedule(&id)
+        .await
+        .map_err(err)?
+        .ok_or_else(|| "no such schedule".to_string())?;
+    let status = scheduler::run_one(&state.metadata, &sched).await;
+    let next = scheduler::next_run_after(&sched.schedule_expr, now());
+    let _ = state
+        .metadata
+        .mark_schedule_run(&id, now(), &status, if sched.enabled { next } else { None })
+        .await;
+    Ok(status)
+}
+
 // ---------------------------------------------------------------- app state
 
 #[tauri::command]
@@ -450,6 +540,8 @@ async fn main() {
         }
     }
 
+    scheduler::spawn(metadata.clone());
+
     let managed = AppState {
         metadata: metadata.clone(),
         mcp: mcp_slot,
@@ -473,6 +565,11 @@ async fn main() {
             tab_save,
             tab_delete,
             history_recent,
+            history_request_recent,
+            schedules_list,
+            schedule_save,
+            schedule_delete,
+            schedule_run_now,
             saved_queries_list,
             saved_query_save,
             saved_query_delete,

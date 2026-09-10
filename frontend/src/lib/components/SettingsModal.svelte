@@ -2,7 +2,7 @@
   import Modal from './Modal.svelte';
   import { onMount } from 'svelte';
   import { api } from '../api.js';
-  import { connections, toast, toastError } from '../stores.js';
+  import { connections, appearance, toast, toastError } from '../stores.js';
 
   let cfg = null; // {enabled, port, token, allow_write, allow_http}
   let status = { running: false, port: null };
@@ -62,6 +62,25 @@
 
 <Modal title="Settings" width="600px" on:close>
   {#if cfg}
+    <section class="sec">
+      <h3>Appearance</h3>
+      <p class="muted">Applies instantly. Stored on this device.</p>
+      <div class="slider">
+        <label>Corner radius</label>
+        <input type="range" min="0" max="18" bind:value={$appearance.radius} />
+        <span class="v">{$appearance.radius}px</span>
+      </div>
+      <div class="slider">
+        <label>Window margin</label>
+        <input type="range" min="0" max="24" bind:value={$appearance.gutter} />
+        <span class="v">{$appearance.gutter}px</span>
+      </div>
+      <button
+        class="btn sm"
+        on:click={() => appearance.set({ radius: 8, gutter: 0, density: 1 })}
+      >Reset</button>
+    </section>
+
     <section class="sec">
       <div class="sec-head">
         <h3>MCP server</h3>
@@ -216,6 +235,26 @@
   .tok {
     display: flex;
     gap: 5px;
+  }
+  .slider {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin: 8px 0;
+    font-size: 12px;
+  }
+  .slider label {
+    width: 110px;
+    color: var(--text-secondary);
+  }
+  .slider input[type='range'] {
+    flex: 1;
+  }
+  .slider .v {
+    width: 44px;
+    text-align: right;
+    color: var(--text-muted);
+    font-family: var(--font-mono);
   }
   .acl {
     width: 100%;

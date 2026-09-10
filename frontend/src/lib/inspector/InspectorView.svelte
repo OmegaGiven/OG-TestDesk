@@ -9,6 +9,14 @@
   let selected = null; // {path, value, type}
   let rawMode = false;
   let rawText = '';
+
+  if (typeof location !== 'undefined') {
+    const raw = new URLSearchParams(location.search).get('inspectraw');
+    if (raw) {
+      rawMode = true;
+      rawText = raw;
+    }
+  }
   let rawError = '';
 
   $: payload = $inspectorPayload;
@@ -36,6 +44,20 @@
     } catch (e) {
       rawError = String(e);
       return null;
+    }
+  }
+  function prettify() {
+    try {
+      rawText = JSON.stringify(JSON.parse(rawText), null, 2);
+    } catch (e) {
+      toast('Not valid JSON: ' + e.message, 'error');
+    }
+  }
+  function minify() {
+    try {
+      rawText = JSON.stringify(JSON.parse(rawText));
+    } catch (e) {
+      toast('Not valid JSON: ' + e.message, 'error');
     }
   }
 
@@ -162,6 +184,12 @@
   <div class="body">
     <div class="content">
       {#if rawMode}
+        <div class="raw-tools">
+          <button class="btn ghost sm" on:click={prettify} disabled={!rawText.trim()}>Prettify</button>
+          <button class="btn ghost sm" on:click={minify} disabled={!rawText.trim()}>Minify</button>
+          <button class="btn ghost sm" on:click={() => (rawText = '')} disabled={!rawText}>Clear</button>
+          {#if rawText.trim() && !rawError}<span class="ok-tag">valid JSON</span>{/if}
+        </div>
         <textarea class="raw" bind:value={rawText} placeholder={'{ "paste": "any JSON here" }'} spellcheck="false"></textarea>
         {#if rawError}<div class="raw-err">{rawError}</div>{/if}
       {/if}
@@ -333,6 +361,17 @@
     color: var(--danger);
     font-size: 11px;
     font-family: var(--font-mono);
+  }
+  .raw-tools {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 8px;
+    border-bottom: 1px solid var(--border);
+  }
+  .ok-tag {
+    font-size: 10px;
+    color: var(--ok);
   }
   .empty {
     padding: 30px;

@@ -26,6 +26,13 @@ export const api = {
 
   // history
   historyRecent: (limit) => call('history_recent', { limit }),
+  historyRequestRecent: (limit) => call('history_request_recent', { limit }),
+
+  // schedules
+  schedulesList: () => call('schedules_list'),
+  scheduleSave: (schedule) => call('schedule_save', { schedule }),
+  scheduleDelete: (id) => call('schedule_delete', { id }),
+  scheduleRunNow: (id) => call('schedule_run_now', { id }),
 
   // saved queries
   savedQueriesList: () => call('saved_queries_list'),
@@ -48,7 +55,8 @@ export const api = {
   environmentDelete: (id) => call('environment_delete', { id }),
 
   // http
-  requestSend: (request, applyEnv = true) => call('request_send', { request, applyEnv }),
+  requestSend: (request, applyEnv = true, savedRequestId = null, name = null) =>
+    call('request_send', { request, applyEnv, savedRequestId, name }),
 
   // app state
   stateGet: (key) => call('state_get', { key }),

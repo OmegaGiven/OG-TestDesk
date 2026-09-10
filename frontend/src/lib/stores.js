@@ -196,3 +196,43 @@ export async function saveGlobals(obj) {
 }
 
 export const activeEnvironment = derived(environments, ($e) => $e.find((x) => x.is_active) || null);
+
+/* ------------------------------------------------------- history recall */
+
+// Set by the Activity modal; consumed by SqlView / RequestsView.
+export const historyLoad = writable(null); // { kind:'sql'|'request', entry, at }
+
+export function loadFromHistory(kind, entry) {
+  historyLoad.set({ kind, entry, at: Date.now() });
+  activeTool.set(kind === 'sql' ? 'sql' : 'requests');
+}
+
+/* ------------------------------------------------------------ appearance */
+
+const APPEARANCE_KEY = 'ogtestdesk.appearance';
+const APPEARANCE_DEFAULT = { radius: 8, gutter: 0, density: 1 };
+
+function initialAppearance() {
+  try {
+    return { ...APPEARANCE_DEFAULT, ...JSON.parse(localStorage.getItem(APPEARANCE_KEY) || '{}') };
+  } catch {
+    return { ...APPEARANCE_DEFAULT };
+  }
+}
+export const appearance = writable(initialAppearance());
+
+export function applyAppearance(a) {
+  const root = document.documentElement;
+  root.style.setProperty('--radius', `${a.radius}px`);
+  root.style.setProperty('--radius-sm', `${Math.max(2, a.radius - 3)}px`);
+  root.style.setProperty('--app-gutter', `${a.gutter}px`);
+  root.style.setProperty('--density', String(a.density));
+  if (a.gutter > 0) root.dataset.gutter = '1';
+  else delete root.dataset.gutter;
+  try {
+    localStorage.setItem(APPEARANCE_KEY, JSON.stringify(a));
+  } catch {}
+}
+appearance.subscribe((a) => {
+  if (typeof document !== 'undefined') applyAppearance(a);
+});

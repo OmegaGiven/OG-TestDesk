@@ -11,7 +11,8 @@
     reloadRequests,
     toast,
     toastError,
-    sendToInspector
+    sendToInspector,
+    historyLoad
   } from '../stores.js';
 
   const METHODS = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'HEAD', 'OPTIONS'];
@@ -98,7 +99,7 @@
       timeout_secs: 60
     };
     try {
-      response = await api.requestSend(req, true);
+      response = await api.requestSend(req, true, draft.id || null, draft.name || null);
       respTab = 'body';
     } catch (e) {
       error = String(e);
@@ -125,6 +126,36 @@
     if (draft.body) tab = 'body';
     response = null;
     error = null;
+  }
+
+  let consumedHistory = null;
+  $: if ($historyLoad && $historyLoad.kind === 'request' && $historyLoad.at !== consumedHistory) {
+    consumedHistory = $historyLoad.at;
+    loadHistoryEntry($historyLoad.entry);
+  }
+  function loadHistoryEntry(e) {
+    const headersObj = JSON.parse(e.headers_json || '{}');
+    draft = {
+      id: e.saved_request_id || '',
+      name: e.name || 'From history',
+      method: e.method,
+      url: e.url,
+      headers: ensureTrailingRow(
+        Object.entries(headersObj).map(([k, v]) => ({ k, v: String(v), on: true }))
+      ),
+      params: [{ k: '', v: '', on: true }],
+      body: e.body || '',
+      collection_id: null
+    };
+    urlToParams();
+    if (e.body) tab = 'body';
+    error = e.error || null;
+    response = null;
+    if (e.response_json) {
+      try {
+        response = JSON.parse(e.response_json);
+      } catch {}
+    }
   }
 
   // Demo helper: ?req=<name>&send loads a saved request and sends it.

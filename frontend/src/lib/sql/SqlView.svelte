@@ -15,10 +15,35 @@
     persistSqlTab,
     toast,
     toastError,
-    sendToInspector
+    sendToInspector,
+    historyLoad
   } from '../stores.js';
 
   let sidebarConnId = null;
+  let consumedHistory = null;
+
+  $: if ($historyLoad && $historyLoad.kind === 'sql' && $historyLoad.at !== consumedHistory) {
+    consumedHistory = $historyLoad.at;
+    openFromHistory($historyLoad.entry);
+  }
+
+  async function openFromHistory(entry) {
+    const connId =
+      ($connections.find((c) => c.id === entry.connection_id) || {}).id ||
+      sidebarConnId ||
+      $connections[0]?.id;
+    if (!connId) return;
+    const t = await newSqlTab(connId, entry.sql_text);
+    touchSqlTab(t.id, { title: 'History', dirty: false });
+    if (entry.result_json) {
+      try {
+        touchSqlTab(t.id, { result: JSON.parse(entry.result_json) });
+      } catch {}
+    } else if (entry.error) {
+      touchSqlTab(t.id, { error: entry.error });
+    }
+    persistSqlTab(t.id, true);
+  }
   let modal = null; // null | {existing}
   let splitPct = 55;
   let dragging = false;

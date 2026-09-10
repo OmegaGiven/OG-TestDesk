@@ -7,6 +7,8 @@
   import Toasts from '../lib/components/Toasts.svelte';
   import SettingsModal from '../lib/components/SettingsModal.svelte';
   import HelpModal from '../lib/components/HelpModal.svelte';
+  import ActivityModal from '../lib/components/ActivityModal.svelte';
+  import { appearance, applyAppearance } from '../lib/stores.js';
   import SqlView from '../lib/sql/SqlView.svelte';
   import RequestsView from '../lib/requests/RequestsView.svelte';
   import InspectorView from '../lib/inspector/InspectorView.svelte';
@@ -21,6 +23,7 @@
 
   let settingsOpen = false;
   let helpOpen = false;
+  let activityOpen = false;
   const THEMES = ['system', 'light', 'dark'];
   function cycleTheme() {
     theme.update((t) => THEMES[(THEMES.indexOf(t) + 1) % THEMES.length]);
@@ -34,6 +37,7 @@
   }
 
   onMount(async () => {
+    applyAppearance($appearance);
     await reloadConnections();
     await Promise.all([reloadTabs(), reloadRequests()]);
 
@@ -42,6 +46,7 @@
     const q = new URLSearchParams(location.search);
     if (q.has('settings')) settingsOpen = true;
     if (q.has('help')) helpOpen = true;
+    if (q.has('activity')) activityOpen = true;
     if (q.has('tool')) activeTool.set(q.get('tool'));
     if (q.has('sqltab')) {
       const t = get(sqlTabs).find((x) => x.title === q.get('sqltab'));
@@ -81,8 +86,10 @@
 <svelte:window on:keydown={onKey} />
 
 <div class="app">
+ <div class="shell">
   <div class="chrome">
     <TopNav />
+    <button class="chrome-btn" on:click={() => (activityOpen = true)} title="History & schedules">⏱</button>
     <button class="chrome-btn" on:click={() => (helpOpen = true)} title="Help">?</button>
     <button class="chrome-btn" on:click={() => (settingsOpen = true)} title="Settings">⚙</button>
     <button class="chrome-btn" on:click={cycleTheme} title="Theme: {$theme}">
@@ -95,6 +102,7 @@
     <div class="view" class:show={$activeTool === 'requests'}><RequestsView /></div>
     <div class="view" class:show={$activeTool === 'inspector'}><InspectorView /></div>
   </main>
+ </div>
 </div>
 
 {#if settingsOpen}
@@ -103,15 +111,30 @@
 {#if helpOpen}
   <HelpModal on:close={() => (helpOpen = false)} />
 {/if}
+{#if activityOpen}
+  <ActivityModal on:close={() => (activityOpen = false)} />
+{/if}
 
 <Toasts />
 
 <style>
   .app {
-    display: flex;
-    flex-direction: column;
     height: 100vh;
     overflow: hidden;
+    padding: var(--app-gutter, 0);
+    background: var(--surface-0);
+  }
+  .shell {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    overflow: hidden;
+    border-radius: var(--radius);
+    border: 1px solid var(--border);
+  }
+  :global(:root:not([data-gutter])) .shell {
+    border-radius: 0;
+    border: none;
   }
   .chrome {
     display: flex;

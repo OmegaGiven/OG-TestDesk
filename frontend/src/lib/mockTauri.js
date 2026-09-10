@@ -205,7 +205,99 @@ if (typeof window !== 'undefined' && !window.__TAURI_INTERNALS__) {
     tabs_list_all: () => ok(tabs),
     tab_save: ({ tab }) => ok({ ...tab, id: tab.id || 'tab-' + Date.now() }),
     tab_delete: () => ok(null),
-    history_recent: () => ok([]),
+    history_recent: () =>
+      ok([
+        {
+          id: 'h1',
+          connection_id: DEMO_SHOP,
+          sql_text: 'SELECT * FROM customer_revenue LIMIT 15;',
+          duration_ms: 3,
+          row_count: 15,
+          success: true,
+          error: null,
+          result_json: JSON.stringify(topCustomers),
+          ran_at: Math.floor(Date.now() / 1000) - 120
+        },
+        {
+          id: 'h2',
+          connection_id: DEMO_SHOP,
+          sql_text: "SELECT status, COUNT(*) FROM orders GROUP BY status;",
+          duration_ms: 2,
+          row_count: 5,
+          success: true,
+          error: null,
+          result_json: JSON.stringify(ordersByStatus),
+          ran_at: Math.floor(Date.now() / 1000) - 900
+        },
+        {
+          id: 'h3',
+          connection_id: DEMO_SHOP,
+          sql_text: 'SELECT * FROM nonexistent;',
+          duration_ms: null,
+          row_count: null,
+          success: false,
+          error: 'no such table: nonexistent',
+          result_json: null,
+          ran_at: Math.floor(Date.now() / 1000) - 3600
+        }
+      ]),
+    history_request_recent: () =>
+      ok([
+        {
+          id: 'rh1',
+          saved_request_id: 'r1',
+          name: 'List posts',
+          method: 'GET',
+          url: 'https://jsonplaceholder.typicode.com/posts',
+          headers_json: '{}',
+          body: null,
+          status: 200,
+          duration_ms: 96,
+          size_bytes: 27520,
+          success: true,
+          error: null,
+          response_json: JSON.stringify({
+            status: 200,
+            status_text: 'OK',
+            headers: [['content-type', 'application/json; charset=utf-8']],
+            body: JSON.stringify([{ id: 1, title: 'sunt aut facere' }], null, 2),
+            content_type: 'application/json; charset=utf-8',
+            is_json: true,
+            duration_ms: 96,
+            size_bytes: 27520
+          }),
+          sent_at: Math.floor(Date.now() / 1000) - 240
+        },
+        {
+          id: 'rh2',
+          saved_request_id: 'r3',
+          name: 'Create post',
+          method: 'POST',
+          url: 'https://jsonplaceholder.typicode.com/posts',
+          headers_json: '{"Content-Type":"application/json"}',
+          body: '{ "title": "hello" }',
+          status: 201,
+          duration_ms: 128,
+          size_bytes: 292,
+          success: true,
+          error: null,
+          response_json: null,
+          sent_at: Math.floor(Date.now() / 1000) - 1500
+        }
+      ]),
+    schedules_list: () => ok(mockSchedules),
+    schedule_save: ({ schedule }) => {
+      const s = { ...schedule, id: schedule.id || 'sch-' + Date.now(), next_run: Math.floor(Date.now() / 1000) + 3600 };
+      const i = mockSchedules.findIndex((x) => x.id === s.id);
+      if (i >= 0) mockSchedules[i] = s;
+      else mockSchedules = [...mockSchedules, s];
+      return ok(s);
+    },
+    schedule_delete: ({ id }) => {
+      mockSchedules = mockSchedules.filter((s) => s.id !== id);
+      return ok(null);
+    },
+    schedule_run_now: () => ok('ok · 15 rows'),
     saved_queries_list: () => ok([]),
     saved_query_save: ({ query }) => ok({ ...query, id: query.id || 'sq-' + Date.now() }),
     saved_query_delete: () => ok(null),
@@ -277,6 +369,44 @@ if (typeof window !== 'undefined' && !window.__TAURI_INTERNALS__) {
   };
   let mcpCfg = null;
   let mcpAcls = { [DEMO_SHOP]: { exposed: true, allow_writes: false } };
+  let mockSchedules = [
+    {
+      id: 'sch-1',
+      name: 'Hourly revenue snapshot',
+      kind: 'sql',
+      connection_id: DEMO_SHOP,
+      sql_text: 'SELECT status, COUNT(*) FROM orders GROUP BY status;',
+      saved_request_id: null,
+      request_method: null,
+      request_url: null,
+      request_headers_json: null,
+      request_body: null,
+      schedule_expr: 'every:3600',
+      enabled: true,
+      last_run: Math.floor(Date.now() / 1000) - 1200,
+      last_status: 'ok · 5 rows',
+      next_run: Math.floor(Date.now() / 1000) + 2400,
+      created_at: 0
+    },
+    {
+      id: 'sch-2',
+      name: 'Morning health check',
+      kind: 'request',
+      connection_id: null,
+      sql_text: null,
+      saved_request_id: 'r4',
+      request_method: null,
+      request_url: null,
+      request_headers_json: null,
+      request_body: null,
+      schedule_expr: '0 9 * * *',
+      enabled: false,
+      last_run: null,
+      last_status: null,
+      next_run: null,
+      created_at: 0
+    }
+  ];
 
   window.__TAURI_INTERNALS__ = {
     transformCallback: (cb) => cb,
