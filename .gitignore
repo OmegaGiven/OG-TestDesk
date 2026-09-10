@@ -1,0 +1,17 @@
+# Rust
+/target/
+core/target/
+src-tauri/target/
+Cargo.lock
+
+# Node / SvelteKit
+frontend/node_modules/
+frontend/.svelte-kit/
+frontend/build/
+
+# Tauri
+src-tauri/gen/
+dist/
+
+# OS
+.DS_Store

@@ -1,0 +1,56 @@
+:root {
+  --surface-0: #f1efe8;
+  --surface-1: #f9f8f4;
+  --surface-2: #ffffff;
+  --text-primary: #1a1a18;
+  --text-secondary: #5f5e5a;
+  --text-muted: #888780;
+  --border: rgba(0, 0, 0, 0.1);
+  --border-strong: rgba(0, 0, 0, 0.18);
+  --radius: 8px;
+  --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+
+  /* Tool hues — SQL / Requests / Inspector. Reuse everywhere that
+     tool's content shows up (buttons, badges, selection state). */
+  --tool-sql-tint: #e6f1fb;
+  --tool-sql-text: #0c447c;
+  --tool-requests-tint: #eaf3de;
+  --tool-requests-text: #27500a;
+  --tool-inspector-tint: #eeedfe;
+  --tool-inspector-text: #3c3489;
+
+  /* Connection accent dots — pick freely per saved connection. */
+  --conn-red: #e24b4a;
+  --conn-amber: #ef9f27;
+  --conn-teal: #1d9e75;
+  --conn-pink: #d4537e;
+}
+
+[data-theme='dark'] {
+  --surface-0: #17171a;
+  --surface-1: #1e1e22;
+  --surface-2: #26262b;
+  --text-primary: #f1efe8;
+  --text-secondary: #b4b2a9;
+  --text-muted: #888780;
+  --border: rgba(255, 255, 255, 0.1);
+  --border-strong: rgba(255, 255, 255, 0.18);
+
+  --tool-sql-tint: #0c447c33;
+  --tool-sql-text: #85b7eb;
+  --tool-requests-tint: #27500a33;
+  --tool-requests-text: #97c459;
+  --tool-inspector-tint: #3c348933;
+  --tool-inspector-text: #afa9ec;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: var(--surface-0);
+  color: var(--text-primary);
+  font-family: var(--font-sans);
+}
