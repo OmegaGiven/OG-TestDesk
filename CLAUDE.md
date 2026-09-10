@@ -41,25 +41,23 @@ if you see them anywhere — they're not the direction.
   `SecretsStore` (OS keychain) keyed by `connection.id`. The metadata DB
   only ever stores the id reference.
 
-## Current state (what's real vs stubbed)
+## Current state (MVP built — all three modules functional end to end)
 
 | Area | Status |
 |---|---|
-| `core::drivers` | Trait + 3 impls scaffolded, every method is `todo!()`. Nothing runs a real query yet. |
-| `core::storage::metadata` | Schema is real and complete (see file for all tables). `open()` works. No query helpers written yet — callers use `pool()` directly. |
-| `core::storage::secrets` | Fully implemented, should work as-is. |
-| `core::requests` | `send()` and `apply_environment()` fully implemented. Untested against a real server. |
-| `src-tauri` commands | All 4 commands exist but `list_connections`/`save_connection` are no-ops (don't touch the DB yet). `run_query`/`send_request` call into `core` correctly but will hit `todo!()` for query. |
-| `frontend` | Only `TopNav.svelte` exists, with hardcoded placeholder data in `+page.svelte`. No SQL editor, no data grid, no request builder, no Inspector UI at all. |
+| `core::drivers` | Trait + Postgres/MySQL/SQLite impls all real: `test_connection` (returns `ServerInfo`), `list_schemas`, `list_columns`, `run_query` with dynamic row→JSON decoding (`drivers/decode.rs`). Pool cache in `drivers/pool.rs`. Non-SELECT statements report `rows_affected`. |
+| `core::storage::metadata` | Full CRUD: connections (+reorder), query_tabs, query_history (auto-trimmed to 500), saved_queries, request_collections, saved_requests, environments, app_state. Models defined in the same file. |
+| `core::storage::secrets` | Unchanged, works. Passwords keyed by `connection.id`. |
+| `core::requests` | `send()` returns status text, header list, content-type + `is_json` sniff, timing. `apply_environment()` substitutes `{{var}}` in url/headers/body. |
+| `src-tauri` | ~27 commands wrapping all of the above (`main.rs`). `query_run` records history. `request_send` applies the active environment. IDs minted server-side (uuid v4). |
+| `frontend` | Real app. `stores.js` holds all state; `api.js` is the single command surface. **SQL**: connection manager modal w/ test + accent picker, schema tree (lazy columns), CodeMirror 6 editor (⌘↵ run, ⌘S save, run-selection), sortable result grid, CSV/JSON export, → Inspector. **Requests**: collections sidebar, method/url bar, Params⇄URL sync, headers, JSON body w/ beautify, response pane (status/time/size, body + headers tabs), environments modal. **Inspector**: Tree / Table / Summary modes, recursive `JsonNode`, search w/ match count + auto-expand, right-side detail panel (path/type/size/pretty + copy), "Paste JSON" standalone mode. Fed by SQL results and HTTP responses via `sendToInspector`. Theme toggle (system/light/dark), toasts, ⌘1/2/3 tool switch. |
 
-## Suggested first task
+## Build / run
 
-Pick ONE, don't try to scope the whole app:
+- `cd frontend && pnpm install` then `cargo tauri dev` (cargo-tauri v2 + pnpm required — both installed).
+- `pnpm build` in `frontend/` produces `build/`; `cargo check` passes for the whole workspace.
+- Icons regenerated as RGBA (scaffold's `icon.png` was palette-mode and broke `generate_context!`).
 
-1. **`SqliteDriverImpl::run_query`** — simplest driver (no network), good
-   first win, unblocks testing the whole pipe end-to-end (Tauri command →
-   core → sqlx → back to frontend).
-2. **Wire `list_connections`/`save_connection` to the metadata DB** —
-   needed before (1) is useful from the UI.
+## What's left
 
-Either is a reasonable starting prompt: "implement SqliteDriverImpl::run_query using sqlx, map rows to QueryResult, keep types matching core/src/drivers/mod.rs exactly."
+See `docs/next-steps.md` — polish (result virtualization, saved-query/history panels, native modals instead of `prompt()`), driver edge cases (PG arrays/composites), and Requests stretch (auth helpers, curl import).

@@ -1,79 +1,82 @@
 <script>
-  // tools: [{ id, label, tint, text, connections?: [{ id, label, color, tabs: [{id,label}] }], tabs?: [{id,label}] }]
-  export let tools = [];
-  export let activeToolId = tools[0]?.id;
-  export let activeTabId = null;
+  import {
+    connections,
+    sqlTabs,
+    activeSqlTabId,
+    activeTool,
+    newSqlTab,
+    closeSqlTab,
+    persistSqlTab
+  } from '../stores.js';
+  import { api } from '../api.js';
 
-  import { createEventDispatcher } from 'svelte';
-  const dispatch = createEventDispatcher();
+  const TOOLS = [
+    { id: 'sql', label: 'SQL', tint: 'var(--tool-sql-tint)', text: 'var(--tool-sql-text)' },
+    { id: 'requests', label: 'Requests', tint: 'var(--tool-requests-tint)', text: 'var(--tool-requests-text)' },
+    { id: 'inspector', label: 'Inspector', tint: 'var(--tool-inspector-tint)', text: 'var(--tool-inspector-text)' }
+  ];
 
-  function selectTool(toolId) {
-    activeToolId = toolId;
-    dispatch('selectTool', { toolId });
+  $: tabsByConn = (connId) =>
+    $sqlTabs.filter((t) => t.connection_id === connId).sort((a, b) => a.position - b.position);
+
+  function selectTab(id) {
+    activeTool.set('sql');
+    activeSqlTabId.set(id);
+    persistSqlTab(id, true);
   }
-
-  function selectTab(toolId, tabId) {
-    activeToolId = toolId;
-    activeTabId = tabId;
-    dispatch('selectTab', { toolId, tabId });
+  async function addTab(connId) {
+    activeTool.set('sql');
+    try {
+      await newSqlTab(connId);
+    } catch (e) {}
   }
-
-  function addTab(toolId, connectionId = null) {
-    dispatch('addTab', { toolId, connectionId });
-  }
-
-  function closeTab(toolId, tabId, event) {
-    event.stopPropagation();
-    dispatch('closeTab', { toolId, tabId });
+  function close(id, e) {
+    e.stopPropagation();
+    closeSqlTab(id);
   }
 </script>
 
 <nav class="topnav">
-  {#each tools as tool, i}
-    {#if i > 0}<div class="divider" />{/if}
-
-    <div
-      class="tool-group"
-      class:active={activeToolId === tool.id}
-      style="--tint: {tool.tint}; --tint-text: {tool.text};"
-    >
-      <button class="tool-label" on:click={() => selectTool(tool.id)}>
-        {tool.label}
-      </button>
-
-      {#if tool.connections}
-        {#each tool.connections as conn}
-          <div class="conn-group">
-            <span class="conn-dot" style="background: {conn.color}" aria-hidden="true" />
-            <button class="conn-label" on:click={() => selectTool(tool.id)}>
-              {conn.label}
-            </button>
-            {#each conn.tabs as tab}
-              <button
-                class="tab"
-                class:active={activeTabId === tab.id}
-                style="--dot: {conn.color}"
-                on:click={() => selectTab(tool.id, tab.id)}
-              >
-                {tab.label}
-                <span class="close" on:click={(e) => closeTab(tool.id, tab.id, e)}>×</span>
-              </button>
-            {/each}
-          </div>
-        {/each}
-        <button class="add-btn" on:click={() => addTab(tool.id)} aria-label="Add connection">+</button>
-      {:else if tool.tabs}
-        {#each tool.tabs as tab}
+  <!-- SQL tool: connection groups with tabs -->
+  <div
+    class="tool"
+    class:active={$activeTool === 'sql'}
+    style="--tint: var(--tool-sql-tint); --tint-text: var(--tool-sql-text);"
+  >
+    <button class="tool-label" on:click={() => activeTool.set('sql')}>SQL</button>
+    {#each $connections as conn (conn.id)}
+      <div class="conn">
+        <span class="dot" style="background: {conn.color || 'var(--conn-slate)'}" />
+        <button class="conn-label" on:click={() => activeTool.set('sql')}>{conn.nickname}</button>
+        {#each tabsByConn(conn.id) as tab (tab.id)}
           <button
             class="tab"
-            class:active={activeTabId === tab.id}
-            on:click={() => selectTab(tool.id, tab.id)}
+            class:active={$activeSqlTabId === tab.id && $activeTool === 'sql'}
+            style="--dot: {conn.color || 'var(--conn-slate)'}"
+            on:click={() => selectTab(tab.id)}
+            title={tab.title}
           >
-            {tab.label}
-            <span class="close" on:click={(e) => closeTab(tool.id, tab.id, e)}>×</span>
+            {tab.dirty ? '•' : ''}{tab.title}
+            <span class="x" on:click={(e) => close(tab.id, e)} role="button" tabindex="-1">×</span>
           </button>
         {/each}
-      {/if}
+        <button class="add" title="New query" on:click={() => addTab(conn.id)}>+</button>
+      </div>
+    {/each}
+    {#if $connections.length === 0}
+      <span class="hint">no connections</span>
+    {/if}
+  </div>
+
+  <div class="divider" />
+
+  {#each TOOLS.slice(1) as tool}
+    <div
+      class="tool flat"
+      class:active={$activeTool === tool.id}
+      style="--tint: {tool.tint}; --tint-text: {tool.text};"
+    >
+      <button class="tool-label" on:click={() => activeTool.set(tool.id)}>{tool.label}</button>
     </div>
   {/each}
 </nav>
@@ -83,110 +86,111 @@
     display: flex;
     align-items: center;
     gap: 6px;
-    padding: 10px 12px;
+    padding: 8px 10px;
     overflow-x: auto;
     white-space: nowrap;
     background: var(--surface-1);
-    border-bottom: 0.5px solid var(--border);
+    border-bottom: 1px solid var(--border);
+    flex-shrink: 0;
+    -webkit-app-region: drag;
   }
-
+  .topnav button {
+    -webkit-app-region: no-drag;
+  }
   .divider {
-    width: 0.5px;
+    width: 1px;
     height: 20px;
-    background: var(--border);
+    background: var(--border-strong);
     margin: 0 4px;
     flex-shrink: 0;
   }
-
-  .tool-group {
+  .tool {
     display: flex;
     align-items: center;
-    gap: 6px;
+    gap: 5px;
     background: var(--tint);
-    border-radius: 8px;
+    border-radius: var(--radius);
     padding: 4px;
   }
-
-  .tool-group.active {
+  .tool.active {
     box-shadow: 0 0 0 1.5px var(--tint-text) inset;
   }
-
   .tool-label {
     font-size: 12px;
-    font-weight: 500;
+    font-weight: 600;
     color: var(--tint-text);
     padding: 4px 8px;
     background: none;
     border: none;
     cursor: pointer;
   }
-
-  .conn-group {
+  .conn {
     display: flex;
     align-items: center;
-    gap: 4px;
+    gap: 3px;
     background: var(--surface-2);
     border-radius: 6px;
     padding: 3px;
   }
-
-  .conn-dot {
-    width: 6px;
-    height: 6px;
+  .dot {
+    width: 7px;
+    height: 7px;
     border-radius: 50%;
-    margin-left: 4px;
+    margin-left: 3px;
     flex-shrink: 0;
   }
-
   .conn-label {
-    font-size: 12px;
+    font-size: 11px;
+    font-weight: 600;
     color: var(--text-secondary);
-    padding: 5px 6px;
+    padding: 4px 5px;
     background: none;
     border: none;
     cursor: pointer;
   }
-
   .tab {
     display: flex;
     align-items: center;
-    gap: 6px;
-    font-size: 12px;
+    gap: 5px;
+    font-size: 11px;
     color: var(--text-muted);
-    padding: 5px 8px;
+    padding: 4px 7px;
     border-radius: 5px;
     background: none;
     border: none;
     cursor: pointer;
+    max-width: 160px;
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
-
   .tab.active {
-    background: color-mix(in srgb, var(--dot, var(--text-accent)) 15%, transparent);
+    background: color-mix(in srgb, var(--dot, var(--text-secondary)) 20%, transparent);
     color: var(--text-primary);
     font-weight: 500;
   }
-
-  .close {
-    font-size: 11px;
-    opacity: 0.6;
+  .x {
+    font-size: 12px;
+    opacity: 0.55;
   }
-
-  .close:hover {
+  .x:hover {
     opacity: 1;
   }
-
-  .add-btn {
-    width: 24px;
-    height: 24px;
-    border-radius: 6px;
+  .add {
+    width: 20px;
+    height: 20px;
+    border-radius: 5px;
     background: none;
     border: none;
     color: var(--text-secondary);
     cursor: pointer;
     flex-shrink: 0;
   }
-
-  .add-btn:hover {
-    background: var(--surface-2);
+  .add:hover {
+    background: var(--surface-3);
+  }
+  .hint {
+    font-size: 11px;
+    color: var(--text-muted);
+    padding: 0 6px;
   }
 </style>

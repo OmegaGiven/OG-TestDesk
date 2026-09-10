@@ -2,13 +2,17 @@
   --surface-0: #f1efe8;
   --surface-1: #f9f8f4;
   --surface-2: #ffffff;
+  --surface-3: #ecebe3;
   --text-primary: #1a1a18;
   --text-secondary: #5f5e5a;
   --text-muted: #888780;
   --border: rgba(0, 0, 0, 0.1);
   --border-strong: rgba(0, 0, 0, 0.18);
   --radius: 8px;
-  --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+  --radius-sm: 5px;
+  --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  --font-mono: 'JetBrains Mono', 'SF Mono', 'Menlo', 'Consolas', monospace;
+  --shadow-pop: 0 8px 30px rgba(0, 0, 0, 0.14), 0 2px 8px rgba(0, 0, 0, 0.08);
 
   /* Tool hues — SQL / Requests / Inspector. Reuse everywhere that
      tool's content shows up (buttons, badges, selection state). */
@@ -24,28 +28,76 @@
   --conn-amber: #ef9f27;
   --conn-teal: #1d9e75;
   --conn-pink: #d4537e;
+  --conn-blue: #3b82c4;
+  --conn-purple: #8b5cf6;
+  --conn-slate: #64748b;
+  --conn-lime: #84a417;
+
+  /* HTTP method colors (Requests module — greens/neutrals family kept
+     distinct from connection dots). */
+  --m-get: #1d9e75;
+  --m-post: #d99114;
+  --m-put: #3b82c4;
+  --m-patch: #8b5cf6;
+  --m-delete: #e24b4a;
+  --m-head: #64748b;
+  --m-options: #64748b;
+
+  --ok: #1d9e75;
+  --warn: #d99114;
+  --danger: #e24b4a;
+
+  /* JSON syntax */
+  --j-key: #7c3aed;
+  --j-string: #167a4a;
+  --j-number: #b45309;
+  --j-bool: #b91c60;
+  --j-null: #888780;
+}
+
+:root[data-theme='dark'],
+:root:not([data-theme='light']) {
 }
 
 [data-theme='dark'] {
   --surface-0: #17171a;
   --surface-1: #1e1e22;
   --surface-2: #26262b;
+  --surface-3: #2f2f35;
   --text-primary: #f1efe8;
   --text-secondary: #b4b2a9;
   --text-muted: #888780;
   --border: rgba(255, 255, 255, 0.1);
-  --border-strong: rgba(255, 255, 255, 0.18);
+  --border-strong: rgba(255, 255, 255, 0.2);
+  --shadow-pop: 0 8px 30px rgba(0, 0, 0, 0.5), 0 2px 8px rgba(0, 0, 0, 0.35);
 
-  --tool-sql-tint: #0c447c33;
+  --tool-sql-tint: #0c447c40;
   --tool-sql-text: #85b7eb;
-  --tool-requests-tint: #27500a33;
+  --tool-requests-tint: #27500a44;
   --tool-requests-text: #97c459;
-  --tool-inspector-tint: #3c348933;
+  --tool-inspector-tint: #3c348944;
   --tool-inspector-text: #afa9ec;
+
+  --m-get: #3ec296;
+  --m-post: #e6ac3f;
+  --m-put: #5ea3e0;
+  --m-patch: #a888f5;
+  --m-delete: #ef6b6a;
+
+  --j-key: #b794f6;
+  --j-string: #6bcf9a;
+  --j-number: #e0a458;
+  --j-bool: #ec6f9e;
+  --j-null: #888780;
 }
 
 * {
   box-sizing: border-box;
+}
+
+html,
+body {
+  height: 100%;
 }
 
 body {
@@ -53,4 +105,25 @@ body {
   background: var(--surface-0);
   color: var(--text-primary);
   font-family: var(--font-sans);
+  font-size: 13px;
+  -webkit-font-smoothing: antialiased;
+  overflow: hidden;
+}
+
+button {
+  font-family: inherit;
+}
+
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--border-strong);
+  border-radius: 5px;
+  border: 2px solid transparent;
+  background-clip: content-box;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
 }

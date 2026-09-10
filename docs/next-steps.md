@@ -1,48 +1,55 @@
-# Next steps, roughly in order
+# Next steps
 
-Not a rigid sequence — but later items generally depend on earlier ones
-being at least stubbed out.
+MVP is built (see the status table in `../CLAUDE.md`). Remaining polish
+and stretch items, roughly in priority order.
 
-## 1. Get one query executing end-to-end
-- [ ] `MetadataStore`: add query helpers (insert/select connections,
-      query_tabs) — currently only `pool()` is exposed, commands have
-      nothing to call.
-- [ ] Wire `list_connections` / `save_connection` in `src-tauri/src/main.rs`
-      to actually hit the metadata DB.
-- [ ] Implement `SqliteDriverImpl::run_query` (see CLAUDE.md — suggested
-      first task, no network dependency, fastest path to a working
-      pipe).
-- [ ] Frontend: replace `+page.svelte`'s hardcoded `tools` array with a
-      real `invoke('list_connections')` call on mount.
+## Near-term polish
 
-## 2. SQL module UI
-- [ ] Query editor (syntax highlight — check what's available for
-      Svelte, e.g. CodeMirror 6 has a Svelte-friendly API).
-- [ ] Results grid (sortable/filterable — don't hand-roll, look at
-      existing Svelte table components before building one).
-- [ ] Schema browser sidebar (tables/views tree, feeds `list_schemas`).
+- [ ] Result grid virtualization — currently renders every row into the
+      DOM. Fine to ~10k rows; add windowing (e.g. manual slice on scroll)
+      for large result sets.
+- [ ] Connection reorder UI — backend `connections_reorder` exists, no
+      drag handle in the sidebar yet.
+- [ ] Saved-query browser — `saved_query_save` is wired (toolbar "Save"),
+      but there's no panel to list / open / delete saved queries.
+- [ ] Query history panel — `history_recent` command exists and every run
+      is recorded; surface it (sidebar tab or ⌘R palette).
+- [ ] Move `prompt()` / `confirm()` calls to real modals (they work but
+      look non-native).
+- [ ] Request "Params" tab: decode/encode edge cases (array params,
+      existing fragments).
 
-## 3. Postgres + MySQL drivers
-- [ ] Same shape as SQLite, now with real network connections + auth.
-- [ ] Pull password via `SecretsStore::get` before connecting (already
-      wired in the `run_query` Tauri command, just needs the driver impl
-      to do something with it).
+## Drivers
 
-## 4. Requests module
-- [ ] Request builder UI (method/url/headers/body) — `HttpRequest`
-      type already exists in `core::requests`.
-- [ ] Wire to `send_request` command (already implemented, untested).
-- [ ] Collections/folders — `request_collections` + `saved_requests`
-      tables already exist in the metadata schema, no UI yet.
+- [ ] `NUMERIC`/`DECIMAL` precision: currently parsed to JS number when it
+      round-trips, else kept as string. Consider always-string for money.
+- [ ] Postgres arrays / composite types fall back to `<TYPE>` — decode the
+      common ones (`_int4`, `_text`, `_uuid`).
+- [ ] Connection pool eviction on connection edit/delete (pool cache in
+      `core/src/drivers/pool.rs` keys on the conn string, so a changed
+      password makes a new pool but the old one lingers until process
+      exit — acceptable, revisit if it matters).
+- [ ] `EXPLAIN`/`ANALYZE` result rendering (plain text panel).
 
-## 5. Inspector module
-- [ ] Full spec in `docs/design-decisions.md` — build the shared tree
-      component first, wire SQL results in, then HTTP responses.
+## Requests
 
-## 6. Polish / cross-cutting
-- [ ] Connection color picker (see design-decisions.md — must be
-      user-assignable, not auto-rotated).
-- [ ] Tab persistence across app restarts (query_tabs table has
-      `position`/`is_active` columns for this, unused so far).
-- [ ] Error handling / toasts — nothing currently surfaces `Result::Err`
-      to the user anywhere in the frontend.
+- [ ] Response body: syntax highlight for XML/HTML, image preview.
+- [ ] Cookie jar / auth helpers (Bearer, Basic, API key) as a dedicated
+      tab instead of manual headers.
+- [ ] Import from `curl` / Postman collection JSON.
+- [ ] Per-request environment override + variable autocomplete.
+
+## Inspector
+
+- [ ] Search prev/next navigation (match count is shown; no jump yet).
+- [ ] Tree virtualization for very large payloads.
+- [ ] "Diff two payloads" mode.
+
+## Cross-cutting
+
+- [ ] `cargo tauri build` bundle: generate `icon.icns` + proper
+      multi-size `icon.ico` (the `magick` one-liner in the build notes),
+      set up updater endpoint or drop `tauri-plugin-updater`.
+- [ ] Persist last active tool + window size via `app_state`.
+- [ ] Tests: `core::drivers` against disposable Docker DBs; `stmt_returns_rows`
+      unit tests.

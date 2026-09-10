@@ -6,7 +6,12 @@ pub mod drivers;
 pub mod requests;
 pub mod storage;
 
-pub use drivers::{ConnConfig, DbDriver, DbKind, QueryResult, Schema};
-pub use requests::{HttpRequest, HttpResponse};
-pub use storage::metadata::MetadataStore;
+pub use drivers::{
+    driver_for, Column, ConnConfig, DbDriver, DbKind, QueryColumn, QueryResult, Relation,
+    RelationKind, Schema, ServerInfo,
+};
+pub use requests::{apply_environment, HttpRequest, HttpResponse};
+pub use storage::metadata::{
+    Environment, HistoryEntry, MetadataStore, QueryTab, RequestCollection, SavedQuery, SavedRequest,
+};
 pub use storage::secrets::SecretsStore;

@@ -1,0 +1,682 @@
+<script>
+  import CodeEditor from '../components/CodeEditor.svelte';
+  import EnvModal from './EnvModal.svelte';
+  import { api } from '../api.js';
+  import {
+    requestCollections,
+    savedRequests,
+    activeEnvironment,
+    reloadRequests,
+    toast,
+    toastError,
+    sendToInspector
+  } from '../stores.js';
+
+  const METHODS = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'HEAD', 'OPTIONS'];
+
+  let draft = blank();
+  let tab = 'params'; // params | headers | body
+  let response = null;
+  let sending = false;
+  let error = null;
+  let respTab = 'body'; // body | headers
+  let envModal = false;
+  let splitPct = 50;
+  let dragging = false;
+
+  function blank() {
+    return {
+      id: '',
+      name: 'Untitled request',
+      method: 'GET',
+      url: '',
+      headers: [{ k: '', v: '', on: true }],
+      params: [{ k: '', v: '', on: true }],
+      body: '',
+      collection_id: null
+    };
+  }
+
+  $: methodColor = `var(--m-${draft.method.toLowerCase()})`;
+
+  // params <-> url sync
+  let syncing = false;
+  function paramsToUrl() {
+    if (syncing) return;
+    syncing = true;
+    const base = draft.url.split('?')[0];
+    const qs = draft.params
+      .filter((p) => p.on && p.k)
+      .map((p) => `${encodeURIComponent(p.k)}=${encodeURIComponent(p.v)}`)
+      .join('&');
+    draft.url = qs ? `${base}?${qs}` : base;
+    syncing = false;
+  }
+  function urlToParams() {
+    if (syncing) return;
+    syncing = true;
+    const q = draft.url.split('?')[1] || '';
+    const parsed = q
+      .split('&')
+      .filter(Boolean)
+      .map((pair) => {
+        const [k, v = ''] = pair.split('=');
+        return { k: decodeURIComponent(k), v: decodeURIComponent(v), on: true };
+      });
+    draft.params = [...parsed, { k: '', v: '', on: true }];
+    syncing = false;
+  }
+
+  function ensureTrailingRow(arr) {
+    if (!arr.length || arr[arr.length - 1].k !== '' || arr[arr.length - 1].v !== '') {
+      arr.push({ k: '', v: '', on: true });
+    }
+    return arr;
+  }
+  function onHeaderInput() {
+    draft.headers = ensureTrailingRow([...draft.headers]);
+  }
+  function onParamInput() {
+    draft.params = ensureTrailingRow([...draft.params]);
+    paramsToUrl();
+  }
+
+  async function send() {
+    if (!draft.url.trim()) return;
+    sending = true;
+    error = null;
+    response = null;
+    const headers = {};
+    for (const h of draft.headers) if (h.on && h.k.trim()) headers[h.k.trim()] = h.v;
+    const req = {
+      method: draft.method,
+      url: draft.url.trim(),
+      headers,
+      body: ['GET', 'HEAD'].includes(draft.method) ? null : draft.body || null,
+      timeout_secs: 60
+    };
+    try {
+      response = await api.requestSend(req, true);
+      respTab = 'body';
+    } catch (e) {
+      error = String(e);
+    } finally {
+      sending = false;
+    }
+  }
+
+  function loadSaved(s) {
+    const headersObj = JSON.parse(s.headers_json || '{}');
+    draft = {
+      id: s.id,
+      name: s.name,
+      method: s.method,
+      url: s.url,
+      headers: ensureTrailingRow(
+        Object.entries(headersObj).map(([k, v]) => ({ k, v: String(v), on: true }))
+      ),
+      params: [{ k: '', v: '', on: true }],
+      body: s.body || '',
+      collection_id: s.collection_id
+    };
+    urlToParams();
+    response = null;
+    error = null;
+  }
+
+  async function save() {
+    const headers = {};
+    for (const h of draft.headers) if (h.on && h.k.trim()) headers[h.k.trim()] = h.v;
+    const name = draft.id ? draft.name : prompt('Request name:', draft.name);
+    if (!name) return;
+    try {
+      const saved = await api.savedRequestSave({
+        id: draft.id,
+        collection_id: draft.collection_id,
+        name,
+        method: draft.method,
+        url: draft.url,
+        headers_json: JSON.stringify(headers),
+        body: draft.body || null,
+        sort_order: 0,
+        created_at: 0
+      });
+      draft.id = saved.id;
+      draft.name = saved.name;
+      await reloadRequests();
+      toast('Request saved', 'success');
+    } catch (e) {
+      toastError(e);
+    }
+  }
+
+  async function delSaved(s) {
+    if (!confirm(`Delete "${s.name}"?`)) return;
+    try {
+      await api.savedRequestDelete(s.id);
+      await reloadRequests();
+      if (draft.id === s.id) draft = blank();
+    } catch (e) {
+      toastError(e);
+    }
+  }
+
+  async function newCollection() {
+    const name = prompt('Collection name:');
+    if (!name) return;
+    try {
+      await api.collectionSave({ id: '', name, parent_id: null });
+      await reloadRequests();
+    } catch (e) {
+      toastError(e);
+    }
+  }
+  async function delCollection(c) {
+    if (!confirm(`Delete collection "${c.name}" and its requests?`)) return;
+    try {
+      await api.collectionDelete(c.id);
+      await reloadRequests();
+    } catch (e) {
+      toastError(e);
+    }
+  }
+
+  $: grouped = groupRequests($requestCollections, $savedRequests);
+  function groupRequests(cols, reqs) {
+    const byCol = new Map(cols.map((c) => [c.id, { ...c, items: [] }]));
+    const loose = [];
+    for (const r of reqs) {
+      if (r.collection_id && byCol.has(r.collection_id)) byCol.get(r.collection_id).items.push(r);
+      else loose.push(r);
+    }
+    return { collections: [...byCol.values()], loose };
+  }
+
+  function bodyLang() {
+    const ct = (draft.headers.find((h) => h.k.toLowerCase() === 'content-type') || {}).v || '';
+    if (ct.includes('json') || (draft.body.trim().startsWith('{') || draft.body.trim().startsWith('[')))
+      return 'json';
+    return 'text';
+  }
+
+  function prettyBody() {
+    try {
+      draft.body = JSON.stringify(JSON.parse(draft.body), null, 2);
+    } catch (e) {
+      toastError('Body is not valid JSON');
+    }
+  }
+
+  function inspectResponse() {
+    if (!response) return;
+    let json;
+    try {
+      json = JSON.parse(response.body);
+    } catch {
+      toastError('Response is not JSON');
+      return;
+    }
+    sendToInspector('requests', `${draft.method} ${draft.url}`, json);
+  }
+
+  function statusClass(s) {
+    if (s >= 200 && s < 300) return 'ok';
+    if (s >= 300 && s < 400) return 'redir';
+    if (s >= 400) return 'err';
+    return '';
+  }
+  function fmtSize(n) {
+    return n < 1024 ? `${n} B` : n < 1048576 ? `${(n / 1024).toFixed(1)} KB` : `${(n / 1048576).toFixed(2)} MB`;
+  }
+
+  function startDrag() {
+    dragging = true;
+  }
+  function onMove(e) {
+    if (!dragging) return;
+    const host = document.querySelector('.rq-work');
+    if (!host) return;
+    const rect = host.getBoundingClientRect();
+    splitPct = Math.min(80, Math.max(20, ((e.clientY - rect.top) / rect.height) * 100));
+  }
+  function endDrag() {
+    dragging = false;
+  }
+</script>
+
+<svelte:window on:mousemove={onMove} on:mouseup={endDrag} />
+
+<div class="rq">
+  <aside class="sidebar">
+    <div class="sec-head">
+      <span>Collections</span>
+      <div>
+        <button class="btn ghost sm" on:click={newCollection}>+ Folder</button>
+        <button class="btn ghost sm" on:click={() => (draft = blank())}>+ Req</button>
+      </div>
+    </div>
+    <div class="scroll">
+      {#each grouped.collections as col (col.id)}
+        <div class="col-head">
+          <span>{col.name}</span>
+          <button class="btn ghost sm danger" on:click={() => delCollection(col)}>✕</button>
+        </div>
+        {#each col.items as s (s.id)}
+          <div class="req-item" class:active={draft.id === s.id}>
+            <button class="ri-main" on:click={() => loadSaved(s)}>
+              <span class="mm" style="color:var(--m-{s.method.toLowerCase()})">{s.method}</span>
+              <span class="rn">{s.name}</span>
+            </button>
+            <button class="del" on:click={() => delSaved(s)}>✕</button>
+          </div>
+        {/each}
+      {/each}
+      {#if grouped.loose.length}
+        <div class="col-head"><span>Ungrouped</span></div>
+        {#each grouped.loose as s (s.id)}
+          <div class="req-item" class:active={draft.id === s.id}>
+            <button class="ri-main" on:click={() => loadSaved(s)}>
+              <span class="mm" style="color:var(--m-{s.method.toLowerCase()})">{s.method}</span>
+              <span class="rn">{s.name}</span>
+            </button>
+            <button class="del" on:click={() => delSaved(s)}>✕</button>
+          </div>
+        {/each}
+      {/if}
+      {#if $savedRequests.length === 0}
+        <div class="muted" style="padding:10px">No saved requests.</div>
+      {/if}
+    </div>
+    <div class="env-bar">
+      <button class="btn ghost sm" on:click={() => (envModal = true)}>
+        Env: {$activeEnvironment?.name || 'none'} ▾
+      </button>
+    </div>
+  </aside>
+
+  <section class="main">
+    <div class="urlbar">
+      <select class="method" bind:value={draft.method} style="color:{methodColor}">
+        {#each METHODS as m}<option value={m}>{m}</option>{/each}
+      </select>
+      <input
+        class="url input mono"
+        placeholder="https://api.example.com/v1/resource  —  {'{{baseUrl}}'} allowed"
+        bind:value={draft.url}
+        on:change={urlToParams}
+        on:keydown={(e) => e.key === 'Enter' && send()}
+      />
+      <button class="btn primary send" on:click={send} disabled={sending}>
+        {sending ? '…' : 'Send'}
+      </button>
+      <button class="btn" on:click={save}>Save</button>
+    </div>
+
+    <div class="rq-work">
+      <div class="req-pane" style="height:{splitPct}%">
+        <div class="subtabs">
+          {#each ['params', 'headers', 'body'] as t}
+            <button class:active={tab === t} on:click={() => (tab = t)}>
+              {t}
+              {#if t === 'headers' && draft.headers.filter((h) => h.k).length}
+                <span class="n">{draft.headers.filter((h) => h.k).length}</span>
+              {/if}
+              {#if t === 'params' && draft.params.filter((p) => p.k).length}
+                <span class="n">{draft.params.filter((p) => p.k).length}</span>
+              {/if}
+            </button>
+          {/each}
+        </div>
+
+        {#if tab === 'params' || tab === 'headers'}
+          {@const rows = tab === 'params' ? draft.params : draft.headers}
+          <div class="kv-grid">
+            {#each rows as row}
+              <div class="kv-row">
+                <input type="checkbox" bind:checked={row.on} />
+                <input
+                  class="input mono"
+                  placeholder={tab === 'params' ? 'key' : 'Header-Name'}
+                  bind:value={row.k}
+                  on:input={tab === 'params' ? onParamInput : onHeaderInput}
+                />
+                <input
+                  class="input mono"
+                  placeholder="value"
+                  bind:value={row.v}
+                  on:input={tab === 'params' ? onParamInput : onHeaderInput}
+                />
+              </div>
+            {/each}
+          </div>
+        {:else}
+          <div class="body-tools">
+            <button class="btn ghost sm" on:click={prettyBody}>Beautify JSON</button>
+            <span class="muted">{['GET', 'HEAD'].includes(draft.method) ? 'body ignored for ' + draft.method : ''}</span>
+          </div>
+          <div class="body-editor">
+            <CodeEditor bind:value={draft.body} language={bodyLang()} on:run={send} />
+          </div>
+        {/if}
+      </div>
+
+      <div class="splitter" on:mousedown={startDrag} role="separator" tabindex="-1"></div>
+
+      <div class="resp-pane" style="height:{100 - splitPct}%">
+        {#if error}
+          <div class="resp-err">{error}</div>
+        {:else if !response}
+          <div class="empty">Send a request to see the response.</div>
+        {:else}
+          <div class="resp-head">
+            <span class="status {statusClass(response.status)}">{response.status} {response.status_text}</span>
+            <span class="meta">{response.duration_ms} ms</span>
+            <span class="meta">{fmtSize(response.size_bytes)}</span>
+            {#if response.content_type}<span class="meta ct">{response.content_type.split(';')[0]}</span>{/if}
+            <span style="flex:1" />
+            {#if response.is_json}
+              <button class="btn ghost sm" on:click={inspectResponse}>→ Inspector</button>
+            {/if}
+            <div class="subtabs sm">
+              <button class:active={respTab === 'body'} on:click={() => (respTab = 'body')}>Body</button>
+              <button class:active={respTab === 'headers'} on:click={() => (respTab = 'headers')}>
+                Headers <span class="n">{response.headers.length}</span>
+              </button>
+            </div>
+          </div>
+          {#if respTab === 'body'}
+            <div class="resp-body">
+              <CodeEditor
+                value={response.is_json ? tryPretty(response.body) : response.body}
+                language={response.is_json ? 'json' : 'text'}
+                readonly
+              />
+            </div>
+          {:else}
+            <div class="resp-headers">
+              {#each response.headers as [k, v]}
+                <div class="h-row"><span class="hk">{k}</span><span class="hv">{v}</span></div>
+              {/each}
+            </div>
+          {/if}
+        {/if}
+      </div>
+    </div>
+  </section>
+</div>
+
+{#if envModal}
+  <EnvModal on:close={() => (envModal = false)} />
+{/if}
+
+<script context="module">
+  function tryPretty(s) {
+    try {
+      return JSON.stringify(JSON.parse(s), null, 2);
+    } catch {
+      return s;
+    }
+  }
+</script>
+
+<style>
+  .rq {
+    display: flex;
+    height: 100%;
+    overflow: hidden;
+  }
+  .sidebar {
+    width: 250px;
+    flex-shrink: 0;
+    border-right: 1px solid var(--border);
+    background: var(--surface-1);
+    display: flex;
+    flex-direction: column;
+  }
+  .sec-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 8px;
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    color: var(--text-secondary);
+    border-bottom: 1px solid var(--border);
+  }
+  .scroll {
+    flex: 1;
+    overflow: auto;
+    padding: 4px 0;
+  }
+  .col-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 6px 8px 2px;
+    font-size: 10px;
+    font-weight: 700;
+    text-transform: uppercase;
+    color: var(--text-muted);
+  }
+  .req-item {
+    display: flex;
+    align-items: center;
+  }
+  .req-item.active {
+    background: color-mix(in srgb, var(--tool-requests-text) 14%, transparent);
+  }
+  .ri-main {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    background: none;
+    border: none;
+    padding: 5px 8px;
+    cursor: pointer;
+    text-align: left;
+    overflow: hidden;
+  }
+  .mm {
+    font-size: 9px;
+    font-weight: 800;
+    width: 42px;
+    flex-shrink: 0;
+  }
+  .rn {
+    font-size: 12px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .del {
+    background: none;
+    border: none;
+    color: var(--text-muted);
+    cursor: pointer;
+    padding: 4px 7px;
+    font-size: 10px;
+  }
+  .del:hover {
+    color: var(--danger);
+  }
+  .env-bar {
+    border-top: 1px solid var(--border);
+    padding: 6px;
+  }
+  .main {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+  .urlbar {
+    display: flex;
+    gap: 6px;
+    padding: 8px;
+    border-bottom: 1px solid var(--border);
+    background: var(--surface-1);
+  }
+  .method {
+    font-weight: 800;
+    font-size: 12px;
+    padding: 6px 8px;
+    border-radius: var(--radius-sm);
+    border: 1px solid var(--border-strong);
+    background: var(--surface-2);
+  }
+  .url {
+    flex: 1;
+  }
+  .send {
+    min-width: 64px;
+    justify-content: center;
+  }
+  .rq-work {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+  .req-pane,
+  .resp-pane {
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+  .resp-pane {
+    border-top: 1px solid var(--border);
+  }
+  .splitter {
+    height: 6px;
+    background: var(--surface-1);
+    cursor: row-resize;
+    flex-shrink: 0;
+  }
+  .splitter:hover {
+    background: var(--tool-requests-text);
+  }
+  .subtabs {
+    display: flex;
+    gap: 2px;
+    padding: 4px 8px 0;
+    border-bottom: 1px solid var(--border);
+  }
+  .subtabs button {
+    background: none;
+    border: none;
+    border-bottom: 2px solid transparent;
+    padding: 6px 10px;
+    font-size: 11px;
+    text-transform: capitalize;
+    color: var(--text-muted);
+    cursor: pointer;
+  }
+  .subtabs button.active {
+    color: var(--tool-requests-text);
+    border-bottom-color: var(--tool-requests-text);
+    font-weight: 600;
+  }
+  .subtabs.sm button {
+    padding: 3px 8px;
+  }
+  .n {
+    background: var(--tool-requests-tint);
+    color: var(--tool-requests-text);
+    border-radius: 8px;
+    padding: 0 5px;
+    font-size: 9px;
+  }
+  .kv-grid {
+    overflow: auto;
+    padding: 8px;
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+  }
+  .kv-row {
+    display: grid;
+    grid-template-columns: 18px 1fr 1.5fr;
+    gap: 6px;
+    align-items: center;
+  }
+  .body-tools {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 8px;
+  }
+  .body-editor,
+  .resp-body {
+    flex: 1;
+    overflow: hidden;
+  }
+  .empty,
+  .resp-err {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    height: 100%;
+    color: var(--text-muted);
+    font-size: 12px;
+    padding: 20px;
+    text-align: center;
+  }
+  .resp-err {
+    color: var(--danger);
+    font-family: var(--font-mono);
+    white-space: pre-wrap;
+    align-items: flex-start;
+    overflow: auto;
+  }
+  .resp-head {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 6px 8px;
+    border-bottom: 1px solid var(--border);
+    background: var(--surface-1);
+    flex-wrap: wrap;
+  }
+  .status {
+    font-weight: 700;
+    font-size: 12px;
+  }
+  .status.ok {
+    color: var(--ok);
+  }
+  .status.redir {
+    color: var(--warn);
+  }
+  .status.err {
+    color: var(--danger);
+  }
+  .meta {
+    font-size: 11px;
+    color: var(--text-muted);
+  }
+  .meta.ct {
+    font-family: var(--font-mono);
+  }
+  .resp-headers {
+    overflow: auto;
+    padding: 8px;
+    font-family: var(--font-mono);
+    font-size: 11px;
+  }
+  .h-row {
+    display: flex;
+    gap: 10px;
+    padding: 3px 0;
+    border-bottom: 1px solid var(--border);
+  }
+  .hk {
+    color: var(--j-key);
+    min-width: 180px;
+  }
+  .hv {
+    color: var(--text-secondary);
+    word-break: break-all;
+  }
+</style>

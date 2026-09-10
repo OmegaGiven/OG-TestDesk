@@ -1,0 +1,56 @@
+// Thin typed wrappers over the Tauri command layer. Every backend call in
+// the app goes through here so command names live in exactly one place.
+import { invoke } from '@tauri-apps/api/core';
+
+const call = (cmd, args) => invoke(cmd, args);
+
+export const api = {
+  // connections
+  connectionsList: () => call('connections_list'),
+  connectionSave: (config, password) => call('connection_save', { config, password }),
+  connectionDelete: (id) => call('connection_delete', { id }),
+  connectionsReorder: (ids) => call('connections_reorder', { ids }),
+  connectionTest: (config, password) => call('connection_test', { config, password }),
+
+  // schema
+  schemasList: (config) => call('schemas_list', { config }),
+  columnsList: (config, schema, relation) => call('columns_list', { config, schema, relation }),
+
+  // query
+  queryRun: (config, sql) => call('query_run', { config, sql }),
+
+  // tabs
+  tabsListAll: () => call('tabs_list_all'),
+  tabSave: (tab) => call('tab_save', { tab }),
+  tabDelete: (id) => call('tab_delete', { id }),
+
+  // history
+  historyRecent: (limit) => call('history_recent', { limit }),
+
+  // saved queries
+  savedQueriesList: () => call('saved_queries_list'),
+  savedQuerySave: (query) => call('saved_query_save', { query }),
+  savedQueryDelete: (id) => call('saved_query_delete', { id }),
+
+  // request collections
+  collectionsList: () => call('collections_list'),
+  collectionSave: (collection) => call('collection_save', { collection }),
+  collectionDelete: (id) => call('collection_delete', { id }),
+
+  // saved requests
+  savedRequestsList: () => call('saved_requests_list'),
+  savedRequestSave: (request) => call('saved_request_save', { request }),
+  savedRequestDelete: (id) => call('saved_request_delete', { id }),
+
+  // environments
+  environmentsList: () => call('environments_list'),
+  environmentSave: (environment) => call('environment_save', { environment }),
+  environmentDelete: (id) => call('environment_delete', { id }),
+
+  // http
+  requestSend: (request, applyEnv = true) => call('request_send', { request, applyEnv }),
+
+  // app state
+  stateGet: (key) => call('state_get', { key }),
+  stateSet: (key, value) => call('state_set', { key, value })
+};

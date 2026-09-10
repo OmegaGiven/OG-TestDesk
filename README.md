@@ -63,7 +63,9 @@ cargo tauri build
 
 | Feature   | Status                                                                 |
 | --------- | ----------------------------------------------------------------------- |
-| SQL       | Connection manager, driver trait, metadata schema scaffolded. Query execution (`run_query`) and schema browser are TODO per-driver. |
-| Requests  | Request/response types + `send()` implemented. Collections UI and saved-request persistence TODO. |
-| Inspector | Not yet started — shared tree/table/summary viewer, consumes both SQL results and HTTP responses. |
-| Top nav   | Color-coded tool/connection/tab component implemented (`TopNav.svelte`) with placeholder data. |
+| SQL       | Working. Connection manager (test + accent color), lazy schema/column browser, CodeMirror editor (⌘↵ run, run-selection, ⌘S save), sortable result grid, CSV/JSON export, per-connection query tabs persisted across restarts. Postgres / MySQL / SQLite. |
+| Requests  | Working. Collections + saved requests, method/URL bar with Params⇄URL sync, headers, JSON body (beautify), response viewer (status/time/size, body + headers), `{{variable}}` environments with an active-env switcher. |
+| Inspector | Working. Tree / Table / Summary modes, search with match count + auto-expand, detail panel (path / type / size / pretty-print + copy). Fed by SQL results and HTTP responses, or paste raw JSON. |
+| Top nav   | Color-coded tool → connection → tab, live from app state. |
+
+Post-MVP polish is tracked in `docs/next-steps.md`.
