@@ -124,8 +124,9 @@ pub fn driver_for(kind: DbKind) -> Box<dyn DbDriver> {
 }
 
 /// Heuristic: does this statement return rows? Used to decide between
-/// reporting a row set vs. an affected-row count.
-pub(crate) fn stmt_returns_rows(sql: &str) -> bool {
+/// reporting a row set vs. an affected-row count, and to enforce
+/// read-only access (see the MCP server).
+pub fn stmt_returns_rows(sql: &str) -> bool {
     let trimmed = sql.trim_start();
     // skip leading line comments / CTEs
     let head = trimmed

@@ -1,7 +1,12 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod mcp;
+
 use std::collections::HashMap;
 use std::sync::Arc;
+
+use mcp::{ConnAcl, McpConfig, McpHandle};
+use tokio::sync::Mutex as AsyncMutex;
 
 use og_testdesk_core::{
     apply_environment, drivers, requests as http_requests, Column, ConnConfig, Environment,
@@ -12,6 +17,27 @@ use tauri::{Manager, State};
 
 struct AppState {
     metadata: Arc<MetadataStore>,
+    mcp: Arc<AsyncMutex<Option<McpHandle>>>,
+}
+
+async fn load_mcp_config(meta: &MetadataStore) -> McpConfig {
+    let mut cfg: McpConfig = meta
+        .get_state("mcp_config")
+        .await
+        .ok()
+        .flatten()
+        .and_then(|raw| serde_json::from_str(&raw).ok())
+        .unwrap_or_default();
+    if cfg.token.is_empty() {
+        cfg.token = uuid::Uuid::new_v4().simple().to_string();
+    }
+    cfg
+}
+
+async fn save_mcp_config(meta: &MetadataStore, cfg: &McpConfig) -> Result<(), String> {
+    meta.set_state("mcp_config", &serde_json::to_string(cfg).map_err(err)?)
+        .await
+        .map_err(err)
 }
 
 type R<T> = Result<T, String>;
@@ -289,6 +315,101 @@ async fn request_send(
     http_requests::send(&request).await.map_err(err)
 }
 
+// ----------------------------------------------------------------------- mcp
+
+#[tauri::command]
+async fn mcp_config_get(state: State<'_, AppState>) -> R<McpConfig> {
+    Ok(load_mcp_config(&state.metadata).await)
+}
+
+#[tauri::command]
+async fn mcp_status(state: State<'_, AppState>) -> R<serde_json::Value> {
+    let guard = state.mcp.lock().await;
+    Ok(serde_json::json!({
+        "running": guard.is_some(),
+        "port": guard.as_ref().map(|h| h.port),
+    }))
+}
+
+#[tauri::command]
+async fn mcp_config_set(state: State<'_, AppState>, config: McpConfig) -> R<serde_json::Value> {
+    save_mcp_config(&state.metadata, &config).await?;
+    // restart to apply
+    {
+        let mut guard = state.mcp.lock().await;
+        if let Some(h) = guard.take() {
+            h.stop();
+        }
+    }
+    if config.enabled {
+        start_mcp(&state).await?;
+    }
+    mcp_status(state).await
+}
+
+#[tauri::command]
+async fn mcp_start(state: State<'_, AppState>) -> R<serde_json::Value> {
+    let mut cfg = load_mcp_config(&state.metadata).await;
+    cfg.enabled = true;
+    save_mcp_config(&state.metadata, &cfg).await?;
+    start_mcp(&state).await?;
+    mcp_status(state).await
+}
+
+#[tauri::command]
+async fn mcp_stop(state: State<'_, AppState>) -> R<serde_json::Value> {
+    let mut cfg = load_mcp_config(&state.metadata).await;
+    cfg.enabled = false;
+    save_mcp_config(&state.metadata, &cfg).await?;
+    if let Some(h) = state.mcp.lock().await.take() {
+        h.stop();
+    }
+    mcp_status(state).await
+}
+
+#[tauri::command]
+async fn mcp_acls_get(state: State<'_, AppState>) -> R<HashMap<String, ConnAcl>> {
+    Ok(state
+        .metadata
+        .get_state("mcp_connections")
+        .await
+        .map_err(err)?
+        .and_then(|raw| serde_json::from_str(&raw).ok())
+        .unwrap_or_default())
+}
+
+#[tauri::command]
+async fn mcp_acl_set(
+    state: State<'_, AppState>,
+    connection_id: String,
+    acl: ConnAcl,
+) -> R<()> {
+    let mut map: HashMap<String, ConnAcl> = state
+        .metadata
+        .get_state("mcp_connections")
+        .await
+        .map_err(err)?
+        .and_then(|raw| serde_json::from_str(&raw).ok())
+        .unwrap_or_default();
+    map.insert(connection_id, acl);
+    state
+        .metadata
+        .set_state("mcp_connections", &serde_json::to_string(&map).map_err(err)?)
+        .await
+        .map_err(err)
+}
+
+async fn start_mcp(state: &State<'_, AppState>) -> R<()> {
+    let cfg = load_mcp_config(&state.metadata).await;
+    let mut guard = state.mcp.lock().await;
+    if guard.is_some() {
+        return Ok(());
+    }
+    let handle = mcp::start(state.metadata.clone(), cfg).await.map_err(err)?;
+    *guard = Some(handle);
+    Ok(())
+}
+
 // ---------------------------------------------------------------- app state
 
 #[tauri::command]
@@ -317,11 +438,26 @@ async fn main() {
         .expect("open metadata store");
     let metadata = Arc::new(metadata);
 
+    // Auto-start the MCP server if it was left enabled.
+    let mcp_slot: Arc<AsyncMutex<Option<McpHandle>>> = Arc::new(AsyncMutex::new(None));
+    {
+        let cfg = load_mcp_config(&metadata).await;
+        if cfg.enabled {
+            match mcp::start(metadata.clone(), cfg).await {
+                Ok(h) => *mcp_slot.lock().await = Some(h),
+                Err(e) => eprintln!("[mcp] failed to auto-start: {e}"),
+            }
+        }
+    }
+
+    let managed = AppState {
+        metadata: metadata.clone(),
+        mcp: mcp_slot,
+    };
+
     tauri::Builder::default()
         .setup(move |app| {
-            app.manage(AppState {
-                metadata: metadata.clone(),
-            });
+            app.manage(managed);
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -352,6 +488,13 @@ async fn main() {
             request_send,
             state_get,
             state_set,
+            mcp_config_get,
+            mcp_config_set,
+            mcp_status,
+            mcp_start,
+            mcp_stop,
+            mcp_acls_get,
+            mcp_acl_set,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

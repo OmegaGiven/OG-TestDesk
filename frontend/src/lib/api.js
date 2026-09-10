@@ -56,5 +56,14 @@ export const api = {
 
   // request globals (plain variables, applied under the active environment)
   globalsGet: () => call('state_get', { key: 'request_globals' }),
-  globalsSet: (json) => call('state_set', { key: 'request_globals', value: json })
+  globalsSet: (json) => call('state_set', { key: 'request_globals', value: json }),
+
+  // MCP server
+  mcpConfigGet: () => call('mcp_config_get'),
+  mcpConfigSet: (config) => call('mcp_config_set', { config }),
+  mcpStatus: () => call('mcp_status'),
+  mcpStart: () => call('mcp_start'),
+  mcpStop: () => call('mcp_stop'),
+  mcpAclsGet: () => call('mcp_acls_get'),
+  mcpAclSet: (connectionId, acl) => call('mcp_acl_set', { connectionId, acl })
 };

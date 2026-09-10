@@ -243,8 +243,40 @@ if (typeof window !== 'undefined' && !window.__TAURI_INTERNALS__) {
     state_set: ({ key, value }) => {
       state[key] = value;
       return ok(null);
+    },
+
+    // MCP (mock)
+    mcp_config_get: () =>
+      ok(
+        mcpCfg || {
+          enabled: true,
+          port: 7788,
+          token: 'a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6',
+          allow_write: false,
+          allow_http: true
+        }
+      ),
+    mcp_status: () => ok({ running: (mcpCfg || { enabled: true }).enabled, port: 7788 }),
+    mcp_config_set: ({ config }) => {
+      mcpCfg = config;
+      return ok({ running: config.enabled, port: config.port });
+    },
+    mcp_start: () => {
+      mcpCfg = { ...(mcpCfg || {}), enabled: true };
+      return ok({ running: true, port: 7788 });
+    },
+    mcp_stop: () => {
+      mcpCfg = { ...(mcpCfg || {}), enabled: false };
+      return ok({ running: false, port: 7788 });
+    },
+    mcp_acls_get: () => ok(mcpAcls),
+    mcp_acl_set: ({ connectionId, acl }) => {
+      mcpAcls = { ...mcpAcls, [connectionId]: acl };
+      return ok(null);
     }
   };
+  let mcpCfg = null;
+  let mcpAcls = { [DEMO_SHOP]: { exposed: true, allow_writes: false } };
 
   window.__TAURI_INTERNALS__ = {
     transformCallback: (cb) => cb,

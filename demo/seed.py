@@ -118,6 +118,12 @@ tabs = [
      "FROM orders o\nJOIN customers c ON c.id = o.customer_id\n"
      "JOIN order_items oi ON oi.order_id = o.id\nJOIN products p ON p.id = oi.product_id\n"
      "ORDER BY o.id DESC LIMIT 100;"),
+    ("By city + status",
+     "-- fill {{city}} and {{status}} in the Variables bar above\n"
+     "SELECT c.city, o.status, COUNT(*) AS orders, ROUND(SUM(o.total),2) AS revenue\n"
+     "FROM orders o JOIN customers c ON c.id = o.customer_id\n"
+     "WHERE c.city = '{{city}}' AND o.status = '{{status}}'\n"
+     "GROUP BY c.city, o.status;"),
 ]
 m.execute("DELETE FROM query_tabs WHERE connection_id = ?", (sqlite_id,))
 for i, (title, sql) in enumerate(tabs):

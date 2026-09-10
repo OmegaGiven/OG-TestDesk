@@ -5,6 +5,7 @@
   import { api } from '../lib/api.js';
   import TopNav from '../lib/components/TopNav.svelte';
   import Toasts from '../lib/components/Toasts.svelte';
+  import SettingsModal from '../lib/components/SettingsModal.svelte';
   import SqlView from '../lib/sql/SqlView.svelte';
   import RequestsView from '../lib/requests/RequestsView.svelte';
   import InspectorView from '../lib/inspector/InspectorView.svelte';
@@ -17,6 +18,7 @@
     sendToInspector
   } from '../lib/stores.js';
 
+  let settingsOpen = false;
   const THEMES = ['system', 'light', 'dark'];
   function cycleTheme() {
     theme.update((t) => THEMES[(THEMES.indexOf(t) + 1) % THEMES.length]);
@@ -36,6 +38,7 @@
     // Dev/demo helpers via query string (no effect in normal use):
     //   ?tool=requests|inspector   ?run  (auto-run the active SQL tab)
     const q = new URLSearchParams(location.search);
+    if (q.has('settings')) settingsOpen = true;
     if (q.has('tool')) activeTool.set(q.get('tool'));
     if (q.has('sqltab')) {
       const t = get(sqlTabs).find((x) => x.title === q.get('sqltab'));
@@ -92,7 +95,8 @@
 <div class="app">
   <div class="chrome">
     <TopNav />
-    <button class="theme" on:click={cycleTheme} title="Theme: {$theme}">
+    <button class="chrome-btn" on:click={() => (settingsOpen = true)} title="Settings">⚙</button>
+    <button class="chrome-btn" on:click={cycleTheme} title="Theme: {$theme}">
       {$theme === 'dark' ? '☾' : $theme === 'light' ? '☀' : '◐'}
     </button>
   </div>
@@ -103,6 +107,10 @@
     <div class="view" class:show={$activeTool === 'inspector'}><InspectorView /></div>
   </main>
 </div>
+
+{#if settingsOpen}
+  <SettingsModal on:close={() => (settingsOpen = false)} />
+{/if}
 
 <Toasts />
 
@@ -123,14 +131,17 @@
     flex: 1;
     border-bottom: none;
   }
-  .theme {
+  .chrome-btn {
     border: none;
     border-left: 1px solid var(--border);
     background: var(--surface-1);
     color: var(--text-secondary);
     font-size: 14px;
-    width: 40px;
+    width: 38px;
     cursor: pointer;
+  }
+  .chrome-btn:hover {
+    background: var(--surface-3);
   }
   main {
     flex: 1;

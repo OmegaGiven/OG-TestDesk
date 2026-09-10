@@ -58,6 +58,21 @@ if you see them anywhere — they're not the direction.
 - `pnpm build` in `frontend/` produces `build/`; `cargo check` passes for the whole workspace.
 - Icons regenerated as RGBA (scaffold's `icon.png` was palette-mode and broke `generate_context!`).
 
+## MCP server (`src-tauri/src/mcp.rs`)
+
+The app can host a local MCP server so on-device AI tools use its stored
+connections/requests **without seeing secrets** — the server executes
+queries and requests itself. HTTP+SSE transport (`GET /sse`, `POST
+/message`), bound to `127.0.0.1:<port>` (default 7788), bearer-token
+gated (token in `?token=` or `Authorization`). Config + per-connection
+ACLs live in `app_state` (`mcp_config`, `mcp_connections`); auto-starts on
+launch if left enabled. Tools: `list_connections`, `list_schemas`,
+`list_columns`, `run_query` (+ `list_saved_requests`, `run_saved_request`,
+`send_request` when `allow_http`). Safety: a connection is invisible until
+explicitly exposed; exposed = read-only unless per-connection **and**
+server-wide write flags are both on. UI: gear icon → Settings modal
+(`components/SettingsModal.svelte`).
+
 ## What's left
 
 See `docs/next-steps.md` — polish (result virtualization, saved-query/history panels, native modals instead of `prompt()`), driver edge cases (PG arrays/composites), and Requests stretch (auth helpers, curl import).
