@@ -177,13 +177,19 @@
     border-left: 1px solid var(--border);
     background: var(--surface-1);
     color: var(--text-secondary);
-    font-size: 14px;
-    width: 38px;
+    font-size: 19px;
+    line-height: 1;
+    min-width: 40px;
+    padding: 0 8px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
     cursor: pointer;
     -webkit-app-region: no-drag;
   }
   .chrome-btn:hover {
     background: var(--surface-3);
+    color: var(--text-primary);
   }
   main {
     flex: 1;

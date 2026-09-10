@@ -125,9 +125,15 @@
     padding: 6px;
     border-bottom: 1px solid var(--border);
   }
-  .input.sm {
-    padding: 5px 7px;
-    font-size: 11px;
+  .tools .input.sm {
+    flex: 1;
+    padding: 6px 8px;
+    font-size: 11.5px;
+  }
+  .tools :global(.btn) {
+    font-size: 15px;
+    line-height: 1;
+    padding: 4px 9px;
   }
   .scroll {
     overflow: auto;
@@ -141,15 +147,15 @@
   .node {
     display: flex;
     align-items: center;
-    gap: 5px;
+    gap: 6px;
     width: 100%;
     text-align: left;
     background: none;
     border: none;
     cursor: pointer;
-    font-size: 12px;
+    font-size: 12.5px;
     color: var(--text-primary);
-    padding: 4px 8px;
+    padding: 5px 8px;
   }
   .node:hover {
     background: var(--surface-3);
@@ -159,15 +165,16 @@
     color: var(--text-secondary);
   }
   .rel {
-    padding-left: 18px;
+    padding-left: 16px;
   }
   .chev {
-    font-size: 9px;
-    width: 10px;
+    font-size: 11px;
+    width: 12px;
+    text-align: center;
     color: var(--text-muted);
   }
   .ico {
-    font-size: 10px;
+    font-size: 13px;
     color: var(--tool-sql-text);
   }
   .count {
@@ -187,11 +194,13 @@
     border: none;
     color: var(--text-muted);
     cursor: pointer;
-    padding: 4px 8px;
-    font-size: 12px;
+    padding: 5px 9px;
+    font-size: 15px;
+    line-height: 1;
   }
   .peek:hover {
     color: var(--tool-sql-text);
+    background: var(--surface-3);
   }
   .cols {
     padding: 2px 8px 6px 40px;

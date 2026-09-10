@@ -463,7 +463,9 @@
     gap: 5px;
   }
   .sq-toggle .chev {
-    font-size: 9px;
+    font-size: 11px;
+    width: 12px;
+    text-align: center;
     color: var(--text-muted);
   }
   .sq-badge {

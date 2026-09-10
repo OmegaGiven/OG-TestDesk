@@ -327,6 +327,10 @@
     font-family: var(--font-mono);
     color: var(--text-secondary);
   }
+  .filter-bar :global(.btn.ghost.sm) {
+    font-size: 12px;
+    padding: 5px 9px;
+  }
   .export {
     display: flex;
     align-items: center;

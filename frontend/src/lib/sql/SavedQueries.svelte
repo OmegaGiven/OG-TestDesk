@@ -111,8 +111,14 @@
     border-bottom: 1px solid var(--border);
   }
   .sq-tools .input.sm {
-    padding: 5px 7px;
-    font-size: 11px;
+    flex: 1;
+    padding: 6px 8px;
+    font-size: 11.5px;
+  }
+  .sq-tools :global(.btn) {
+    font-size: 15px;
+    line-height: 1;
+    padding: 4px 9px;
   }
   .sq-scroll {
     overflow: auto;
@@ -138,7 +144,9 @@
     background: var(--surface-3);
   }
   .chev {
-    font-size: 9px;
+    font-size: 11px;
+    width: 12px;
+    text-align: center;
     color: var(--text-muted);
   }
   .count {
@@ -183,11 +191,13 @@
     border: none;
     color: var(--text-muted);
     cursor: pointer;
-    padding: 4px 6px;
-    font-size: 10px;
+    padding: 5px 8px;
+    font-size: 13px;
+    line-height: 1;
   }
   .q-act:hover {
     color: var(--text-primary);
+    background: var(--surface-3);
   }
   .none {
     padding: 10px;

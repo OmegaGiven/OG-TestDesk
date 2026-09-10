@@ -67,10 +67,11 @@
 <style>
   .wc {
     display: flex;
+    align-self: stretch;
     -webkit-app-region: no-drag;
   }
   .wc-btn {
-    width: 42px;
+    min-width: 44px;
     border: none;
     border-left: 1px solid var(--border);
     background: var(--surface-1);
@@ -81,9 +82,14 @@
     justify-content: center;
   }
   .wc-btn svg {
+    width: 14px;
+    height: 14px;
     stroke: currentColor;
-    stroke-width: 1;
+    stroke-width: 1.1;
     fill: none;
+  }
+  .wc-btn:hover {
+    color: var(--text-primary);
   }
   .wc-btn:hover {
     background: var(--surface-3);
