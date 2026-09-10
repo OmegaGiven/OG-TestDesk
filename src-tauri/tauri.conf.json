@@ -6,7 +6,7 @@
   "build": {
     "beforeDevCommand": "pnpm --dir ../frontend dev",
     "beforeBuildCommand": "pnpm --dir ../frontend build",
-    "devUrl": "http://localhost:5173",
+    "devUrl": "http://localhost:5199",
     "frontendDist": "../frontend/build"
   },
   "app": {

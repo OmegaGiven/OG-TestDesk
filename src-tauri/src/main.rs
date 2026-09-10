@@ -307,7 +307,6 @@ async fn main() {
     let metadata = Arc::new(metadata);
 
     tauri::Builder::default()
-        .plugin(tauri_plugin_updater::Builder::new().build())
         .setup(move |app| {
             app.manage(AppState {
                 metadata: metadata.clone(),
