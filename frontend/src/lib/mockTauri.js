@@ -387,6 +387,31 @@ if (typeof window !== 'undefined' && !window.__TAURI_INTERNALS__) {
       mockSavedQueries = mockSavedQueries.filter((x) => x.id !== id);
       return ok(null);
     },
+    saved_query_folders_list: () => ok(mockSavedQueryFolders),
+    saved_query_folder_save: ({ folder }) => {
+      const f = { sort_order: 0, ...folder, id: folder.id || 'sqf-' + Date.now() };
+      const i = mockSavedQueryFolders.findIndex((x) => x.id === f.id);
+      if (i >= 0) mockSavedQueryFolders[i] = f;
+      else mockSavedQueryFolders = [...mockSavedQueryFolders, f];
+      return ok(f);
+    },
+    saved_query_folder_delete: ({ id }) => {
+      const gone = new Set([id]);
+      let grew = true;
+      while (grew) {
+        grew = false;
+        for (const f of mockSavedQueryFolders)
+          if (f.parent_id && gone.has(f.parent_id) && !gone.has(f.id)) {
+            gone.add(f.id);
+            grew = true;
+          }
+      }
+      mockSavedQueryFolders = mockSavedQueryFolders.filter((x) => !gone.has(x.id));
+      mockSavedQueries = mockSavedQueries.map((q) =>
+        gone.has(q.folder_id) ? { ...q, folder_id: null } : q
+      );
+      return ok(null);
+    },
     collections_list: () => ok(collections),
     collection_save: ({ collection }) => ok({ ...collection, id: collection.id || 'col-' + Date.now() }),
     collection_delete: () => ok(null),
@@ -468,30 +493,37 @@ if (typeof window !== 'undefined' && !window.__TAURI_INTERNALS__) {
   };
   let mcpCfg = null;
   let mockLimit = 10000;
+  let mockSavedQueryFolders = [
+    { id: 'sqf-reports', name: 'Reports', parent_id: null, sort_order: 0 },
+    { id: 'sqf-daily', name: 'Daily', parent_id: 'sqf-reports', sort_order: 0 }
+  ];
   let mockSavedQueries = [
     {
       id: 'sq-1',
       connection_id: DEMO_SHOP,
-      folder: 'Reports',
+      folder_id: 'sqf-reports',
       name: 'Top customers',
       sql_text: 'SELECT * FROM customer_revenue LIMIT 15;',
+      sort_order: 0,
       created_at: 0
     },
     {
       id: 'sq-2',
       connection_id: DEMO_SHOP,
-      folder: 'Reports',
+      folder_id: 'sqf-daily',
       name: 'Orders by status',
       sql_text: 'SELECT status, COUNT(*) FROM orders GROUP BY status;',
+      sort_order: 0,
       created_at: 0
     },
     {
       id: 'sq-3',
       connection_id: DEMO_SHOP,
-      folder: null,
+      folder_id: null,
       name: 'Row counts',
       sql_text:
         "SELECT 'customers' t, COUNT(*) n FROM customers\nUNION ALL SELECT 'orders', COUNT(*) FROM orders;",
+      sort_order: 0,
       created_at: 0
     }
   ];

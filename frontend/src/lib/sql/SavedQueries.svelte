@@ -1,98 +1,256 @@
 <script>
-  import { createEventDispatcher } from 'svelte';
+  import { createEventDispatcher, setContext } from 'svelte';
+  import { writable } from 'svelte/store';
   import { api } from '../api.js';
-  import { savedQueries, connections, reloadSavedQueries, toast, toastError } from '../stores.js';
+  import FolderNode from './FolderNode.svelte';
+  import {
+    savedQueries,
+    savedQueryFolders,
+    connections,
+    reloadSavedQueries,
+    toast,
+    toastError
+  } from '../stores.js';
 
   const dispatch = createEventDispatcher();
 
   let filter = '';
-  let collapsedFolders = new Set();
+  const collapsed = writable(new Set());
+  const dragOver = writable(null);
+  let drag = null; // { kind: 'q'|'f', id }
 
-  $: groups = groupByFolder($savedQueries, filter);
-  function groupByFolder(list, f) {
-    const q = f.trim().toLowerCase();
-    const map = new Map();
-    for (const s of list) {
-      if (q && !(`${s.folder || ''} ${s.name} ${s.sql_text}`.toLowerCase().includes(q))) continue;
-      const key = s.folder || '';
-      if (!map.has(key)) map.set(key, []);
-      map.get(key).push(s);
+  $: rootFolders = $savedQueryFolders
+    .filter((f) => !f.parent_id)
+    .sort((a, b) => a.sort_order - b.sort_order || a.name.localeCompare(b.name));
+  $: rootQueries = $savedQueries
+    .filter((q) => !q.folder_id)
+    .sort((a, b) => a.sort_order - b.sort_order || a.name.localeCompare(b.name));
+
+  // flat filtered view
+  $: matches = filter.trim()
+    ? $savedQueries.filter((s) =>
+        `${folderPath(s.folder_id)} ${s.name} ${s.sql_text}`
+          .toLowerCase()
+          .includes(filter.trim().toLowerCase())
+      )
+    : null;
+
+  function folderPath(id) {
+    const parts = [];
+    let cur = id;
+    const seen = new Set();
+    while (cur && !seen.has(cur)) {
+      seen.add(cur);
+      const f = $savedQueryFolders.find((x) => x.id === cur);
+      if (!f) break;
+      parts.unshift(f.name);
+      cur = f.parent_id;
     }
-    return [...map.entries()]
-      .sort((a, b) => (a[0] === '' ? 1 : b[0] === '' ? -1 : a[0].localeCompare(b[0])))
-      .map(([folder, items]) => ({
-        folder,
-        items: items.sort((a, b) => a.name.localeCompare(b.name))
-      }));
+    return parts.join(' / ');
   }
-
   function connName(id) {
     return $connections.find((c) => c.id === id)?.nickname;
   }
-  function toggle(folder) {
-    collapsedFolders.has(folder) ? collapsedFolders.delete(folder) : collapsedFolders.add(folder);
-    collapsedFolders = collapsedFolders;
+  function toggle(id) {
+    collapsed.update((s) => {
+      s.has(id) ? s.delete(id) : s.add(id);
+      return new Set(s);
+    });
+  }
+  function descendants(fid) {
+    const out = new Set([fid]);
+    let grew = true;
+    while (grew) {
+      grew = false;
+      for (const f of $savedQueryFolders) {
+        if (f.parent_id && out.has(f.parent_id) && !out.has(f.id)) {
+          out.add(f.id);
+          grew = true;
+        }
+      }
+    }
+    return out;
   }
 
-  async function del(s, e) {
-    e.stopPropagation();
-    if (!confirm(`Delete saved query "${s.name}"?`)) return;
+  async function reload() {
+    await reloadSavedQueries();
+  }
+
+  // -- folder ops
+  async function newFolder(parentId) {
+    const name = prompt(parentId ? 'New subfolder name:' : 'New folder name:');
+    if (!name || !name.trim()) return;
     try {
-      await api.savedQueryDelete(s.id);
-      await reloadSavedQueries();
-    } catch (err) {
-      toastError(err);
+      await api.savedQueryFolderSave({ id: '', name: name.trim(), parent_id: parentId || null, sort_order: 0 });
+      if (parentId) collapsed.update((s) => (s.delete(parentId), new Set(s)));
+      await reload();
+    } catch (e) {
+      toastError(e);
     }
   }
-  async function rename(s, e) {
-    e.stopPropagation();
-    const next = prompt('Rename (use folder/name to move):', s.folder ? `${s.folder}/${s.name}` : s.name);
-    if (!next) return;
-    const i = next.lastIndexOf('/');
-    const folder = i >= 0 ? next.slice(0, i).trim() || null : null;
-    const name = (i >= 0 ? next.slice(i + 1) : next).trim();
+  async function renameFolder(f) {
+    const name = prompt('Rename folder:', f.name);
+    if (!name || !name.trim() || name.trim() === f.name) return;
     try {
-      await api.savedQuerySave({ ...s, folder, name });
-      await reloadSavedQueries();
-      toast('Saved query updated', 'success', 1500);
-    } catch (err) {
-      toastError(err);
+      await api.savedQueryFolderSave({ ...f, name: name.trim() });
+      await reload();
+    } catch (e) {
+      toastError(e);
     }
   }
+  async function deleteFolder(f) {
+    if (!confirm(`Delete folder "${f.name}"? Subfolders are removed; queries inside move to the top level.`))
+      return;
+    try {
+      await api.savedQueryFolderDelete(f.id);
+      await reload();
+    } catch (e) {
+      toastError(e);
+    }
+  }
+
+  // -- query ops
+  async function newQuery(folderId) {
+    const name = prompt('New query name:');
+    if (!name || !name.trim()) return;
+    try {
+      const saved = await api.savedQuerySave({
+        id: '',
+        connection_id: null,
+        folder_id: folderId || null,
+        name: name.trim(),
+        sql_text: '',
+        sort_order: 0,
+        created_at: 0
+      });
+      await reload();
+      dispatch('open', saved);
+    } catch (e) {
+      toastError(e);
+    }
+  }
+  function openQuery(q) {
+    dispatch('open', q);
+  }
+  async function renameQuery(q) {
+    const name = prompt('Rename query:', q.name);
+    if (!name || !name.trim() || name.trim() === q.name) return;
+    try {
+      await api.savedQuerySave({ ...q, name: name.trim() });
+      await reload();
+    } catch (e) {
+      toastError(e);
+    }
+  }
+  async function deleteQuery(q) {
+    if (!confirm(`Delete saved query "${q.name}"?`)) return;
+    try {
+      await api.savedQueryDelete(q.id);
+      await reload();
+    } catch (e) {
+      toastError(e);
+    }
+  }
+
+  // -- drag & drop
+  function beginDrag(e, kind, id) {
+    drag = { kind, id };
+    e.dataTransfer.effectAllowed = 'move';
+    try {
+      e.dataTransfer.setData('text/plain', `${kind}:${id}`);
+    } catch {}
+  }
+  function setDragOver(key) {
+    dragOver.set(key);
+  }
+  async function drop(targetFolderId) {
+    dragOver.set(null);
+    const d = drag;
+    drag = null;
+    if (!d) return;
+    try {
+      if (d.kind === 'q') {
+        const q = $savedQueries.find((x) => x.id === d.id);
+        if (!q || q.folder_id === (targetFolderId || null)) return;
+        await api.savedQuerySave({ ...q, folder_id: targetFolderId || null });
+      } else {
+        const f = $savedQueryFolders.find((x) => x.id === d.id);
+        if (!f || f.parent_id === (targetFolderId || null)) return;
+        if (targetFolderId && descendants(d.id).has(targetFolderId)) {
+          toast('Cannot move a folder into itself', 'error', 2000);
+          return;
+        }
+        await api.savedQueryFolderSave({ ...f, parent_id: targetFolderId || null });
+      }
+      await reload();
+    } catch (e) {
+      toastError(e);
+    }
+  }
+
+  setContext('sqtree', {
+    folders: savedQueryFolders,
+    queries: savedQueries,
+    collapsed,
+    dragOver,
+    toggle,
+    connName,
+    beginDrag,
+    setDragOver,
+    drop,
+    newFolder,
+    renameFolder,
+    deleteFolder,
+    newQuery,
+    renameQuery,
+    deleteQuery,
+    openQuery
+  });
 </script>
 
 <div class="sq">
   <div class="sq-tools">
     <input class="input sm" placeholder="Filter saved queries…" bind:value={filter} />
-    <button class="btn ghost sm" title="Refresh" on:click={reloadSavedQueries}>⟳</button>
+    <button class="btn ghost sm" title="New folder" on:click={() => newFolder(null)}>＋⌸</button>
+    <button class="btn ghost sm" title="Refresh" on:click={reload}>⟳</button>
   </div>
 
-  <div class="sq-scroll">
-    {#each groups as g (g.folder)}
-      <button class="folder" on:click={() => toggle(g.folder)}>
-        <span class="chev">{collapsedFolders.has(g.folder) ? '▸' : '▾'}</span>
-        {g.folder || 'Ungrouped'}
-        <span class="count">{g.items.length}</span>
-      </button>
-      {#if !collapsedFolders.has(g.folder)}
-        {#each g.items as s (s.id)}
-          <div class="q-row">
-            <button
-              class="q-main"
-              title={s.sql_text}
-              on:click={() => dispatch('open', s)}
-            >
-              <span class="q-name">{s.name}</span>
-              {#if connName(s.connection_id)}<span class="q-conn">{connName(s.connection_id)}</span>{/if}
-            </button>
-            <button class="q-act" title="Rename / move" on:click={(e) => rename(s, e)}>✎</button>
-            <button class="q-act" title="Delete" on:click={(e) => del(s, e)}>✕</button>
-          </div>
-        {/each}
+  <div
+    class="sq-scroll"
+    class:over={$dragOver === 'root'}
+    on:dragover|preventDefault={() => setDragOver('root')}
+    on:dragleave={() => setDragOver(null)}
+    on:drop|preventDefault={() => drop(null)}
+  >
+    {#if matches}
+      {#each matches as s (s.id)}
+        <div class="qrow">
+          <button class="qmain" title={s.sql_text} on:click={() => openQuery(s)}>
+            <span class="qname">{s.name}</span>
+            {#if folderPath(s.folder_id)}<span class="qconn">{folderPath(s.folder_id)}</span>{/if}
+          </button>
+          <button class="qact" title="Rename" on:click={() => renameQuery(s)}>✎</button>
+          <button class="qact" title="Delete" on:click={() => deleteQuery(s)}>✕</button>
+        </div>
+      {/each}
+      {#if matches.length === 0}<div class="none">No matches.</div>{/if}
+    {:else}
+      {#each rootFolders as f (f.id)}
+        <FolderNode folderId={f.id} depth={0} />
+      {/each}
+      {#each rootQueries as q (q.id)}
+        <div class="qrow" style="padding-left:6px" draggable="true" on:dragstart={(e) => beginDrag(e, 'q', q.id)}>
+          <button class="qmain" title={q.sql_text} on:click={() => openQuery(q)}>
+            <span class="qname">{q.name}</span>
+            {#if connName(q.connection_id)}<span class="qconn">{connName(q.connection_id)}</span>{/if}
+          </button>
+          <button class="qact" title="Rename" on:click={() => renameQuery(q)}>✎</button>
+          <button class="qact" title="Delete" on:click={() => deleteQuery(q)}>✕</button>
+        </div>
+      {/each}
+      {#if rootFolders.length === 0 && rootQueries.length === 0}
+        <div class="none">No saved queries. Hit Save in a query tab, or ＋⌸ to make a folder.</div>
       {/if}
-    {/each}
-    {#if groups.length === 0}
-      <div class="none">{filter ? 'No matches.' : 'No saved queries. Hit Save in a query tab.'}</div>
     {/if}
   </div>
 </div>
@@ -116,53 +274,26 @@
     font-size: 11.5px;
   }
   .sq-tools :global(.btn) {
-    font-size: 15px;
+    font-size: 13px;
     line-height: 1;
-    padding: 4px 9px;
+    padding: 4px 8px;
   }
   .sq-scroll {
     overflow: auto;
     padding: 4px 0 10px;
+    flex: 1;
   }
-  .folder {
-    display: flex;
-    align-items: center;
-    gap: 5px;
-    width: 100%;
-    text-align: left;
-    background: none;
-    border: none;
-    cursor: pointer;
-    font-size: 11px;
-    font-weight: 700;
-    text-transform: uppercase;
-    letter-spacing: 0.03em;
-    color: var(--text-secondary);
-    padding: 5px 8px 3px;
+  .sq-scroll.over {
+    box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--tool-sql-text) 50%, transparent);
   }
-  .folder:hover {
-    background: var(--surface-3);
-  }
-  .chev {
-    font-size: 11px;
-    width: 12px;
-    text-align: center;
-    color: var(--text-muted);
-  }
-  .count {
-    margin-left: auto;
-    font-size: 9px;
-    color: var(--text-muted);
-    font-weight: 400;
-  }
-  .q-row {
+  .qrow {
     display: flex;
     align-items: center;
   }
-  .q-row:hover {
+  .qrow:hover {
     background: var(--surface-3);
   }
-  .q-main {
+  .qmain {
     flex: 1;
     display: flex;
     align-items: baseline;
@@ -171,31 +302,31 @@
     border: none;
     cursor: pointer;
     text-align: left;
-    padding: 4px 8px 4px 20px;
+    padding: 4px 8px;
     overflow: hidden;
   }
-  .q-name {
+  .qname {
     font-size: 12px;
     color: var(--text-primary);
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
   }
-  .q-conn {
+  .qconn {
     font-size: 9px;
     color: var(--text-muted);
     flex-shrink: 0;
   }
-  .q-act {
+  .qact {
     background: none;
     border: none;
     color: var(--text-muted);
     cursor: pointer;
-    padding: 5px 8px;
-    font-size: 13px;
+    padding: 5px 6px;
+    font-size: 12px;
     line-height: 1;
   }
-  .q-act:hover {
+  .qact:hover {
     color: var(--text-primary);
     background: var(--surface-3);
   }

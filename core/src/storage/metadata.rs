@@ -35,12 +35,21 @@ CREATE TABLE IF NOT EXISTS query_tabs (
     is_active     INTEGER NOT NULL DEFAULT 0
 );
 
+CREATE TABLE IF NOT EXISTS saved_query_folders (
+    id        TEXT PRIMARY KEY,
+    name      TEXT NOT NULL,
+    parent_id TEXT REFERENCES saved_query_folders(id) ON DELETE CASCADE,
+    sort_order INTEGER NOT NULL DEFAULT 0
+);
+
 CREATE TABLE IF NOT EXISTS saved_queries (
     id            TEXT PRIMARY KEY,
     connection_id TEXT REFERENCES connections(id) ON DELETE SET NULL,
     folder        TEXT,
+    folder_id     TEXT REFERENCES saved_query_folders(id) ON DELETE SET NULL,
     name          TEXT NOT NULL,
     sql_text      TEXT NOT NULL,
+    sort_order    INTEGER NOT NULL DEFAULT 0,
     created_at    INTEGER NOT NULL
 );
 
@@ -171,10 +180,23 @@ pub struct QueryTab {
 pub struct SavedQuery {
     pub id: String,
     pub connection_id: Option<String>,
-    pub folder: Option<String>,
+    #[serde(default)]
+    pub folder_id: Option<String>,
     pub name: String,
     pub sql_text: String,
+    #[serde(default)]
+    pub sort_order: i64,
     pub created_at: i64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SavedQueryFolder {
+    pub id: String,
+    pub name: String,
+    #[serde(default)]
+    pub parent_id: Option<String>,
+    #[serde(default)]
+    pub sort_order: i64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -301,8 +323,41 @@ impl MetadataStore {
         for stmt in [
             "ALTER TABLE query_history ADD COLUMN error TEXT",
             "ALTER TABLE query_history ADD COLUMN result_json TEXT",
+            "ALTER TABLE saved_queries ADD COLUMN folder_id TEXT",
+            "ALTER TABLE saved_queries ADD COLUMN sort_order INTEGER NOT NULL DEFAULT 0",
         ] {
             let _ = sqlx::query(stmt).execute(&pool).await; // ignore "duplicate column"
+        }
+        // One-time migration of the old flat `folder` string into real folders.
+        let legacy: Vec<(String, String)> = sqlx::query_as(
+            "SELECT id, folder FROM saved_queries WHERE folder IS NOT NULL AND folder <> '' AND folder_id IS NULL",
+        )
+        .fetch_all(&pool)
+        .await
+        .unwrap_or_default();
+        if !legacy.is_empty() {
+            let mut by_name: std::collections::HashMap<String, String> = Default::default();
+            for (qid, folder) in legacy {
+                let fid = if let Some(f) = by_name.get(&folder) {
+                    f.clone()
+                } else {
+                    let f = uuid::Uuid::new_v4().to_string();
+                    let _ = sqlx::query(
+                        "INSERT INTO saved_query_folders (id, name, parent_id) VALUES (?,?,NULL)",
+                    )
+                    .bind(&f)
+                    .bind(&folder)
+                    .execute(&pool)
+                    .await;
+                    by_name.insert(folder.clone(), f.clone());
+                    f
+                };
+                let _ = sqlx::query("UPDATE saved_queries SET folder_id = ? WHERE id = ?")
+                    .bind(&fid)
+                    .bind(&qid)
+                    .execute(&pool)
+                    .await;
+            }
         }
         Ok(Self { pool })
     }
@@ -691,8 +746,8 @@ impl MetadataStore {
 
     pub async fn list_saved_queries(&self) -> Result<Vec<SavedQuery>> {
         let rows = sqlx::query(
-            "SELECT id, connection_id, folder, name, sql_text, created_at
-             FROM saved_queries ORDER BY folder, name",
+            "SELECT id, connection_id, folder_id, name, sql_text, sort_order, created_at
+             FROM saved_queries ORDER BY sort_order, name",
         )
         .fetch_all(&self.pool)
         .await?;
@@ -701,9 +756,10 @@ impl MetadataStore {
             .map(|r| SavedQuery {
                 id: r.get("id"),
                 connection_id: r.get("connection_id"),
-                folder: r.get("folder"),
+                folder_id: r.get("folder_id"),
                 name: r.get("name"),
                 sql_text: r.get("sql_text"),
+                sort_order: r.get("sort_order"),
                 created_at: r.get("created_at"),
             })
             .collect())
@@ -711,17 +767,18 @@ impl MetadataStore {
 
     pub async fn upsert_saved_query(&self, q: &SavedQuery) -> Result<()> {
         sqlx::query(
-            "INSERT INTO saved_queries (id, connection_id, folder, name, sql_text, created_at)
-             VALUES (?,?,?,?,?,?)
+            "INSERT INTO saved_queries (id, connection_id, folder_id, name, sql_text, sort_order, created_at)
+             VALUES (?,?,?,?,?,?,?)
              ON CONFLICT(id) DO UPDATE SET
-                connection_id=excluded.connection_id, folder=excluded.folder,
-                name=excluded.name, sql_text=excluded.sql_text",
+                connection_id=excluded.connection_id, folder_id=excluded.folder_id,
+                name=excluded.name, sql_text=excluded.sql_text, sort_order=excluded.sort_order",
         )
         .bind(&q.id)
         .bind(&q.connection_id)
-        .bind(&q.folder)
+        .bind(&q.folder_id)
         .bind(&q.name)
         .bind(&q.sql_text)
+        .bind(q.sort_order)
         .bind(if q.created_at == 0 { now() } else { q.created_at })
         .execute(&self.pool)
         .await?;
@@ -730,6 +787,63 @@ impl MetadataStore {
 
     pub async fn delete_saved_query(&self, id: &str) -> Result<()> {
         sqlx::query("DELETE FROM saved_queries WHERE id = ?")
+            .bind(id)
+            .execute(&self.pool)
+            .await?;
+        Ok(())
+    }
+
+    // -------------------------------------------------- saved query folders
+
+    pub async fn list_saved_query_folders(&self) -> Result<Vec<SavedQueryFolder>> {
+        let rows = sqlx::query(
+            "SELECT id, name, parent_id, sort_order FROM saved_query_folders ORDER BY sort_order, name",
+        )
+        .fetch_all(&self.pool)
+        .await?;
+        Ok(rows
+            .into_iter()
+            .map(|r| SavedQueryFolder {
+                id: r.get("id"),
+                name: r.get("name"),
+                parent_id: r.get("parent_id"),
+                sort_order: r.get("sort_order"),
+            })
+            .collect())
+    }
+
+    pub async fn upsert_saved_query_folder(&self, f: &SavedQueryFolder) -> Result<()> {
+        // Guard against parent cycles: walk up from the requested parent.
+        if let Some(mut pid) = f.parent_id.clone() {
+            let all = self.list_saved_query_folders().await?;
+            loop {
+                if pid == f.id {
+                    return Err(anyhow::anyhow!("cannot move a folder into its own descendant"));
+                }
+                match all.iter().find(|x| x.id == pid).and_then(|x| x.parent_id.clone()) {
+                    Some(next) => pid = next,
+                    None => break,
+                }
+            }
+        }
+        sqlx::query(
+            "INSERT INTO saved_query_folders (id, name, parent_id, sort_order)
+             VALUES (?,?,?,?)
+             ON CONFLICT(id) DO UPDATE SET
+                name=excluded.name, parent_id=excluded.parent_id, sort_order=excluded.sort_order",
+        )
+        .bind(&f.id)
+        .bind(&f.name)
+        .bind(&f.parent_id)
+        .bind(f.sort_order)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    pub async fn delete_saved_query_folder(&self, id: &str) -> Result<()> {
+        // FK cascade drops child folders; ON DELETE SET NULL frees the queries.
+        sqlx::query("DELETE FROM saved_query_folders WHERE id = ?")
             .bind(id)
             .execute(&self.pool)
             .await?;

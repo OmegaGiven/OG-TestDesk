@@ -180,22 +180,21 @@
 
   async function saveQuery() {
     if (!tab) return;
-    const raw = prompt('Save query as (use folder/name to group):', tab.title);
+    const raw = prompt('Save query as:', tab.title);
     if (!raw || !raw.trim()) return;
-    const i = raw.lastIndexOf('/');
-    const folder = i >= 0 ? raw.slice(0, i).trim() || null : null;
-    const name = (i >= 0 ? raw.slice(i + 1) : raw).trim();
-    // update in place if a query with the same folder/name/connection exists
+    const name = raw.trim();
+    // update in place if a query with the same name/connection exists
     const existing = get(savedQueries).find(
-      (s) => s.name === name && (s.folder || null) === folder && s.connection_id === tab.connection_id
+      (s) => s.name === name && s.connection_id === tab.connection_id
     );
     try {
       await api.savedQuerySave({
         id: existing?.id || '',
         connection_id: tab.connection_id,
-        folder,
+        folder_id: existing?.folder_id ?? null,
         name,
         sql_text: tab.sql_text,
+        sort_order: existing?.sort_order || 0,
         created_at: existing?.created_at || 0
       });
       await reloadSavedQueries();

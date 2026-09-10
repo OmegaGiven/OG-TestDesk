@@ -143,10 +143,13 @@ export const connMenuOpen = writable(false);
 /* ----------------------------------------------------------- saved queries */
 
 export const savedQueries = writable([]);
+export const savedQueryFolders = writable([]);
 
 export async function reloadSavedQueries() {
   try {
-    savedQueries.set(await api.savedQueriesList());
+    const [q, f] = await Promise.all([api.savedQueriesList(), api.savedQueryFoldersList()]);
+    savedQueries.set(q);
+    savedQueryFolders.set(f);
   } catch (e) {
     toastError(e);
   }

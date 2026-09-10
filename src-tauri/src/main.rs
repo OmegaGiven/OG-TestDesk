@@ -12,7 +12,8 @@ use tokio::sync::Mutex as AsyncMutex;
 use og_testdesk_core::{
     apply_environment, drivers, requests as http_requests, Column, ConnConfig, Environment,
     HistoryEntry, HttpRequest, HttpResponse, MetadataStore, QueryResult, QueryTab,
-    RequestCollection, RequestTab, SavedQuery, SavedRequest, Schema, SecretsStore, ServerInfo,
+    RequestCollection, RequestTab, SavedQuery, SavedQueryFolder, SavedRequest, Schema, SecretsStore,
+    ServerInfo,
 };
 use tauri::{Manager, State};
 
@@ -294,6 +295,36 @@ async fn saved_query_save(state: State<'_, AppState>, mut query: SavedQuery) -> 
 #[tauri::command]
 async fn saved_query_delete(state: State<'_, AppState>, id: String) -> R<()> {
     state.metadata.delete_saved_query(&id).await.map_err(err)
+}
+
+#[tauri::command]
+async fn saved_query_folders_list(state: State<'_, AppState>) -> R<Vec<SavedQueryFolder>> {
+    state.metadata.list_saved_query_folders().await.map_err(err)
+}
+
+#[tauri::command]
+async fn saved_query_folder_save(
+    state: State<'_, AppState>,
+    mut folder: SavedQueryFolder,
+) -> R<SavedQueryFolder> {
+    if folder.id.is_empty() {
+        folder.id = new_id();
+    }
+    state
+        .metadata
+        .upsert_saved_query_folder(&folder)
+        .await
+        .map_err(err)?;
+    Ok(folder)
+}
+
+#[tauri::command]
+async fn saved_query_folder_delete(state: State<'_, AppState>, id: String) -> R<()> {
+    state
+        .metadata
+        .delete_saved_query_folder(&id)
+        .await
+        .map_err(err)
 }
 
 // -------------------------------------------------------------- collections
@@ -683,6 +714,9 @@ async fn main() {
             saved_queries_list,
             saved_query_save,
             saved_query_delete,
+            saved_query_folders_list,
+            saved_query_folder_save,
+            saved_query_folder_delete,
             collections_list,
             collection_save,
             collection_delete,

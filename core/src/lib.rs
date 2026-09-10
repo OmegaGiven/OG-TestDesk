@@ -13,6 +13,6 @@ pub use drivers::{
 pub use requests::{apply_environment, HttpRequest, HttpResponse};
 pub use storage::metadata::{
     Environment, HistoryEntry, MetadataStore, QueryTab, RequestCollection, RequestHistoryEntry,
-    RequestTab, SavedQuery, SavedRequest, Schedule,
+    RequestTab, SavedQuery, SavedQueryFolder, SavedRequest, Schedule,
 };
 pub use storage::secrets::SecretsStore;

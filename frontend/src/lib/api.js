@@ -46,6 +46,9 @@ export const api = {
   savedQueriesList: () => call('saved_queries_list'),
   savedQuerySave: (query) => call('saved_query_save', { query }),
   savedQueryDelete: (id) => call('saved_query_delete', { id }),
+  savedQueryFoldersList: () => call('saved_query_folders_list'),
+  savedQueryFolderSave: (folder) => call('saved_query_folder_save', { folder }),
+  savedQueryFolderDelete: (id) => call('saved_query_folder_delete', { id }),
 
   // request collections
   collectionsList: () => call('collections_list'),
