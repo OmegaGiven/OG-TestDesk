@@ -29,6 +29,44 @@
   $: tab = $activeSqlTab;
   $: tabConn = tab ? conns.find((c) => c.id === tab.connection_id) : null;
 
+  // ---- SQL variables: {{name}} tokens filled from slots above the editor
+  const VAR_RE = /\{\{\s*([A-Za-z_]\w*)\s*\}\}/g;
+  let varValues = {}; // { [tabId]: { [name]: value } }
+  let loadedVarsFor = null;
+  let varTimer;
+
+  $: vars = tab
+    ? [...new Set([...tab.sql_text.matchAll(VAR_RE)].map((m) => m[1]))]
+    : [];
+
+  $: if (tab && tab.id !== loadedVarsFor) {
+    loadedVarsFor = tab.id;
+    loadVars(tab.id);
+  }
+
+  async function loadVars(id) {
+    try {
+      const raw = await api.stateGet('sqlvars:' + id);
+      varValues = { ...varValues, [id]: raw ? JSON.parse(raw) : {} };
+    } catch {
+      varValues = { ...varValues, [id]: {} };
+    }
+  }
+  function setVar(name, value) {
+    const id = tab.id;
+    varValues = { ...varValues, [id]: { ...(varValues[id] || {}), [name]: value } };
+    clearTimeout(varTimer);
+    varTimer = setTimeout(
+      () => api.stateSet('sqlvars:' + id, JSON.stringify(varValues[id] || {})).catch(() => {}),
+      500
+    );
+  }
+  function applyVars(sql, id) {
+    const vals = varValues[id] || {};
+    return sql.replace(VAR_RE, (m, name) => (name in vals && vals[name] !== '' ? vals[name] : m));
+  }
+  $: missingVars = tab ? vars.filter((v) => !((varValues[tab.id] || {})[v] ?? '')) : [];
+
   function quote(conn, ident) {
     if (conn.kind === 'mysql') return '`' + ident.replace(/`/g, '``') + '`';
     return '"' + ident.replace(/"/g, '""') + '"';
@@ -58,8 +96,13 @@
     if (!t || t.running) return;
     const conn = get(connections).find((c) => c.id === t.connection_id);
     if (!conn) return;
-    const sql = selectionOrAll(t.sql_text);
+    const sql = applyVars(selectionOrAll(t.sql_text), t.id);
     if (!sql.trim()) return;
+    if (VAR_RE.test(sql)) {
+      VAR_RE.lastIndex = 0;
+      toast('Unfilled variables — set values in the bar above the editor', 'error', 4000);
+      return;
+    }
     touchSqlTab(t.id, { running: true, error: null });
     try {
       const result = await api.queryRun(conn, sql);
@@ -214,6 +257,23 @@
           <button class="btn ghost sm" on:click={() => exportData('json')}>JSON</button>
         {/if}
       </div>
+
+      {#if vars.length}
+        <div class="varbar">
+          <span class="vb-label">Variables</span>
+          {#each vars as v (v)}
+            <label class="vb-slot" class:missing={missingVars.includes(v)}>
+              <span class="vb-name">{`{{${v}}}`}</span>
+              <input
+                class="vb-input"
+                value={(varValues[tab.id] || {})[v] ?? ''}
+                on:input={(e) => setVar(v, e.target.value)}
+                placeholder="value"
+              />
+            </label>
+          {/each}
+        </div>
+      {/if}
 
       <div class="workarea">
         <div class="pane editor-pane" style="height:{splitPct}%">
@@ -393,6 +453,49 @@
     display: flex;
     flex-direction: column;
     overflow: hidden;
+  }
+  .varbar {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+    padding: 6px 8px;
+    background: var(--tool-sql-tint);
+    border-bottom: 1px solid var(--border);
+  }
+  .vb-label {
+    font-size: 10px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--tool-sql-text);
+  }
+  .vb-slot {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    background: var(--surface-2);
+    border: 1px solid var(--border-strong);
+    border-radius: var(--radius-sm);
+    padding: 2px 4px 2px 7px;
+  }
+  .vb-slot.missing {
+    border-color: var(--warn);
+  }
+  .vb-name {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    color: var(--tool-sql-text);
+  }
+  .vb-input {
+    font: inherit;
+    font-size: 11px;
+    border: none;
+    background: none;
+    color: var(--text-primary);
+    width: 120px;
+    padding: 3px 4px;
+    outline: none;
   }
   .pane {
     overflow: hidden;

@@ -2,6 +2,7 @@
   import CodeEditor from '../components/CodeEditor.svelte';
   import EnvModal from './EnvModal.svelte';
   import { api } from '../api.js';
+  import { parsePostman } from './postman.js';
   import {
     requestCollections,
     savedRequests,
@@ -181,6 +182,51 @@
     }
   }
 
+  let fileInput;
+  async function onImportFile(e) {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+    let parsed;
+    try {
+      parsed = parsePostman(await file.text());
+    } catch (err) {
+      return toastError(err);
+    }
+    if (!parsed) return toastError('Not a recognized Postman collection or environment');
+    try {
+      if (parsed.kind === 'environment') {
+        await api.environmentSave({
+          id: '',
+          name: parsed.name,
+          variables_json: JSON.stringify(parsed.variables),
+          is_active: false
+        });
+        toast(`Imported environment "${parsed.name}" (${Object.keys(parsed.variables).length} vars)`, 'success');
+      } else {
+        const col = await api.collectionSave({ id: '', name: parsed.name, parent_id: null });
+        for (let i = 0; i < parsed.requests.length; i++) {
+          const r = parsed.requests[i];
+          await api.savedRequestSave({
+            id: '',
+            collection_id: col.id,
+            name: r.folder ? `${r.folder} / ${r.name}` : r.name,
+            method: r.method,
+            url: r.url,
+            headers_json: JSON.stringify(r.headers || {}),
+            body: r.body,
+            sort_order: i,
+            created_at: 0
+          });
+        }
+        toast(`Imported "${parsed.name}" — ${parsed.requests.length} requests`, 'success');
+      }
+      await reloadRequests();
+    } catch (err) {
+      toastError(err);
+    }
+  }
+
   $: grouped = groupRequests($requestCollections, $savedRequests);
   function groupRequests(cols, reqs) {
     const byCol = new Map(cols.map((c) => [c.id, { ...c, items: [] }]));
@@ -251,10 +297,18 @@
     <div class="sec-head">
       <span>Collections</span>
       <div>
+        <button class="btn ghost sm" title="Import Postman collection / environment" on:click={() => fileInput.click()}>⇩</button>
         <button class="btn ghost sm" on:click={newCollection}>+ Folder</button>
         <button class="btn ghost sm" on:click={() => (draft = blank())}>+ Req</button>
       </div>
     </div>
+    <input
+      type="file"
+      accept=".json,application/json"
+      bind:this={fileInput}
+      on:change={onImportFile}
+      style="display:none"
+    />
     <div class="scroll">
       {#each grouped.collections as col (col.id)}
         <div class="col-head">

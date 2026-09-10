@@ -52,5 +52,9 @@ export const api = {
 
   // app state
   stateGet: (key) => call('state_get', { key }),
-  stateSet: (key, value) => call('state_set', { key, value })
+  stateSet: (key, value) => call('state_set', { key, value }),
+
+  // request globals (plain variables, applied under the active environment)
+  globalsGet: () => call('state_get', { key: 'request_globals' }),
+  globalsSet: (json) => call('state_set', { key: 'request_globals', value: json })
 };

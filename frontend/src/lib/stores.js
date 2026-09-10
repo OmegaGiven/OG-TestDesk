@@ -163,17 +163,33 @@ export function sendToInspector(source, label, json) {
 export const requestCollections = writable([]);
 export const savedRequests = writable([]);
 export const environments = writable([]);
+export const requestGlobals = writable({}); // plain vars, applied under active env
 
 export async function reloadRequests() {
   try {
-    const [cols, reqs, envs] = await Promise.all([
+    const [cols, reqs, envs, globalsRaw] = await Promise.all([
       api.collectionsList(),
       api.savedRequestsList(),
-      api.environmentsList()
+      api.environmentsList(),
+      api.globalsGet()
     ]);
     requestCollections.set(cols);
     savedRequests.set(reqs);
     environments.set(envs);
+    try {
+      requestGlobals.set(globalsRaw ? JSON.parse(globalsRaw) : {});
+    } catch {
+      requestGlobals.set({});
+    }
+  } catch (e) {
+    toastError(e);
+  }
+}
+
+export async function saveGlobals(obj) {
+  requestGlobals.set(obj);
+  try {
+    await api.globalsSet(JSON.stringify(obj));
   } catch (e) {
     toastError(e);
   }

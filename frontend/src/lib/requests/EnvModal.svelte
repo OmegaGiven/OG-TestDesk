@@ -1,11 +1,26 @@
 <script>
   import Modal from '../components/Modal.svelte';
   import { api } from '../api.js';
-  import { environments, reloadRequests, toast, toastError } from '../stores.js';
+  import {
+    environments,
+    requestGlobals,
+    saveGlobals,
+    reloadRequests,
+    toast,
+    toastError
+  } from '../stores.js';
 
-  let editing = null; // {id, name, vars:[{k,v}], is_active}
+  let editing = null; // {id, name, vars:[{k,v}], is_active} | {globals:true, vars}
 
   $: list = $environments;
+
+  function editGlobals() {
+    editing = {
+      globals: true,
+      name: 'Globals',
+      vars: Object.entries($requestGlobals).map(([k, v]) => ({ k, v: String(v) })).concat({ k: '', v: '' })
+    };
+  }
 
   function startNew() {
     editing = { id: '', name: 'New environment', vars: [{ k: '', v: '' }], is_active: list.length === 0 };
@@ -26,14 +41,19 @@
     const variables = {};
     for (const { k, v } of editing.vars) if (k.trim()) variables[k.trim()] = v;
     try {
-      await api.environmentSave({
-        id: editing.id,
-        name: editing.name.trim() || 'Environment',
-        variables_json: JSON.stringify(variables),
-        is_active: editing.is_active
-      });
-      await reloadRequests();
-      toast('Environment saved', 'success');
+      if (editing.globals) {
+        await saveGlobals(variables);
+        toast('Globals saved', 'success');
+      } else {
+        await api.environmentSave({
+          id: editing.id,
+          name: editing.name.trim() || 'Environment',
+          variables_json: JSON.stringify(variables),
+          is_active: editing.is_active
+        });
+        await reloadRequests();
+        toast('Environment saved', 'success');
+      }
       editing = null;
     } catch (e) {
       toastError(e);
@@ -61,6 +81,12 @@
 <Modal title="Environments" width="520px" on:close>
   {#if !editing}
     <div class="list">
+      <div class="env globals-row">
+        <span class="radio on">★</span>
+        <span class="name">Globals</span>
+        <span class="cnt">{Object.keys($requestGlobals).length} vars · always on</span>
+        <button class="btn ghost sm" on:click={editGlobals}>Edit</button>
+      </div>
       {#each list as env (env.id)}
         <div class="env">
           <button class="radio" class:on={env.is_active} on:click={() => activate(env)} title="Set active">
@@ -75,11 +101,17 @@
       {#if list.length === 0}<div class="muted">No environments yet.</div>{/if}
     </div>
   {:else}
-    <div class="field">
-      <label for="en">Name</label>
-      <input id="en" class="input" bind:value={editing.name} />
-    </div>
-    <label class="act"><input type="checkbox" bind:checked={editing.is_active} /> Active</label>
+    {#if !editing.globals}
+      <div class="field">
+        <label for="en">Name</label>
+        <input id="en" class="input" bind:value={editing.name} />
+      </div>
+      <label class="act"><input type="checkbox" bind:checked={editing.is_active} /> Active</label>
+    {:else}
+      <p class="hint" style="margin-top:0">
+        Globals apply to every request. The active environment overrides a global with the same name.
+      </p>
+    {/if}
     <div class="vars">
       <div class="vh"><span>Variable</span><span>Value</span></div>
       {#each editing.vars as row}
@@ -98,7 +130,9 @@
       <button class="btn primary" on:click={startNew}>New environment</button>
     {:else}
       <button class="btn" on:click={() => (editing = null)}>Cancel</button>
-      <button class="btn primary" on:click={save}>Save</button>
+      <button class="btn primary" on:click={save}>
+        {editing.globals ? 'Save globals' : 'Save'}
+      </button>
     {/if}
   </svelte:fragment>
 </Modal>

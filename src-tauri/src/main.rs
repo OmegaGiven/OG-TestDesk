@@ -268,10 +268,21 @@ async fn request_send(
     apply_env: Option<bool>,
 ) -> R<HttpResponse> {
     if apply_env.unwrap_or(true) {
+        let mut vars: HashMap<String, String> = HashMap::new();
+        // globals first (lowest precedence)
+        if let Some(raw) = state.metadata.get_state("request_globals").await.map_err(err)? {
+            if let Ok(g) = serde_json::from_str::<HashMap<String, String>>(&raw) {
+                vars.extend(g);
+            }
+        }
+        // active environment overrides globals
         let envs = state.metadata.list_environments().await.map_err(err)?;
         if let Some(active) = envs.into_iter().find(|e| e.is_active) {
-            let vars: HashMap<String, String> =
-                serde_json::from_str(&active.variables_json).unwrap_or_default();
+            if let Ok(e) = serde_json::from_str::<HashMap<String, String>>(&active.variables_json) {
+                vars.extend(e);
+            }
+        }
+        if !vars.is_empty() {
             apply_environment(&mut request, &vars);
         }
     }

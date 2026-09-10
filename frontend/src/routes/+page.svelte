@@ -1,5 +1,8 @@
 <script>
   import { onMount } from 'svelte';
+  import { get } from 'svelte/store';
+  import { sqlTabs, activeSqlTabId } from '../lib/stores.js';
+  import { api } from '../lib/api.js';
   import TopNav from '../lib/components/TopNav.svelte';
   import Toasts from '../lib/components/Toasts.svelte';
   import SqlView from '../lib/sql/SqlView.svelte';
@@ -10,7 +13,8 @@
     theme,
     reloadConnections,
     reloadTabs,
-    reloadRequests
+    reloadRequests,
+    sendToInspector
   } from '../lib/stores.js';
 
   const THEMES = ['system', 'light', 'dark'];
@@ -28,6 +32,57 @@
   onMount(async () => {
     await reloadConnections();
     await Promise.all([reloadTabs(), reloadRequests()]);
+
+    // Dev/demo helpers via query string (no effect in normal use):
+    //   ?tool=requests|inspector   ?run  (auto-run the active SQL tab)
+    const q = new URLSearchParams(location.search);
+    if (q.has('tool')) activeTool.set(q.get('tool'));
+    if (q.has('sqltab')) {
+      const t = get(sqlTabs).find((x) => x.title === q.get('sqltab'));
+      if (t) activeSqlTabId.set(t.id);
+    }
+    if (q.has('run')) {
+      const clickWhenReady = async (sel, tries = 40) => {
+        for (let i = 0; i < tries; i++) {
+          const el = document.querySelector(sel);
+          if (el) return el.click();
+          await new Promise((r) => setTimeout(r, 100));
+        }
+      };
+      await clickWhenReady('.toolbar .btn.primary');
+    }
+
+    const clickText = async (sel, text, tries = 40) => {
+      for (let i = 0; i < tries; i++) {
+        const el = [...document.querySelectorAll(sel)].find((e) => e.textContent.includes(text));
+        if (el) return el.click();
+        await new Promise((r) => setTimeout(r, 100));
+      }
+    };
+    if (q.has('req')) {
+      await clickText('.ri-main', q.get('req'));
+      if (q.has('send')) {
+        await new Promise((r) => setTimeout(r, 300));
+        document.querySelector('.urlbar .send')?.click();
+      }
+    }
+    if (q.has('inspect')) {
+      sendToInspector('requests', 'POST {{baseUrl}}/orders — 201 Created', {
+        order: {
+          id: 1042,
+          status: 'shipped',
+          total: 284.97,
+          customer: { name: 'Ava Ng', city: 'Dallas', vip: true },
+          items: [
+            { sku: 'SKU-1007', name: 'Keyboard Model 7', qty: 2, price: 79.99 },
+            { sku: 'SKU-1019', name: 'Monitor Model 19', qty: 1, price: 124.99 }
+          ]
+        },
+        meta: { duration_ms: 128, cached: false, region: 'us-east' }
+      });
+      await new Promise((r) => setTimeout(r, 250));
+      await clickText('.toolbar .btn', 'Expand all');
+    }
   });
 </script>
 

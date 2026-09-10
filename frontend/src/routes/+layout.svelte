@@ -1,4 +1,5 @@
 <script>
+  import '../lib/mockTauri.js';
   import '../lib/styles/tokens.css';
   import '../lib/styles/ui.css';
   import { onMount } from 'svelte';
