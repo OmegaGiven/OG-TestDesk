@@ -375,9 +375,18 @@ if (typeof window !== 'undefined' && !window.__TAURI_INTERNALS__) {
       return ok(null);
     },
     schedule_run_now: () => ok('ok · 15 rows'),
-    saved_queries_list: () => ok([]),
-    saved_query_save: ({ query }) => ok({ ...query, id: query.id || 'sq-' + Date.now() }),
-    saved_query_delete: () => ok(null),
+    saved_queries_list: () => ok(mockSavedQueries),
+    saved_query_save: ({ query }) => {
+      const s = { ...query, id: query.id || 'sq-' + Date.now() };
+      const i = mockSavedQueries.findIndex((x) => x.id === s.id);
+      if (i >= 0) mockSavedQueries[i] = s;
+      else mockSavedQueries = [...mockSavedQueries, s];
+      return ok(s);
+    },
+    saved_query_delete: ({ id }) => {
+      mockSavedQueries = mockSavedQueries.filter((x) => x.id !== id);
+      return ok(null);
+    },
     collections_list: () => ok(collections),
     collection_save: ({ collection }) => ok({ ...collection, id: collection.id || 'col-' + Date.now() }),
     collection_delete: () => ok(null),
@@ -458,6 +467,33 @@ if (typeof window !== 'undefined' && !window.__TAURI_INTERNALS__) {
   };
   let mcpCfg = null;
   let mockLimit = 10000;
+  let mockSavedQueries = [
+    {
+      id: 'sq-1',
+      connection_id: DEMO_SHOP,
+      folder: 'Reports',
+      name: 'Top customers',
+      sql_text: 'SELECT * FROM customer_revenue LIMIT 15;',
+      created_at: 0
+    },
+    {
+      id: 'sq-2',
+      connection_id: DEMO_SHOP,
+      folder: 'Reports',
+      name: 'Orders by status',
+      sql_text: 'SELECT status, COUNT(*) FROM orders GROUP BY status;',
+      created_at: 0
+    },
+    {
+      id: 'sq-3',
+      connection_id: DEMO_SHOP,
+      folder: null,
+      name: 'Row counts',
+      sql_text:
+        "SELECT 'customers' t, COUNT(*) n FROM customers\nUNION ALL SELECT 'orders', COUNT(*) FROM orders;",
+      created_at: 0
+    }
+  ];
   let mockReqTabs = [
     {
       id: 'rt-1',

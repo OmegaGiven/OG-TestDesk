@@ -3,6 +3,7 @@
   import CodeEditor from '../components/CodeEditor.svelte';
   import ResultGrid from './ResultGrid.svelte';
   import SchemaTree from './SchemaTree.svelte';
+  import SavedQueries from './SavedQueries.svelte';
   import ConnectionModal from './ConnectionModal.svelte';
   import { api } from '../api.js';
   import {
@@ -17,10 +18,14 @@
     toastError,
     sendToInspector,
     historyLoad,
-    appearance
+    appearance,
+    savedQueries,
+    reloadSavedQueries
   } from '../stores.js';
 
   let sidebarConnId = null;
+  let sqOpen =
+    typeof location !== 'undefined' && new URLSearchParams(location.search).has('savedqueries');
   let consumedHistory = null;
 
   $: if ($historyLoad && $historyLoad.kind === 'sql' && $historyLoad.at !== consumedHistory) {
@@ -175,21 +180,40 @@
 
   async function saveQuery() {
     if (!tab) return;
-    const name = prompt('Save query as:', tab.title);
-    if (!name) return;
+    const raw = prompt('Save query as (use folder/name to group):', tab.title);
+    if (!raw || !raw.trim()) return;
+    const i = raw.lastIndexOf('/');
+    const folder = i >= 0 ? raw.slice(0, i).trim() || null : null;
+    const name = (i >= 0 ? raw.slice(i + 1) : raw).trim();
+    // update in place if a query with the same folder/name/connection exists
+    const existing = get(savedQueries).find(
+      (s) => s.name === name && (s.folder || null) === folder && s.connection_id === tab.connection_id
+    );
     try {
       await api.savedQuerySave({
-        id: '',
+        id: existing?.id || '',
         connection_id: tab.connection_id,
-        folder: null,
+        folder,
         name,
         sql_text: tab.sql_text,
-        created_at: 0
+        created_at: existing?.created_at || 0
       });
-      toast('Query saved', 'success');
+      await reloadSavedQueries();
+      sqOpen = true;
+      toast(existing ? 'Saved query updated' : 'Query saved', 'success', 1800);
     } catch (e) {
       toastError(e);
     }
+  }
+
+  async function openSavedQuery(e) {
+    const s = e.detail;
+    const connId =
+      $connections.find((c) => c.id === s.connection_id)?.id || sidebarConnId || $connections[0]?.id;
+    if (!connId) return;
+    const t = await newSqlTab(connId, s.sql_text);
+    touchSqlTab(t.id, { title: s.name, dirty: false });
+    persistSqlTab(t.id, true);
   }
 
   function inspectResult() {
@@ -241,6 +265,19 @@
       {/each}
       {#if conns.length === 0}
         <div class="none">No connections yet.</div>
+      {/if}
+    </div>
+
+    <div class="sq-section" class:open={sqOpen}>
+      <button class="sec-head sq-toggle" on:click={() => (sqOpen = !sqOpen)}>
+        <span class="chev">{sqOpen ? '▾' : '▸'}</span>
+        <span>Saved queries</span>
+        <span class="sq-badge">{$savedQueries.length}</span>
+      </button>
+      {#if sqOpen}
+        <div class="sq-body">
+          <SavedQueries on:open={openSavedQuery} />
+        </div>
       {/if}
     </div>
 
@@ -389,8 +426,9 @@
   .conn-list {
     border-bottom: 1px solid var(--border);
     padding-bottom: 6px;
-    max-height: 45%;
+    max-height: 38%;
     overflow: auto;
+    flex-shrink: 0;
   }
   .sec-head {
     display: flex;
@@ -402,6 +440,39 @@
     text-transform: uppercase;
     letter-spacing: 0.04em;
     color: var(--text-secondary);
+  }
+  .sq-section {
+    border-bottom: 1px solid var(--border);
+    flex-shrink: 0;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+  .sq-section.open {
+    max-height: 42%;
+  }
+  .sq-toggle {
+    width: 100%;
+    background: none;
+    border: none;
+    cursor: pointer;
+    justify-content: flex-start;
+    gap: 5px;
+  }
+  .sq-toggle .chev {
+    font-size: 9px;
+    color: var(--text-muted);
+  }
+  .sq-badge {
+    margin-left: auto;
+    font-size: 9px;
+    font-weight: 400;
+    color: var(--text-muted);
+  }
+  .sq-body {
+    flex: 1;
+    overflow: hidden;
+    border-top: 1px solid var(--border);
   }
   .conn-item {
     display: flex;

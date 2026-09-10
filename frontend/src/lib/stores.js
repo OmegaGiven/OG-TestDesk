@@ -136,6 +136,18 @@ export async function loadSchemas(conn, force = false) {
   return schemas;
 }
 
+/* ----------------------------------------------------------- saved queries */
+
+export const savedQueries = writable([]);
+
+export async function reloadSavedQueries() {
+  try {
+    savedQueries.set(await api.savedQueriesList());
+  } catch (e) {
+    toastError(e);
+  }
+}
+
 /* --------------------------------------------------------------- SQL tabs */
 
 export const sqlTabs = writable([]); // {id, connection_id, title, sql_text, position, is_active, dirty, result, error, running}
