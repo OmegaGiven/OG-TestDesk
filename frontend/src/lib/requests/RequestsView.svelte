@@ -1,4 +1,5 @@
 <script>
+  import { onMount, tick } from 'svelte';
   import CodeEditor from '../components/CodeEditor.svelte';
   import EnvModal from './EnvModal.svelte';
   import { api } from '../api.js';
@@ -121,9 +122,26 @@
       collection_id: s.collection_id
     };
     urlToParams();
+    if (draft.body) tab = 'body';
     response = null;
     error = null;
   }
+
+  // Demo helper: ?req=<name>&send loads a saved request and sends it.
+  onMount(async () => {
+    const q = new URLSearchParams(location.search);
+    const want = q.get('req');
+    if (!want) return;
+    for (let i = 0; i < 50 && !$savedRequests.length; i++) await tick();
+    const match = $savedRequests.find((r) => r.name.toLowerCase().includes(want.toLowerCase()));
+    if (match) {
+      loadSaved(match);
+      if (q.has('send')) {
+        await tick();
+        await send();
+      }
+    }
+  });
 
   async function save() {
     const headers = {};

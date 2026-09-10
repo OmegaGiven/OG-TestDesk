@@ -58,20 +58,7 @@
       await clickWhenReady('.toolbar .btn.primary');
     }
 
-    const clickText = async (sel, text, tries = 40) => {
-      for (let i = 0; i < tries; i++) {
-        const el = [...document.querySelectorAll(sel)].find((e) => e.textContent.includes(text));
-        if (el) return el.click();
-        await new Promise((r) => setTimeout(r, 100));
-      }
-    };
-    if (q.has('req')) {
-      await clickText('.ri-main', q.get('req'));
-      if (q.has('send')) {
-        await new Promise((r) => setTimeout(r, 300));
-        document.querySelector('.urlbar .send')?.click();
-      }
-    }
+    // ?req / ?send are handled inside RequestsView itself.
     if (q.has('inspect')) {
       sendToInspector('requests', 'POST {{baseUrl}}/orders — 201 Created', {
         order: {
@@ -86,8 +73,6 @@
         },
         meta: { duration_ms: 128, cached: false, region: 'us-east' }
       });
-      await new Promise((r) => setTimeout(r, 250));
-      await clickText('.toolbar .btn', 'Expand all');
     }
   });
 </script>

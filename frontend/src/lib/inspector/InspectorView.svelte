@@ -15,6 +15,19 @@
   $: root = rawMode ? parseRaw(rawText) : payload?.json;
   $: label = rawMode ? 'Pasted JSON' : payload?.label || 'Nothing loaded';
 
+  // Auto-expand the first two levels whenever a new payload loads.
+  let autoExpandedFor = null;
+  $: {
+    const stamp = rawMode ? rawText : payload?.at;
+    if (root && typeof root === 'object' && stamp !== autoExpandedFor) {
+      autoExpandedFor = stamp;
+      const s = new Set();
+      walk(root, '$', s, 2);
+      expandSet = s;
+      bump++;
+    }
+  }
+
   function parseRaw(t) {
     rawError = '';
     if (!t.trim()) return null;
