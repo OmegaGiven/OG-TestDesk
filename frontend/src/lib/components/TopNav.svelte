@@ -76,23 +76,25 @@
       SQL <span class="caret">▾</span>
     </button>
     {#each $connections as conn (conn.id)}
-      <div class="conn">
-        <span class="dot" style="background: {conn.color || 'var(--conn-slate)'}" />
-        <button class="conn-label" on:click={() => activeTool.set('sql')}>{conn.nickname}</button>
-        {#each tabsByConn(conn.id) as tab (tab.id)}
-          <button
-            class="tab"
-            class:active={$activeSqlTabId === tab.id && $activeTool === 'sql'}
-            style="--dot: {conn.color || 'var(--conn-slate)'}"
-            on:click={() => selectTab(tab.id)}
-            title={tab.title}
-          >
-            {tab.dirty ? '•' : ''}{tab.title}
-            <span class="x" on:click={(e) => close(tab.id, e)} role="button" tabindex="-1">×</span>
+      {#if tabsByConn(conn.id).length}
+        <div class="conn" style="--c: {conn.color || 'var(--conn-slate)'}">
+          <button class="conn-label" on:click={() => connMenuOpen.set(true)} title="Switch / manage">
+            {conn.nickname}
           </button>
-        {/each}
-        <button class="add" title="New query" on:click={() => addTab(conn.id)}>+</button>
-      </div>
+          {#each tabsByConn(conn.id) as tab (tab.id)}
+            <button
+              class="tab"
+              class:active={$activeSqlTabId === tab.id && $activeTool === 'sql'}
+              on:click={() => selectTab(tab.id)}
+              title={tab.title}
+            >
+              {tab.dirty ? '•' : ''}{tab.title}
+              <span class="x" on:click={(e) => close(tab.id, e)} role="button" tabindex="-1">×</span>
+            </button>
+          {/each}
+          <button class="add" title="New query" on:click={() => addTab(conn.id)}>+</button>
+        </div>
+      {/if}
     {/each}
     {#if $connections.length === 0}
       <span class="hint">no connections</span>
@@ -187,23 +189,19 @@
   .conn {
     display: flex;
     align-items: center;
-    gap: 3px;
-    background: var(--surface-2);
+    gap: 2px;
+    /* whole group tinted with the connection colour */
+    background: color-mix(in srgb, var(--c, var(--conn-slate)) 22%, var(--surface-2));
+    box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--c, var(--conn-slate)) 38%, transparent);
     border-radius: 6px;
-    padding: 3px;
-  }
-  .dot {
-    width: 7px;
-    height: 7px;
-    border-radius: 50%;
-    margin-left: 3px;
-    flex-shrink: 0;
+    padding: 2px;
   }
   .conn-label {
-    font-size: 11px;
-    font-weight: 600;
-    color: var(--text-secondary);
-    padding: 4px 5px;
+    font-size: 10.5px;
+    font-weight: 700;
+    letter-spacing: 0.02em;
+    color: color-mix(in srgb, var(--c, var(--text-secondary)) 55%, var(--text-primary));
+    padding: 4px 6px;
     background: none;
     border: none;
     cursor: pointer;
@@ -213,9 +211,9 @@
     align-items: center;
     gap: 5px;
     font-size: 11px;
-    color: var(--text-muted);
+    color: var(--text-secondary);
     padding: 4px 7px;
-    border-radius: 5px;
+    border-radius: 4px;
     background: none;
     border: none;
     cursor: pointer;
@@ -223,10 +221,14 @@
     overflow: hidden;
     text-overflow: ellipsis;
   }
+  .tab:hover {
+    background: color-mix(in srgb, var(--c, var(--text-secondary)) 12%, transparent);
+  }
   .tab.active {
-    background: color-mix(in srgb, var(--dot, var(--text-secondary)) 20%, transparent);
+    background: color-mix(in srgb, var(--c, var(--text-secondary)) 55%, var(--surface-2));
     color: var(--text-primary);
-    font-weight: 500;
+    font-weight: 600;
+    box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--c, var(--text-secondary)) 40%, transparent);
   }
   .rt-method {
     font-size: 9px;
