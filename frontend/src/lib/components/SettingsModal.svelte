@@ -165,14 +165,20 @@
     </section>
 
     <section class="sec">
-      <h3>Query limits</h3>
+      <h3>Query results</h3>
       <p class="muted">
-        A query returning many rows is streamed and stopped at this cap so a
-        <code class="mono">SELECT *</code> on a huge table can't exhaust RAM. History keeps result
-        sets on disk (not memory) and loads one only when you reopen it.
+        Results are paged — each SELECT fetches one page and, on the first page, tries a
+        time-boxed <code class="mono">COUNT(*)</code> so you see the total. "Load all" pulls the
+        whole result (still stopped at the hard cap below to protect RAM). History keeps result
+        sets on disk, loaded only when you reopen one.
       </p>
       <div class="slider">
-        <label>Max rows per query</label>
+        <label>Page size</label>
+        <input type="range" min="100" max="5000" step="100" bind:value={$appearance.pageSize} />
+        <span class="v" style="width:auto">{($appearance.pageSize ?? 500).toLocaleString()}</span>
+      </div>
+      <div class="slider">
+        <label>Hard row cap</label>
         <input
           type="range"
           min="0"

@@ -16,8 +16,9 @@ export const api = {
   schemasList: (config) => call('schemas_list', { config }),
   columnsList: (config, schema, relation) => call('columns_list', { config, schema, relation }),
 
-  // query
-  queryRun: (config, sql) => call('query_run', { config, sql }),
+  // query — page/pageSize omitted = full result (capped by max rows)
+  queryRun: (config, sql, page = null, pageSize = null, count = null) =>
+    call('query_run', { config, sql, page, pageSize, count }),
 
   // tabs
   tabsListAll: () => call('tabs_list_all'),

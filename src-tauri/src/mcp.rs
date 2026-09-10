@@ -366,7 +366,7 @@ async fn call_tool(ctx: &AppCtx, name: &str, args: Value) -> Result<String> {
             }
             let pw = SecretsStore::get(&conn.id)?;
             let result = drivers::driver_for(conn.kind)
-                .run_query(&conn, pw.as_deref(), &sql)
+                .run_query(&conn, pw.as_deref(), &sql, og_testdesk_core::QueryOpts::full())
                 .await?;
             Ok(serde_json::to_string_pretty(&result)?)
         }

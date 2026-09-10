@@ -1,8 +1,11 @@
 mod decode;
+mod exec;
 mod mysql;
 mod pool;
 mod postgres;
 mod sqlite;
+
+pub(crate) use exec::run_query_body;
 
 pub use mysql::MySqlDriverImpl;
 pub use postgres::PostgresDriverImpl;
@@ -80,6 +83,36 @@ pub struct QueryColumn {
     pub type_name: String,
 }
 
+/// Options for a single `run_query` call.
+#[derive(Debug, Clone, Copy)]
+pub struct QueryOpts {
+    /// Page window size. `None` = no pagination wrapper (full result,
+    /// still subject to the streaming safety cap).
+    pub limit: Option<usize>,
+    /// Row offset for the page window.
+    pub offset: usize,
+    /// Also try to compute the total row count (time-boxed).
+    pub count: bool,
+}
+
+impl QueryOpts {
+    /// Full result, no count — used by the scheduler and MCP server.
+    pub fn full() -> Self {
+        Self {
+            limit: None,
+            offset: 0,
+            count: false,
+        }
+    }
+    pub fn page(page: usize, size: usize, count: bool) -> Self {
+        Self {
+            limit: Some(size),
+            offset: page.saturating_mul(size),
+            count,
+        }
+    }
+}
+
 /// Result of a statement. For non-SELECT statements `columns`/`rows` are
 /// empty and `rows_affected` is populated instead.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -91,10 +124,25 @@ pub struct QueryResult {
     pub duration_ms: u64,
     /// True when the statement returned a row set (SELECT / RETURNING / SHOW).
     pub is_select: bool,
-    /// True when the row set was cut off at the fetch cap — more rows
-    /// exist on the server. Add a LIMIT or export to see them all.
+    /// True when the row set was cut off at the streaming safety cap.
     #[serde(default)]
     pub truncated: bool,
+    /// Zero-based page index of this window (paged calls only).
+    #[serde(default)]
+    pub page: usize,
+    /// Page window size requested (0 when unpaged).
+    #[serde(default)]
+    pub page_size: usize,
+    /// Total rows the full query would return, when it could be counted
+    /// within the time budget. `None` = unknown (too slow / not countable).
+    #[serde(default)]
+    pub total: Option<usize>,
+    /// Milliseconds spent on the COUNT(*), when attempted.
+    #[serde(default)]
+    pub count_ms: Option<u64>,
+    /// True when a full page was returned (there may be another page).
+    #[serde(default)]
+    pub has_more: bool,
 }
 
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -133,7 +181,40 @@ pub trait DbDriver: Send + Sync {
         cfg: &ConnConfig,
         password: Option<&str>,
         sql: &str,
+        opts: QueryOpts,
     ) -> Result<QueryResult>;
+}
+
+/// Statements that can be safely wrapped as `SELECT * FROM (<sql>) x` for
+/// pagination / counting. `SHOW`, `EXPLAIN`, `PRAGMA`, `DESCRIBE` cannot.
+pub(crate) fn is_wrappable(sql: &str) -> bool {
+    let head = sql
+        .trim_start()
+        .split_whitespace()
+        .next()
+        .unwrap_or("")
+        .to_ascii_lowercase();
+    matches!(head.as_str(), "select" | "with" | "table" | "values")
+}
+
+pub(crate) fn strip_trailing_semi(sql: &str) -> &str {
+    sql.trim().trim_end_matches(';').trim_end()
+}
+
+pub(crate) fn wrap_paged(sql: &str, limit: usize, offset: usize) -> String {
+    format!(
+        "SELECT * FROM (\n{}\n) AS _ogtd_q LIMIT {} OFFSET {}",
+        strip_trailing_semi(sql),
+        limit,
+        offset
+    )
+}
+
+pub(crate) fn wrap_count(sql: &str) -> String {
+    format!(
+        "SELECT COUNT(*) FROM (\n{}\n) AS _ogtd_q",
+        strip_trailing_semi(sql)
+    )
 }
 
 pub fn driver_for(kind: DbKind) -> Box<dyn DbDriver> {

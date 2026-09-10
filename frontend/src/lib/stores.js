@@ -14,7 +14,8 @@ export const APPEARANCE_DEFAULT = {
   fontSans: 'system',
   fontMono: 'system',
   fontScale: 1,
-  colorTheme: 'default'
+  colorTheme: 'default',
+  pageSize: 500
 };
 
 function initialAppearance() {

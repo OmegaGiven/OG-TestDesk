@@ -1,13 +1,12 @@
 use super::decode::pg_value;
 use super::pool::pg_pool;
 use super::{
-    stmt_returns_rows, Column, ConnConfig, DbDriver, DbKind, QueryColumn, QueryResult, Relation,
+    run_query_body, Column, ConnConfig, DbDriver, DbKind, QueryOpts, QueryResult, Relation,
     RelationKind, Schema, ServerInfo,
 };
 use anyhow::{Context, Result};
 use async_trait::async_trait;
-use sqlx::{Column as _, Row, TypeInfo};
-use std::time::Instant;
+use sqlx::Row;
 
 pub struct PostgresDriverImpl;
 
@@ -145,54 +144,8 @@ impl DbDriver for PostgresDriverImpl {
         cfg: &ConnConfig,
         password: Option<&str>,
         sql: &str,
+        opts: QueryOpts,
     ) -> Result<QueryResult> {
-        let pool = pg_pool(&conn_url(cfg, password)).await?;
-        let start = Instant::now();
-
-        if stmt_returns_rows(sql) {
-            use futures_util::TryStreamExt;
-            let cap = super::max_rows();
-            let mut stream = sqlx::query(sql).fetch(&pool);
-            let mut columns: Vec<QueryColumn> = Vec::new();
-            let mut data: Vec<Vec<serde_json::Value>> = Vec::new();
-            let mut truncated = false;
-            while let Some(row) = stream.try_next().await? {
-                if columns.is_empty() {
-                    columns = row
-                        .columns()
-                        .iter()
-                        .map(|c| QueryColumn {
-                            name: c.name().to_string(),
-                            type_name: c.type_info().name().to_string(),
-                        })
-                        .collect();
-                }
-                if data.len() >= cap {
-                    truncated = true;
-                    break;
-                }
-                data.push((0..row.len()).map(|i| pg_value(&row, i)).collect());
-            }
-            Ok(QueryResult {
-                row_count: data.len(),
-                rows_affected: 0,
-                columns,
-                rows: data,
-                duration_ms: start.elapsed().as_millis() as u64,
-                is_select: true,
-                truncated,
-            })
-        } else {
-            let res = sqlx::query(sql).execute(&pool).await?;
-            Ok(QueryResult {
-                columns: vec![],
-                rows: vec![],
-                row_count: 0,
-                rows_affected: res.rows_affected(),
-                duration_ms: start.elapsed().as_millis() as u64,
-                is_select: false,
-                truncated: false,
-            })
-        }
+        run_query_body!(pg_pool(&conn_url(cfg, password)).await?, sql, opts, pg_value)
     }
 }

@@ -187,32 +187,65 @@ if (typeof window !== 'undefined' && !window.__TAURI_INTERNALS__) {
       ok({ kind: config.kind, version: config.kind === 'sqlite' ? '3.45.0' : '16.2 (mock)' }),
     schemas_list: () => ok(schemas),
     columns_list: ({ relation }) => ok(columns[relation] || []),
-    query_run: ({ sql }) => {
+    query_run: ({ sql, page, pageSize, count }) => {
       const s = (sql || '').toLowerCase();
+      const paged = (allRows, cols, total, dur) => {
+        if (pageSize && pageSize > 0) {
+          const off = (page || 0) * pageSize;
+          const slice = allRows.slice(off, off + pageSize);
+          return ok({
+            columns: cols,
+            rows: slice,
+            row_count: slice.length,
+            rows_affected: 0,
+            duration_ms: dur,
+            is_select: true,
+            truncated: false,
+            page: page || 0,
+            page_size: pageSize,
+            total: count ? total : null,
+            count_ms: count ? 4 : null,
+            has_more: off + slice.length < total
+          });
+        }
+        const capped = Math.min(allRows.length, mockLimit || 100000);
+        return ok({
+          columns: cols,
+          rows: allRows.slice(0, capped),
+          row_count: capped,
+          rows_affected: 0,
+          duration_ms: dur,
+          is_select: true,
+          truncated: capped < allRows.length,
+          page: 0,
+          page_size: 0,
+          total: null,
+          count_ms: null,
+          has_more: false
+        });
+      };
+
       if (s.includes('from order_items')) {
-        const n = Math.min(mockLimit || 10000, 4000);
-        const rows = Array.from({ length: n }, (_, i) => [
+        const total = 12384;
+        const all = Array.from({ length: total }, (_, i) => [
           i + 1,
-          ((i % 75) + 1),
-          ((i % 25) + 1),
+          (i % 75) + 1,
+          (i % 25) + 1,
           (i % 3) + 1,
           Math.round((9.99 + (i % 40) * 7.5) * 100) / 100
         ]);
-        return ok({
-          columns: [
+        return paged(
+          all,
+          [
             { name: 'id', type_name: 'INTEGER' },
             { name: 'order_id', type_name: 'INTEGER' },
             { name: 'product_id', type_name: 'INTEGER' },
             { name: 'qty', type_name: 'INTEGER' },
             { name: 'unit_price', type_name: 'REAL' }
           ],
-          rows,
-          row_count: n,
-          rows_affected: 0,
-          duration_ms: 41,
-          is_select: true,
-          truncated: true
-        });
+          total,
+          41
+        );
       }
       if (s.includes('group by c.city')) {
         const city = (sql.match(/c\.city = '([^']*)'/) || [])[1] || 'Dallas';

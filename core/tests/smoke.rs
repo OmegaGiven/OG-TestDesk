@@ -25,21 +25,38 @@ async fn sqlite_end_to_end() {
     let info = drv.test_connection(&cfg, None).await.unwrap();
     assert_eq!(info.kind, DbKind::Sqlite);
 
-    drv.run_query(&cfg, None, "CREATE TABLE t (id INTEGER PRIMARY KEY, name TEXT, score REAL, ok BOOLEAN)")
-        .await
-        .unwrap();
+    let opts = og_testdesk_core::QueryOpts::full();
+    drv.run_query(
+        &cfg,
+        None,
+        "CREATE TABLE t (id INTEGER PRIMARY KEY, name TEXT, score REAL, ok BOOLEAN)",
+        opts,
+    )
+    .await
+    .unwrap();
     let ins = drv
-        .run_query(&cfg, None, "INSERT INTO t (name, score, ok) VALUES ('a', 1.5, 1), ('b', 2.0, 0)")
+        .run_query(
+            &cfg,
+            None,
+            "INSERT INTO t (name, score, ok) VALUES ('a', 1.5, 1), ('b', 2.0, 0)",
+            opts,
+        )
         .await
         .unwrap();
     assert_eq!(ins.rows_affected, 2);
     assert!(!ins.is_select);
 
     let res = drv
-        .run_query(&cfg, None, "SELECT id, name, score, ok FROM t ORDER BY id")
+        .run_query(
+            &cfg,
+            None,
+            "SELECT id, name, score, ok FROM t ORDER BY id",
+            og_testdesk_core::QueryOpts::page(0, 100, true),
+        )
         .await
         .unwrap();
     assert!(res.is_select);
+    assert_eq!(res.total, Some(2));
     assert_eq!(res.row_count, 2);
     assert_eq!(res.columns.len(), 4);
     assert_eq!(res.rows[0][1], serde_json::json!("a"));

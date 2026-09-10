@@ -110,7 +110,7 @@ pub async fn run_one(metadata: &MetadataStore, s: &Schedule) -> String {
             };
             let pw = SecretsStore::get(&conn.id).ok().flatten();
             let res = drivers::driver_for(conn.kind)
-                .run_query(&conn, pw.as_deref(), sql)
+                .run_query(&conn, pw.as_deref(), sql, og_testdesk_core::QueryOpts::full())
                 .await;
             let entry = match &res {
                 Ok(r) => HistoryEntry {

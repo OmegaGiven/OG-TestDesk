@@ -132,25 +132,40 @@ async fn query_run(
     state: State<'_, AppState>,
     config: ConnConfig,
     sql: String,
+    page: Option<usize>,
+    page_size: Option<usize>,
+    count: Option<bool>,
 ) -> R<QueryResult> {
     let pw = SecretsStore::get(&config.id).map_err(err)?;
+    let opts = match page_size {
+        Some(size) if size > 0 => {
+            og_testdesk_core::QueryOpts::page(page.unwrap_or(0), size, count.unwrap_or(false))
+        }
+        _ => og_testdesk_core::QueryOpts::full(),
+    };
     let result = drivers::driver_for(config.kind)
-        .run_query(&config, pw.as_deref(), &sql)
+        .run_query(&config, pw.as_deref(), &sql, opts)
         .await;
 
-    let entry = HistoryEntry {
-        id: new_id(),
-        connection_id: Some(config.id.clone()),
-        sql_text: sql.clone(),
-        duration_ms: result.as_ref().ok().map(|r| r.duration_ms as i64),
-        row_count: result.as_ref().ok().map(|r| r.row_count as i64),
-        success: result.is_ok(),
-        error: result.as_ref().err().map(|e| e.to_string()),
-        result_json: result.as_ref().ok().and_then(scheduler::cache_result_json),
-        has_result: false,
-        ran_at: now(),
-    };
-    let _ = state.metadata.add_history(&entry).await;
+    // Only record history for the first page of a query.
+    if page.unwrap_or(0) == 0 {
+        let entry = HistoryEntry {
+            id: new_id(),
+            connection_id: Some(config.id.clone()),
+            sql_text: sql.clone(),
+            duration_ms: result.as_ref().ok().map(|r| r.duration_ms as i64),
+            row_count: result
+                .as_ref()
+                .ok()
+                .map(|r| r.total.unwrap_or(r.row_count) as i64),
+            success: result.is_ok(),
+            error: result.as_ref().err().map(|e| e.to_string()),
+            result_json: result.as_ref().ok().and_then(scheduler::cache_result_json),
+            has_result: false,
+            ran_at: now(),
+        };
+        let _ = state.metadata.add_history(&entry).await;
+    }
 
     result.map_err(err)
 }

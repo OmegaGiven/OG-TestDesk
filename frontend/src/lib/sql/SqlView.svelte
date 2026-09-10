@@ -16,7 +16,8 @@
     toast,
     toastError,
     sendToInspector,
-    historyLoad
+    historyLoad,
+    appearance
   } from '../stores.js';
 
   let sidebarConnId = null;
@@ -116,27 +117,55 @@
     persistSqlTab(tab.id);
   }
 
-  async function run() {
+  // page < 0 → full result (no pagination wrapper, capped by max rows)
+  async function run(page = 0) {
     const t = get(activeSqlTab);
     if (!t || t.running) return;
     const conn = get(connections).find((c) => c.id === t.connection_id);
     if (!conn) return;
-    const sql = applyVars(selectionOrAll(t.sql_text), t.id);
-    if (!sql.trim()) return;
-    if (VAR_RE.test(sql)) {
-      VAR_RE.lastIndex = 0;
-      toast('Unfilled variables — set values in the bar above the editor', 'error', 4000);
-      return;
+
+    let sql;
+    if (page > 0 && t.execSql) {
+      sql = t.execSql; // paging — reuse the exact statement page 0 ran
+    } else {
+      sql = applyVars(selectionOrAll(t.sql_text), t.id);
+      if (!sql.trim()) return;
+      if (VAR_RE.test(sql)) {
+        VAR_RE.lastIndex = 0;
+        toast('Unfilled variables — set values in the bar above the editor', 'error', 4000);
+        return;
+      }
+      touchSqlTab(t.id, { execSql: sql });
     }
+
+    const full = page < 0;
+    const size = get(appearance).pageSize ?? 500;
     touchSqlTab(t.id, { running: true, error: null });
     try {
-      const result = await api.queryRun(conn, sql);
+      const result = await api.queryRun(
+        conn,
+        sql,
+        full ? null : Math.max(0, page),
+        full ? null : size,
+        !full && page === 0
+      );
       touchSqlTab(t.id, { result, running: false });
-      if (result.is_select)
-        toast(`${result.row_count} rows · ${result.duration_ms} ms`, 'success', 2500);
+      if (result.is_select) {
+        const shown = result.total != null ? ` of ${result.total.toLocaleString()}` : '';
+        toast(`${result.row_count.toLocaleString()} rows${shown} · ${result.duration_ms} ms`, 'success', 2500);
+      }
     } catch (e) {
       touchSqlTab(t.id, { error: String(e), running: false });
     }
+  }
+
+  function nextPage() {
+    const r = tab?.result;
+    if (r?.has_more) run(r.page + 1);
+  }
+  function prevPage() {
+    const r = tab?.result;
+    if (r && r.page > 0) run(r.page - 1);
   }
 
   function selectionOrAll(text) {
@@ -267,7 +296,7 @@
       </div>
     {:else}
       <div class="toolbar">
-        <button class="btn primary sm" on:click={run} disabled={tab.running}>
+        <button class="btn primary sm" on:click={() => run()} disabled={tab.running}>
           {tab.running ? 'Running…' : '▶ Run'}
         </button>
         <button class="btn sm" on:click={saveQuery}>Save</button>
@@ -275,8 +304,28 @@
           <span class="dot" style="background:{tabConn?.color || 'var(--conn-slate)'}" />
           {tabConn?.nickname}
         </span>
+        {#if tab.result?.is_select && tab.result.page_size > 0}
+          {@const r = tab.result}
+          {@const from = r.page * r.page_size + 1}
+          {@const to = r.page * r.page_size + r.row_count}
+          <span class="pager">
+            <button class="pg" on:click={prevPage} disabled={r.page === 0 || tab.running}>◀</button>
+            <span class="pg-info">
+              {from.toLocaleString()}–{to.toLocaleString()}{r.total != null
+                ? ` of ${r.total.toLocaleString()}`
+                : r.has_more
+                  ? ' of many'
+                  : ''}
+            </span>
+            <button class="pg" on:click={nextPage} disabled={!r.has_more || tab.running}>▶</button>
+            {#if r.count_ms != null}<span class="pg-ct">count {r.count_ms}ms</span>{/if}
+          </span>
+        {/if}
         <span style="flex:1" />
         {#if tab.result?.is_select}
+          {#if tab.result.page_size > 0 && (tab.result.has_more || tab.result.page > 0)}
+            <button class="btn ghost sm" on:click={() => run(-1)}>Load all</button>
+          {/if}
           <button class="btn ghost sm" on:click={inspectResult}>→ Inspector</button>
           <button class="btn ghost sm" on:click={() => exportData('csv')}>CSV</button>
           <button class="btn ghost sm" on:click={() => exportData('json')}>JSON</button>
@@ -306,7 +355,7 @@
             value={tab.sql_text}
             language="sql"
             on:change={(e) => onChange(e.detail)}
-            on:run={run}
+            on:run={() => run()}
             on:save={saveQuery}
           />
         </div>
@@ -325,8 +374,12 @@
           <span class="s-err">error</span>
         {:else if tab.result}
           {tab.result.is_select
-            ? `${tab.result.row_count} rows`
-            : `${tab.result.rows_affected} affected`} · {tab.result.duration_ms} ms
+            ? tab.result.total != null
+              ? `${tab.result.total.toLocaleString()} rows total`
+              : `${tab.result.row_count.toLocaleString()} rows`
+            : `${tab.result.rows_affected} affected`} · {tab.result.duration_ms} ms{tab.result.truncated
+            ? ' · capped'
+            : ''}
         {:else}
           ready · ⌘↵ run
         {/if}
@@ -546,6 +599,35 @@
     white-space: pre-wrap;
     overflow: auto;
     height: 100%;
+  }
+  .pager {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    font-size: 11px;
+    color: var(--text-secondary);
+  }
+  .pg {
+    border: 1px solid var(--border-strong);
+    background: var(--surface-2);
+    color: var(--text-primary);
+    border-radius: var(--radius-sm);
+    width: 22px;
+    height: 22px;
+    cursor: pointer;
+    font-size: 9px;
+  }
+  .pg:disabled {
+    opacity: 0.35;
+    cursor: not-allowed;
+  }
+  .pg-info {
+    font-family: var(--font-mono);
+    padding: 0 4px;
+  }
+  .pg-ct {
+    color: var(--text-muted);
+    font-size: 10px;
   }
   .statusbar {
     padding: 4px 10px;
