@@ -6,6 +6,7 @@
   import TopNav from '../lib/components/TopNav.svelte';
   import Toasts from '../lib/components/Toasts.svelte';
   import SettingsModal from '../lib/components/SettingsModal.svelte';
+  import HelpModal from '../lib/components/HelpModal.svelte';
   import SqlView from '../lib/sql/SqlView.svelte';
   import RequestsView from '../lib/requests/RequestsView.svelte';
   import InspectorView from '../lib/inspector/InspectorView.svelte';
@@ -19,6 +20,7 @@
   } from '../lib/stores.js';
 
   let settingsOpen = false;
+  let helpOpen = false;
   const THEMES = ['system', 'light', 'dark'];
   function cycleTheme() {
     theme.update((t) => THEMES[(THEMES.indexOf(t) + 1) % THEMES.length]);
@@ -39,6 +41,7 @@
     //   ?tool=requests|inspector   ?run  (auto-run the active SQL tab)
     const q = new URLSearchParams(location.search);
     if (q.has('settings')) settingsOpen = true;
+    if (q.has('help')) helpOpen = true;
     if (q.has('tool')) activeTool.set(q.get('tool'));
     if (q.has('sqltab')) {
       const t = get(sqlTabs).find((x) => x.title === q.get('sqltab'));
@@ -95,6 +98,7 @@
 <div class="app">
   <div class="chrome">
     <TopNav />
+    <button class="chrome-btn" on:click={() => (helpOpen = true)} title="Help">?</button>
     <button class="chrome-btn" on:click={() => (settingsOpen = true)} title="Settings">⚙</button>
     <button class="chrome-btn" on:click={cycleTheme} title="Theme: {$theme}">
       {$theme === 'dark' ? '☾' : $theme === 'light' ? '☀' : '◐'}
@@ -110,6 +114,9 @@
 
 {#if settingsOpen}
   <SettingsModal on:close={() => (settingsOpen = false)} />
+{/if}
+{#if helpOpen}
+  <HelpModal on:close={() => (helpOpen = false)} />
 {/if}
 
 <Toasts />
