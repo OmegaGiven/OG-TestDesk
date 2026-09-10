@@ -27,6 +27,10 @@ export const api = {
   // history
   historyRecent: (limit) => call('history_recent', { limit }),
   historyRequestRecent: (limit) => call('history_request_recent', { limit }),
+  historyResult: (id) => call('history_result', { id }),
+  historyRequestResult: (id) => call('history_request_result', { id }),
+  queryLimitsGet: () => call('query_limits_get'),
+  queryLimitsSet: (maxRows) => call('query_limits_set', { maxRows }),
 
   // schedules
   schedulesList: () => call('schedules_list'),

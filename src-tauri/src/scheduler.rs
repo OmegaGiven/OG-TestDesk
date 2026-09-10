@@ -14,7 +14,24 @@ use og_testdesk_core::{
     RequestHistoryEntry, Schedule, SecretsStore,
 };
 
-const MAX_CACHED_ROWS: usize = 2000;
+const MAX_CACHED_ROWS: usize = 5000;
+const MAX_CACHED_BYTES: usize = 4 * 1024 * 1024;
+
+/// Serialize a query result for history only when it is small enough that
+/// keeping it on disk (and later loading one such blob) is cheap. A
+/// truncated result is never cached — it is not the full answer.
+pub fn cache_result_json(r: &og_testdesk_core::QueryResult) -> Option<String> {
+    if r.truncated || r.row_count > MAX_CACHED_ROWS {
+        return None;
+    }
+    let s = serde_json::to_string(r).ok()?;
+    (s.len() <= MAX_CACHED_BYTES).then_some(s)
+}
+
+pub fn cache_response_json(r: &og_testdesk_core::HttpResponse) -> Option<String> {
+    let s = serde_json::to_string(r).ok()?;
+    (s.len() <= MAX_CACHED_BYTES).then_some(s)
+}
 
 /// Next fire time (unix seconds) at or after `from_ts`, or None if the
 /// expression is malformed.
@@ -104,9 +121,8 @@ pub async fn run_one(metadata: &MetadataStore, s: &Schedule) -> String {
                     row_count: Some(r.row_count as i64),
                     success: true,
                     error: None,
-                    result_json: (r.row_count <= MAX_CACHED_ROWS)
-                        .then(|| serde_json::to_string(r).ok())
-                        .flatten(),
+                    result_json: cache_result_json(r),
+                    has_result: false,
                     ran_at: now,
                 },
                 Err(e) => HistoryEntry {
@@ -118,6 +134,7 @@ pub async fn run_one(metadata: &MetadataStore, s: &Schedule) -> String {
                     success: false,
                     error: Some(e.to_string()),
                     result_json: None,
+                    has_result: false,
                     ran_at: now,
                 },
             };
@@ -148,9 +165,8 @@ pub async fn run_one(metadata: &MetadataStore, s: &Schedule) -> String {
                     size_bytes: Some(r.size_bytes as i64),
                     success: r.status < 400,
                     error: None,
-                    response_json: (r.size_bytes <= 512 * 1024)
-                        .then(|| serde_json::to_string(r).ok())
-                        .flatten(),
+                    response_json: cache_response_json(r),
+                    has_response: false,
                     sent_at: now,
                 },
                 Err(e) => RequestHistoryEntry {
@@ -167,6 +183,7 @@ pub async fn run_one(metadata: &MetadataStore, s: &Schedule) -> String {
                     success: false,
                     error: Some(e.to_string()),
                     response_json: None,
+                    has_response: false,
                     sent_at: now,
                 },
             };

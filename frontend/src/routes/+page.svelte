@@ -8,7 +8,12 @@
   import SettingsModal from '../lib/components/SettingsModal.svelte';
   import HelpModal from '../lib/components/HelpModal.svelte';
   import ActivityModal from '../lib/components/ActivityModal.svelte';
+  import WindowControls from '../lib/components/WindowControls.svelte';
   import { appearance, applyAppearance } from '../lib/stores.js';
+
+  const isMac =
+    typeof navigator !== 'undefined' &&
+    /Mac|iPhone|iPad/i.test(navigator.platform || navigator.userAgent || '');
   import SqlView from '../lib/sql/SqlView.svelte';
   import RequestsView from '../lib/requests/RequestsView.svelte';
   import InspectorView from '../lib/inspector/InspectorView.svelte';
@@ -87,7 +92,8 @@
 
 <div class="app">
  <div class="shell">
-  <div class="chrome">
+  <div class="chrome" class:mac={isMac}>
+    {#if isMac}<div class="tl-space"></div>{/if}
     <TopNav />
     <button class="chrome-btn" on:click={() => (activityOpen = true)} title="History & schedules">⏱</button>
     <button class="chrome-btn" on:click={() => (helpOpen = true)} title="Help">?</button>
@@ -95,6 +101,7 @@
     <button class="chrome-btn" on:click={cycleTheme} title="Theme: {$theme}">
       {$theme === 'dark' ? '☾' : $theme === 'light' ? '☀' : '◐'}
     </button>
+    {#if !isMac}<WindowControls />{/if}
   </div>
 
   <main>
@@ -136,9 +143,15 @@
     border-radius: 0;
     border: none;
   }
+  .tl-space {
+    width: 70px;
+    flex-shrink: 0;
+    -webkit-app-region: drag;
+  }
   .chrome {
     display: flex;
     align-items: stretch;
+    -webkit-app-region: drag;
     background: var(--surface-1);
     border-bottom: 1px solid var(--border);
   }
@@ -154,6 +167,7 @@
     font-size: 14px;
     width: 38px;
     cursor: pointer;
+    -webkit-app-region: no-drag;
   }
   .chrome-btn:hover {
     background: var(--surface-3);

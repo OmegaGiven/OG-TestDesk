@@ -91,6 +91,27 @@ pub struct QueryResult {
     pub duration_ms: u64,
     /// True when the statement returned a row set (SELECT / RETURNING / SHOW).
     pub is_select: bool,
+    /// True when the row set was cut off at the fetch cap — more rows
+    /// exist on the server. Add a LIMIT or export to see them all.
+    #[serde(default)]
+    pub truncated: bool,
+}
+
+use std::sync::atomic::{AtomicUsize, Ordering};
+
+/// Max rows any single `run_query` will pull into memory. Streamed row by
+/// row and stopped at this count so a `SELECT *` on a huge table cannot
+/// exhaust RAM. 0 means unlimited (not recommended).
+static MAX_ROWS: AtomicUsize = AtomicUsize::new(10_000);
+
+pub fn set_max_rows(n: usize) {
+    MAX_ROWS.store(n, Ordering::Relaxed);
+}
+pub fn max_rows() -> usize {
+    match MAX_ROWS.load(Ordering::Relaxed) {
+        0 => usize::MAX,
+        n => n,
+    }
 }
 
 /// Implemented once per database engine. Adding a new engine (Mongo,

@@ -69,6 +69,14 @@ if (typeof window !== 'undefined' && !window.__TAURI_INTERNALS__) {
         "SELECT c.city, o.status, COUNT(*) AS orders, ROUND(SUM(o.total),2) AS revenue\nFROM orders o JOIN customers c ON c.id = o.customer_id\nWHERE c.city = '{{city}}' AND o.status = '{{status}}'\nGROUP BY c.city, o.status;",
       position: 3,
       is_active: false
+    },
+    {
+      id: 'tab-5',
+      connection_id: DEMO_SHOP,
+      title: 'Everything',
+      sql_text: 'SELECT * FROM order_items;',
+      position: 4,
+      is_active: false
     }
   ];
 
@@ -181,6 +189,31 @@ if (typeof window !== 'undefined' && !window.__TAURI_INTERNALS__) {
     columns_list: ({ relation }) => ok(columns[relation] || []),
     query_run: ({ sql }) => {
       const s = (sql || '').toLowerCase();
+      if (s.includes('from order_items')) {
+        const n = Math.min(mockLimit || 10000, 4000);
+        const rows = Array.from({ length: n }, (_, i) => [
+          i + 1,
+          ((i % 75) + 1),
+          ((i % 25) + 1),
+          (i % 3) + 1,
+          Math.round((9.99 + (i % 40) * 7.5) * 100) / 100
+        ]);
+        return ok({
+          columns: [
+            { name: 'id', type_name: 'INTEGER' },
+            { name: 'order_id', type_name: 'INTEGER' },
+            { name: 'product_id', type_name: 'INTEGER' },
+            { name: 'qty', type_name: 'INTEGER' },
+            { name: 'unit_price', type_name: 'REAL' }
+          ],
+          rows,
+          row_count: n,
+          rows_affected: 0,
+          duration_ms: 41,
+          is_select: true,
+          truncated: true
+        });
+      }
       if (s.includes('group by c.city')) {
         const city = (sql.match(/c\.city = '([^']*)'/) || [])[1] || 'Dallas';
         const status = (sql.match(/o\.status = '([^']*)'/) || [])[1] || 'paid';
@@ -215,18 +248,18 @@ if (typeof window !== 'undefined' && !window.__TAURI_INTERNALS__) {
           row_count: 15,
           success: true,
           error: null,
-          result_json: JSON.stringify(topCustomers),
+          has_result: true,
           ran_at: Math.floor(Date.now() / 1000) - 120
         },
         {
           id: 'h2',
           connection_id: DEMO_SHOP,
-          sql_text: "SELECT status, COUNT(*) FROM orders GROUP BY status;",
+          sql_text: 'SELECT status, COUNT(*) FROM orders GROUP BY status;',
           duration_ms: 2,
           row_count: 5,
           success: true,
           error: null,
-          result_json: JSON.stringify(ordersByStatus),
+          has_result: true,
           ran_at: Math.floor(Date.now() / 1000) - 900
         },
         {
@@ -237,10 +270,30 @@ if (typeof window !== 'undefined' && !window.__TAURI_INTERNALS__) {
           row_count: null,
           success: false,
           error: 'no such table: nonexistent',
-          result_json: null,
+          has_result: false,
           ran_at: Math.floor(Date.now() / 1000) - 3600
         }
       ]),
+    history_result: ({ id }) =>
+      ok(id === 'h2' ? JSON.stringify(ordersByStatus) : JSON.stringify(topCustomers)),
+    history_request_result: () =>
+      ok(
+        JSON.stringify({
+          status: 200,
+          status_text: 'OK',
+          headers: [['content-type', 'application/json; charset=utf-8']],
+          body: JSON.stringify([{ userId: 1, id: 1, title: 'sunt aut facere repellat' }], null, 2),
+          content_type: 'application/json; charset=utf-8',
+          is_json: true,
+          duration_ms: 96,
+          size_bytes: 27520
+        })
+      ),
+    query_limits_get: () => ok(mockLimit),
+    query_limits_set: ({ maxRows }) => {
+      mockLimit = maxRows;
+      return ok(null);
+    },
     history_request_recent: () =>
       ok([
         {
@@ -256,16 +309,7 @@ if (typeof window !== 'undefined' && !window.__TAURI_INTERNALS__) {
           size_bytes: 27520,
           success: true,
           error: null,
-          response_json: JSON.stringify({
-            status: 200,
-            status_text: 'OK',
-            headers: [['content-type', 'application/json; charset=utf-8']],
-            body: JSON.stringify([{ id: 1, title: 'sunt aut facere' }], null, 2),
-            content_type: 'application/json; charset=utf-8',
-            is_json: true,
-            duration_ms: 96,
-            size_bytes: 27520
-          }),
+          has_response: true,
           sent_at: Math.floor(Date.now() / 1000) - 240
         },
         {
@@ -281,7 +325,7 @@ if (typeof window !== 'undefined' && !window.__TAURI_INTERNALS__) {
           size_bytes: 292,
           success: true,
           error: null,
-          response_json: null,
+          has_response: false,
           sent_at: Math.floor(Date.now() / 1000) - 1500
         }
       ]),
@@ -368,6 +412,7 @@ if (typeof window !== 'undefined' && !window.__TAURI_INTERNALS__) {
     }
   };
   let mcpCfg = null;
+  let mockLimit = 10000;
   let mcpAcls = { [DEMO_SHOP]: { exposed: true, allow_writes: false } };
   let mockSchedules = [
     {
@@ -408,12 +453,27 @@ if (typeof window !== 'undefined' && !window.__TAURI_INTERNALS__) {
     }
   ];
 
+  const winOps = {
+    'plugin:window|is_maximized': () => ok(false),
+    'plugin:window|minimize': () => ok(null),
+    'plugin:window|toggle_maximize': () => ok(null),
+    'plugin:window|close': () => ok(null),
+    'plugin:window|start_dragging': () => ok(null)
+  };
+
   window.__TAURI_INTERNALS__ = {
     transformCallback: (cb) => cb,
-    invoke: (cmd, args) =>
-      handlers[cmd]
+    metadata: {
+      currentWindow: { label: 'main' },
+      currentWebview: { windowLabel: 'main', label: 'main' }
+    },
+    invoke: (cmd, args) => {
+      if (winOps[cmd]) return winOps[cmd]();
+      if (cmd.startsWith('plugin:')) return ok(null);
+      return handlers[cmd]
         ? handlers[cmd](args || {})
-        : Promise.reject(`mock: no handler for ${cmd}`)
+        : Promise.reject(`mock: no handler for ${cmd}`);
+    }
   };
   console.info('[OG TestDesk] mock IPC installed (not running in Tauri)');
 }

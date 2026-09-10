@@ -146,14 +146,44 @@ async fn query_run(
         row_count: result.as_ref().ok().map(|r| r.row_count as i64),
         success: result.is_ok(),
         error: result.as_ref().err().map(|e| e.to_string()),
-        result_json: result.as_ref().ok().and_then(|r| {
-            (r.row_count <= 2000).then(|| serde_json::to_string(r).ok()).flatten()
-        }),
+        result_json: result.as_ref().ok().and_then(scheduler::cache_result_json),
+        has_result: false,
         ran_at: now(),
     };
     let _ = state.metadata.add_history(&entry).await;
 
     result.map_err(err)
+}
+
+#[tauri::command]
+async fn history_result(state: State<'_, AppState>, id: String) -> R<Option<String>> {
+    state.metadata.history_result(&id).await.map_err(err)
+}
+
+#[tauri::command]
+async fn history_request_result(state: State<'_, AppState>, id: String) -> R<Option<String>> {
+    state.metadata.request_history_result(&id).await.map_err(err)
+}
+
+#[tauri::command]
+async fn query_limits_get(state: State<'_, AppState>) -> R<usize> {
+    Ok(state
+        .metadata
+        .get_state("query_max_rows")
+        .await
+        .map_err(err)?
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(10_000))
+}
+
+#[tauri::command]
+async fn query_limits_set(state: State<'_, AppState>, max_rows: usize) -> R<()> {
+    og_testdesk_core::set_max_rows(max_rows);
+    state
+        .metadata
+        .set_state("query_max_rows", &max_rows.to_string())
+        .await
+        .map_err(err)
 }
 
 #[tauri::command]
@@ -346,9 +376,8 @@ async fn request_send(
         size_bytes: result.as_ref().ok().map(|r| r.size_bytes as i64),
         success: result.as_ref().map(|r| r.status < 400).unwrap_or(false),
         error: result.as_ref().err().map(|e| e.to_string()),
-        response_json: result.as_ref().ok().and_then(|r| {
-            (r.size_bytes <= 512 * 1024).then(|| serde_json::to_string(r).ok()).flatten()
-        }),
+        response_json: result.as_ref().ok().and_then(scheduler::cache_response_json),
+        has_response: false,
         sent_at: now(),
     };
     let _ = state.metadata.add_request_history(&entry).await;
@@ -540,6 +569,12 @@ async fn main() {
         }
     }
 
+    if let Ok(Some(s)) = metadata.get_state("query_max_rows").await {
+        if let Ok(n) = s.parse::<usize>() {
+            og_testdesk_core::set_max_rows(n);
+        }
+    }
+
     scheduler::spawn(metadata.clone());
 
     let managed = AppState {
@@ -550,6 +585,12 @@ async fn main() {
     tauri::Builder::default()
         .setup(move |app| {
             app.manage(managed);
+            // macOS keeps its overlaid traffic lights (tauri.conf titleBarStyle).
+            // Everywhere else: frameless window, custom controls live in the top bar.
+            #[cfg(not(target_os = "macos"))]
+            if let Some(win) = app.get_webview_window("main") {
+                let _ = win.set_decorations(false);
+            }
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -566,6 +607,10 @@ async fn main() {
             tab_delete,
             history_recent,
             history_request_recent,
+            history_result,
+            history_request_result,
+            query_limits_get,
+            query_limits_set,
             schedules_list,
             schedule_save,
             schedule_delete,

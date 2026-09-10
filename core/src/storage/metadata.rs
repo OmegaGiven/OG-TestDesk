@@ -175,9 +175,13 @@ pub struct HistoryEntry {
     pub success: bool,
     #[serde(default)]
     pub error: Option<String>,
-    /// Serialized `QueryResult` — only kept for small result sets.
-    #[serde(default)]
+    /// Serialized `QueryResult` — write-only. Never returned by the list
+    /// query (would blow up memory); fetch on demand with `history_result`.
+    #[serde(default, skip_serializing)]
     pub result_json: Option<String>,
+    /// True when a cached result exists on disk for this entry.
+    #[serde(default)]
+    pub has_result: bool,
     pub ran_at: i64,
 }
 
@@ -198,9 +202,12 @@ pub struct RequestHistoryEntry {
     pub success: bool,
     #[serde(default)]
     pub error: Option<String>,
-    /// Serialized `HttpResponse` — only kept when small.
-    #[serde(default)]
+    /// Serialized `HttpResponse` — write-only; fetch on demand with
+    /// `request_history_result`.
+    #[serde(default, skip_serializing)]
     pub response_json: Option<String>,
+    #[serde(default)]
+    pub has_response: bool,
     pub sent_at: i64,
 }
 
@@ -440,7 +447,7 @@ impl MetadataStore {
     pub async fn recent_history(&self, limit: i64) -> Result<Vec<HistoryEntry>> {
         let rows = sqlx::query(
             "SELECT id, connection_id, sql_text, duration_ms, row_count, success, error,
-                    result_json, ran_at
+                    (result_json IS NOT NULL) AS has_result, ran_at
              FROM query_history ORDER BY ran_at DESC LIMIT ?",
         )
         .bind(limit)
@@ -456,10 +463,22 @@ impl MetadataStore {
                 row_count: r.get("row_count"),
                 success: r.get::<i64, _>("success") != 0,
                 error: r.get("error"),
-                result_json: r.get("result_json"),
+                result_json: None,
+                has_result: r.get::<i64, _>("has_result") != 0,
                 ran_at: r.get("ran_at"),
             })
             .collect())
+    }
+
+    /// Fetch the cached result set for one history entry, on demand.
+    pub async fn history_result(&self, id: &str) -> Result<Option<String>> {
+        Ok(
+            sqlx::query_scalar("SELECT result_json FROM query_history WHERE id = ?")
+                .bind(id)
+                .fetch_optional(&self.pool)
+                .await?
+                .flatten(),
+        )
     }
 
     // ------------------------------------------------------- request history
@@ -499,7 +518,8 @@ impl MetadataStore {
     pub async fn recent_request_history(&self, limit: i64) -> Result<Vec<RequestHistoryEntry>> {
         let rows = sqlx::query(
             "SELECT id, saved_request_id, name, method, url, headers_json, body, status,
-                    duration_ms, size_bytes, success, error, response_json, sent_at
+                    duration_ms, size_bytes, success, error,
+                    (response_json IS NOT NULL) AS has_response, sent_at
              FROM request_history ORDER BY sent_at DESC LIMIT ?",
         )
         .bind(limit)
@@ -520,10 +540,21 @@ impl MetadataStore {
                 size_bytes: r.get("size_bytes"),
                 success: r.get::<i64, _>("success") != 0,
                 error: r.get("error"),
-                response_json: r.get("response_json"),
+                response_json: None,
+                has_response: r.get::<i64, _>("has_response") != 0,
                 sent_at: r.get("sent_at"),
             })
             .collect())
+    }
+
+    pub async fn request_history_result(&self, id: &str) -> Result<Option<String>> {
+        Ok(
+            sqlx::query_scalar("SELECT response_json FROM request_history WHERE id = ?")
+                .bind(id)
+                .fetch_optional(&self.pool)
+                .await?
+                .flatten(),
+        )
     }
 
     // ---------------------------------------------------------- schedules

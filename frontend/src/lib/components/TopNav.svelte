@@ -85,8 +85,8 @@
   .topnav {
     display: flex;
     align-items: center;
-    gap: 6px;
-    padding: 8px 10px;
+    gap: var(--nav-gap, 5px);
+    padding: var(--nav-pad, 6px) calc(var(--nav-pad, 6px) + 2px);
     overflow-x: auto;
     white-space: nowrap;
     background: var(--surface-1);
@@ -107,10 +107,10 @@
   .tool {
     display: flex;
     align-items: center;
-    gap: 5px;
+    gap: var(--nav-gap, 5px);
     background: var(--tint);
     border-radius: var(--radius);
-    padding: 4px;
+    padding: calc(var(--nav-gap, 5px) - 1px);
   }
   .tool.active {
     box-shadow: 0 0 0 1.5px var(--tint-text) inset;

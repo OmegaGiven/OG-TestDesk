@@ -131,9 +131,9 @@
   let consumedHistory = null;
   $: if ($historyLoad && $historyLoad.kind === 'request' && $historyLoad.at !== consumedHistory) {
     consumedHistory = $historyLoad.at;
-    loadHistoryEntry($historyLoad.entry);
+    loadHistoryEntry($historyLoad.entry, $historyLoad.resolved);
   }
-  function loadHistoryEntry(e) {
+  function loadHistoryEntry(e, resolved) {
     const headersObj = JSON.parse(e.headers_json || '{}');
     draft = {
       id: e.saved_request_id || '',
@@ -151,9 +151,9 @@
     if (e.body) tab = 'body';
     error = e.error || null;
     response = null;
-    if (e.response_json) {
+    if (resolved) {
       try {
-        response = JSON.parse(e.response_json);
+        response = JSON.parse(resolved);
       } catch {}
     }
   }

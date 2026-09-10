@@ -7,16 +7,31 @@
   let cfg = null; // {enabled, port, token, allow_write, allow_http}
   let status = { running: false, port: null };
   let acls = {}; // connId -> {exposed, allow_writes}
+  let maxRows = 10000;
   let busy = false;
+
+  const ROW_STEPS = [1000, 5000, 10000, 25000, 50000, 100000, 0];
+  function rowLabel(n) {
+    return n === 0 ? 'unlimited (risky)' : n.toLocaleString();
+  }
 
   onMount(load);
   async function load() {
     try {
-      [cfg, status, acls] = await Promise.all([
+      [cfg, status, acls, maxRows] = await Promise.all([
         api.mcpConfigGet(),
         api.mcpStatus(),
-        api.mcpAclsGet()
+        api.mcpAclsGet(),
+        api.queryLimitsGet()
       ]);
+    } catch (e) {
+      toastError(e);
+    }
+  }
+  async function setMaxRows(n) {
+    maxRows = n;
+    try {
+      await api.queryLimitsSet(n);
     } catch (e) {
       toastError(e);
     }
@@ -75,10 +90,41 @@
         <input type="range" min="0" max="24" bind:value={$appearance.gutter} />
         <span class="v">{$appearance.gutter}px</span>
       </div>
+      <div class="slider">
+        <label>Top-bar padding</label>
+        <input type="range" min="0" max="16" bind:value={$appearance.navPad} />
+        <span class="v">{$appearance.navPad}px</span>
+      </div>
+      <div class="slider">
+        <label>Top-bar item gap</label>
+        <input type="range" min="1" max="14" bind:value={$appearance.navGap} />
+        <span class="v">{$appearance.navGap}px</span>
+      </div>
       <button
         class="btn sm"
-        on:click={() => appearance.set({ radius: 8, gutter: 0, density: 1 })}
+        on:click={() =>
+          appearance.set({ radius: 8, gutter: 0, density: 1, navPad: 6, navGap: 5 })}
       >Reset</button>
+    </section>
+
+    <section class="sec">
+      <h3>Query limits</h3>
+      <p class="muted">
+        A query returning many rows is streamed and stopped at this cap so a
+        <code class="mono">SELECT *</code> on a huge table can't exhaust RAM. History keeps result
+        sets on disk (not memory) and loads one only when you reopen it.
+      </p>
+      <div class="slider">
+        <label>Max rows per query</label>
+        <input
+          type="range"
+          min="0"
+          max={ROW_STEPS.length - 1}
+          value={Math.max(0, ROW_STEPS.indexOf(maxRows))}
+          on:input={(e) => setMaxRows(ROW_STEPS[+e.target.value])}
+        />
+        <span class="v" style="width:auto">{rowLabel(maxRows)}</span>
+      </div>
     </section>
 
     <section class="sec">

@@ -200,17 +200,18 @@ export const activeEnvironment = derived(environments, ($e) => $e.find((x) => x.
 /* ------------------------------------------------------- history recall */
 
 // Set by the Activity modal; consumed by SqlView / RequestsView.
-export const historyLoad = writable(null); // { kind:'sql'|'request', entry, at }
+// `resolved` is the on-demand-fetched result/response JSON string, or null.
+export const historyLoad = writable(null); // { kind, entry, resolved, at }
 
-export function loadFromHistory(kind, entry) {
-  historyLoad.set({ kind, entry, at: Date.now() });
+export function loadFromHistory(kind, entry, resolved = null) {
+  historyLoad.set({ kind, entry, resolved, at: Date.now() });
   activeTool.set(kind === 'sql' ? 'sql' : 'requests');
 }
 
 /* ------------------------------------------------------------ appearance */
 
 const APPEARANCE_KEY = 'ogtestdesk.appearance';
-const APPEARANCE_DEFAULT = { radius: 8, gutter: 0, density: 1 };
+const APPEARANCE_DEFAULT = { radius: 8, gutter: 0, density: 1, navPad: 6, navGap: 5 };
 
 function initialAppearance() {
   try {
@@ -227,6 +228,8 @@ export function applyAppearance(a) {
   root.style.setProperty('--radius-sm', `${Math.max(2, a.radius - 3)}px`);
   root.style.setProperty('--app-gutter', `${a.gutter}px`);
   root.style.setProperty('--density', String(a.density));
+  root.style.setProperty('--nav-pad', `${a.navPad ?? 6}px`);
+  root.style.setProperty('--nav-gap', `${a.navGap ?? 5}px`);
   if (a.gutter > 0) root.dataset.gutter = '1';
   else delete root.dataset.gutter;
   try {

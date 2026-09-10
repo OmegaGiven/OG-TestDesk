@@ -58,12 +58,24 @@
     return new Date(ts * 1000).toLocaleString();
   }
 
-  function openSql(e) {
-    loadFromHistory('sql', e);
+  async function openSql(e) {
+    let resolved = null;
+    if (e.has_result) {
+      try {
+        resolved = await api.historyResult(e.id);
+      } catch {}
+    }
+    loadFromHistory('sql', e, resolved);
     dispatch('close');
   }
-  function openReq(e) {
-    loadFromHistory('request', e);
+  async function openReq(e) {
+    let resolved = null;
+    if (e.has_response) {
+      try {
+        resolved = await api.historyRequestResult(e.id);
+      } catch {}
+    }
+    loadFromHistory('request', e, resolved);
     dispatch('close');
   }
 
@@ -166,7 +178,7 @@
             <code class="sql">{e.sql_text.replace(/\s+/g, ' ').slice(0, 90)}</code>
             <span class="right {e.success ? '' : 'err'}">
               {e.success ? `${e.row_count ?? 0} rows` : 'error'}{e.duration_ms != null ? ` · ${e.duration_ms}ms` : ''}
-              {#if e.result_json}<span class="cached" title="result cached — opens with data">◆</span>{/if}
+              {#if e.has_result}<span class="cached" title="result cached — opens with data">◆</span>{/if}
             </span>
           </button>
         {/each}
@@ -179,7 +191,7 @@
             <code class="sql">{e.url.slice(0, 80)}</code>
             <span class="right {e.success ? '' : 'err'}">
               {e.status ?? 'ERR'}{e.duration_ms != null ? ` · ${e.duration_ms}ms` : ''}
-              {#if e.response_json}<span class="cached">◆</span>{/if}
+              {#if e.has_response}<span class="cached">◆</span>{/if}
             </span>
           </button>
         {/each}

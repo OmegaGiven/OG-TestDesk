@@ -24,10 +24,10 @@
 
   $: if ($historyLoad && $historyLoad.kind === 'sql' && $historyLoad.at !== consumedHistory) {
     consumedHistory = $historyLoad.at;
-    openFromHistory($historyLoad.entry);
+    openFromHistory($historyLoad.entry, $historyLoad.resolved);
   }
 
-  async function openFromHistory(entry) {
+  async function openFromHistory(entry, resolved) {
     const connId =
       ($connections.find((c) => c.id === entry.connection_id) || {}).id ||
       sidebarConnId ||
@@ -35,9 +35,9 @@
     if (!connId) return;
     const t = await newSqlTab(connId, entry.sql_text);
     touchSqlTab(t.id, { title: 'History', dirty: false });
-    if (entry.result_json) {
+    if (resolved) {
       try {
-        touchSqlTab(t.id, { result: JSON.parse(entry.result_json) });
+        touchSqlTab(t.id, { result: JSON.parse(resolved) });
       } catch {}
     } else if (entry.error) {
       touchSqlTab(t.id, { error: entry.error });

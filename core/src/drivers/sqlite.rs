@@ -97,31 +97,37 @@ impl DbDriver for SqliteDriverImpl {
         let start = Instant::now();
 
         if stmt_returns_rows(sql) {
-            let rows = sqlx::query(sql).fetch_all(&pool).await?;
-            let duration_ms = start.elapsed().as_millis() as u64;
-            let columns: Vec<QueryColumn> = rows
-                .first()
-                .map(|r| {
-                    r.columns()
+            use futures_util::TryStreamExt;
+            let cap = super::max_rows();
+            let mut stream = sqlx::query(sql).fetch(&pool);
+            let mut columns: Vec<QueryColumn> = Vec::new();
+            let mut data: Vec<Vec<serde_json::Value>> = Vec::new();
+            let mut truncated = false;
+            while let Some(row) = stream.try_next().await? {
+                if columns.is_empty() {
+                    columns = row
+                        .columns()
                         .iter()
                         .map(|c| QueryColumn {
                             name: c.name().to_string(),
                             type_name: c.type_info().name().to_string(),
                         })
-                        .collect()
-                })
-                .unwrap_or_default();
-            let data: Vec<Vec<serde_json::Value>> = rows
-                .iter()
-                .map(|row| (0..row.len()).map(|i| sqlite_value(row, i)).collect())
-                .collect();
+                        .collect();
+                }
+                if data.len() >= cap {
+                    truncated = true;
+                    break;
+                }
+                data.push((0..row.len()).map(|i| sqlite_value(&row, i)).collect());
+            }
             Ok(QueryResult {
                 row_count: data.len(),
                 rows_affected: 0,
                 columns,
                 rows: data,
-                duration_ms,
+                duration_ms: start.elapsed().as_millis() as u64,
                 is_select: true,
+                truncated,
             })
         } else {
             let res = sqlx::query(sql).execute(&pool).await?;
@@ -132,6 +138,7 @@ impl DbDriver for SqliteDriverImpl {
                 rows_affected: res.rows_affected(),
                 duration_ms: start.elapsed().as_millis() as u64,
                 is_select: false,
+                truncated: false,
             })
         }
     }
