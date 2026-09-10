@@ -12,7 +12,13 @@
     toast,
     toastError,
     sendToInspector,
-    historyLoad
+    historyLoad,
+    requestTabs,
+    activeRequestTab,
+    activeRequestTabId,
+    newRequestTab,
+    touchRequestTab,
+    persistRequestTab
   } from '../stores.js';
 
   const METHODS = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'HEAD', 'OPTIONS'];
@@ -38,6 +44,72 @@
       body: '',
       collection_id: null
     };
+  }
+
+  // ---- draft <-> active request tab ----------------------------------------
+  let loadedTabId = null;
+  let flushTimer;
+
+  $: if ($activeRequestTab && $activeRequestTab.id !== loadedTabId) {
+    hydrateDraft($activeRequestTab);
+  }
+
+  let hydrating = false;
+  function hydrateDraft(t) {
+    hydrating = true;
+    loadedTabId = t.id;
+    const headersObj = safeJson(t.headers_json);
+    draft = {
+      id: t.saved_request_id || '',
+      name: t.title || 'Untitled request',
+      method: t.method || 'GET',
+      url: t.url || '',
+      headers: ensureTrailingRow(
+        Object.entries(headersObj).map(([k, v]) => ({ k, v: String(v), on: true }))
+      ),
+      params: [{ k: '', v: '', on: true }],
+      body: t.body || '',
+      collection_id: null
+    };
+    urlToParams();
+    if (draft.body) tab = 'body';
+    response = t.response ?? null;
+    error = t.error ?? null;
+    sending = t.sending ?? false;
+    setTimeout(() => (hydrating = false), 0);
+  }
+
+  function safeJson(s) {
+    try {
+      return JSON.parse(s || '{}');
+    } catch {
+      return {};
+    }
+  }
+
+  function headersObject() {
+    const h = {};
+    for (const row of draft.headers) if (row.on && row.k.trim()) h[row.k.trim()] = row.v;
+    return h;
+  }
+
+  // Whenever the draft changes, sync it back to the tab (debounced).
+  $: draft, scheduleFlush();
+  function scheduleFlush() {
+    if (!loadedTabId || hydrating) return;
+    clearTimeout(flushTimer);
+    flushTimer = setTimeout(() => {
+      touchRequestTab(loadedTabId, {
+        title: draft.name,
+        method: draft.method,
+        url: draft.url,
+        headers_json: JSON.stringify(headersObject()),
+        body: draft.body || null,
+        saved_request_id: draft.id || null,
+        dirty: true
+      });
+      persistRequestTab(loadedTabId);
+    }, 400);
   }
 
   $: methodColor = `var(--m-${draft.method.toLowerCase()})`;
@@ -86,46 +158,40 @@
 
   async function send() {
     if (!draft.url.trim()) return;
+    const tabId = loadedTabId;
     sending = true;
     error = null;
     response = null;
-    const headers = {};
-    for (const h of draft.headers) if (h.on && h.k.trim()) headers[h.k.trim()] = h.v;
+    touchRequestTab(tabId, { sending: true, error: null });
     const req = {
       method: draft.method,
       url: draft.url.trim(),
-      headers,
+      headers: headersObject(),
       body: ['GET', 'HEAD'].includes(draft.method) ? null : draft.body || null,
       timeout_secs: 60
     };
     try {
-      response = await api.requestSend(req, true, draft.id || null, draft.name || null);
+      const r = await api.requestSend(req, true, draft.id || null, draft.name || null);
+      response = r;
       respTab = 'body';
+      touchRequestTab(tabId, { response: r, error: null, sending: false });
     } catch (e) {
       error = String(e);
+      touchRequestTab(tabId, { error: String(e), sending: false });
     } finally {
       sending = false;
     }
   }
 
-  function loadSaved(s) {
-    const headersObj = JSON.parse(s.headers_json || '{}');
-    draft = {
-      id: s.id,
-      name: s.name,
+  async function loadSaved(s) {
+    await newRequestTab({
+      title: s.name,
       method: s.method,
       url: s.url,
-      headers: ensureTrailingRow(
-        Object.entries(headersObj).map(([k, v]) => ({ k, v: String(v), on: true }))
-      ),
-      params: [{ k: '', v: '', on: true }],
-      body: s.body || '',
-      collection_id: s.collection_id
-    };
-    urlToParams();
-    if (draft.body) tab = 'body';
-    response = null;
-    error = null;
+      headers_json: s.headers_json,
+      body: s.body,
+      saved_request_id: s.id
+    });
   }
 
   let consumedHistory = null;
@@ -133,29 +199,23 @@
     consumedHistory = $historyLoad.at;
     loadHistoryEntry($historyLoad.entry, $historyLoad.resolved);
   }
-  function loadHistoryEntry(e, resolved) {
-    const headersObj = JSON.parse(e.headers_json || '{}');
-    draft = {
-      id: e.saved_request_id || '',
-      name: e.name || 'From history',
+  async function loadHistoryEntry(e, resolved) {
+    const t = await newRequestTab({
+      title: e.name || 'From history',
       method: e.method,
       url: e.url,
-      headers: ensureTrailingRow(
-        Object.entries(headersObj).map(([k, v]) => ({ k, v: String(v), on: true }))
-      ),
-      params: [{ k: '', v: '', on: true }],
-      body: e.body || '',
-      collection_id: null
-    };
-    urlToParams();
-    if (e.body) tab = 'body';
-    error = e.error || null;
-    response = null;
+      headers_json: e.headers_json,
+      body: e.body,
+      saved_request_id: e.saved_request_id || null
+    });
+    let resp = null;
     if (resolved) {
       try {
-        response = JSON.parse(resolved);
+        resp = JSON.parse(resolved);
       } catch {}
     }
+    touchRequestTab(t.id, { response: resp, error: e.error || null });
+    loadedTabId = null; // force re-hydrate to pull the response in
   }
 
   // Demo helper: ?req=<name>&send loads a saved request and sends it.
@@ -166,8 +226,9 @@
     for (let i = 0; i < 50 && !$savedRequests.length; i++) await tick();
     const match = $savedRequests.find((r) => r.name.toLowerCase().includes(want.toLowerCase()));
     if (match) {
-      loadSaved(match);
+      await loadSaved(match);
       if (q.has('send')) {
+        await tick();
         await tick();
         await send();
       }
@@ -175,8 +236,7 @@
   });
 
   async function save() {
-    const headers = {};
-    for (const h of draft.headers) if (h.on && h.k.trim()) headers[h.k.trim()] = h.v;
+    const headers = headersObject();
     const name = draft.id ? draft.name : prompt('Request name:', draft.name);
     if (!name) return;
     try {
@@ -205,7 +265,7 @@
     try {
       await api.savedRequestDelete(s.id);
       await reloadRequests();
-      if (draft.id === s.id) draft = blank();
+      if (draft.id === s.id) draft.id = '';
     } catch (e) {
       toastError(e);
     }
@@ -348,7 +408,7 @@
       <div>
         <button class="btn ghost sm" title="Import Postman collection / environment" on:click={() => fileInput.click()}>⇩</button>
         <button class="btn ghost sm" on:click={newCollection}>+ Folder</button>
-        <button class="btn ghost sm" on:click={() => (draft = blank())}>+ Req</button>
+        <button class="btn ghost sm" on:click={() => newRequestTab()}>+ Req</button>
       </div>
     </div>
     <input

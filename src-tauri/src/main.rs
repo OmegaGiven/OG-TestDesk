@@ -12,7 +12,7 @@ use tokio::sync::Mutex as AsyncMutex;
 use og_testdesk_core::{
     apply_environment, drivers, requests as http_requests, Column, ConnConfig, Environment,
     HistoryEntry, HttpRequest, HttpResponse, MetadataStore, QueryResult, QueryTab,
-    RequestCollection, SavedQuery, SavedRequest, Schema, SecretsStore, ServerInfo,
+    RequestCollection, RequestTab, SavedQuery, SavedRequest, Schema, SecretsStore, ServerInfo,
 };
 use tauri::{Manager, State};
 
@@ -284,6 +284,25 @@ async fn collection_delete(state: State<'_, AppState>, id: String) -> R<()> {
 #[tauri::command]
 async fn saved_requests_list(state: State<'_, AppState>) -> R<Vec<SavedRequest>> {
     state.metadata.list_saved_requests().await.map_err(err)
+}
+
+#[tauri::command]
+async fn request_tabs_list(state: State<'_, AppState>) -> R<Vec<RequestTab>> {
+    state.metadata.list_request_tabs().await.map_err(err)
+}
+
+#[tauri::command]
+async fn request_tab_save(state: State<'_, AppState>, mut tab: RequestTab) -> R<RequestTab> {
+    if tab.id.is_empty() {
+        tab.id = new_id();
+    }
+    state.metadata.upsert_request_tab(&tab).await.map_err(err)?;
+    Ok(tab)
+}
+
+#[tauri::command]
+async fn request_tab_delete(state: State<'_, AppState>, id: String) -> R<()> {
+    state.metadata.delete_request_tab(&id).await.map_err(err)
 }
 
 #[tauri::command]
@@ -622,6 +641,9 @@ async fn main() {
             collection_save,
             collection_delete,
             saved_requests_list,
+            request_tabs_list,
+            request_tab_save,
+            request_tab_delete,
             saved_request_save,
             saved_request_delete,
             environments_list,

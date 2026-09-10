@@ -23,6 +23,7 @@
     reloadConnections,
     reloadTabs,
     reloadRequests,
+    reloadRequestTabs,
     sendToInspector
   } from '../lib/stores.js';
 
@@ -44,11 +45,12 @@
   onMount(async () => {
     applyAppearance($appearance);
     await reloadConnections();
-    await Promise.all([reloadTabs(), reloadRequests()]);
+    await Promise.all([reloadTabs(), reloadRequests(), reloadRequestTabs()]);
 
     // Dev/demo helpers via query string (no effect in normal use):
     //   ?tool=requests|inspector   ?run  (auto-run the active SQL tab)
     const q = new URLSearchParams(location.search);
+    if (q.has('theme')) theme.set(q.get('theme'));
     if (q.has('settings')) settingsOpen = true;
     if (q.has('help')) helpOpen = true;
     if (q.has('activity')) activityOpen = true;

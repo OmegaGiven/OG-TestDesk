@@ -48,6 +48,11 @@ export const api = {
   collectionSave: (collection) => call('collection_save', { collection }),
   collectionDelete: (id) => call('collection_delete', { id }),
 
+  // request tabs
+  requestTabsList: () => call('request_tabs_list'),
+  requestTabSave: (tab) => call('request_tab_save', { tab }),
+  requestTabDelete: (id) => call('request_tab_delete', { id }),
+
   // saved requests
   savedRequestsList: () => call('saved_requests_list'),
   savedRequestSave: (request) => call('saved_request_save', { request }),

@@ -98,6 +98,18 @@ CREATE TABLE IF NOT EXISTS request_collections (
     parent_id TEXT REFERENCES request_collections(id) ON DELETE CASCADE
 );
 
+CREATE TABLE IF NOT EXISTS request_tabs (
+    id             TEXT PRIMARY KEY,
+    saved_request_id TEXT,
+    title          TEXT NOT NULL,
+    method         TEXT NOT NULL DEFAULT 'GET',
+    url            TEXT NOT NULL DEFAULT '',
+    headers_json   TEXT NOT NULL DEFAULT '{}',
+    body           TEXT,
+    position       INTEGER NOT NULL DEFAULT 0,
+    is_active      INTEGER NOT NULL DEFAULT 0
+);
+
 CREATE TABLE IF NOT EXISTS saved_requests (
     id            TEXT PRIMARY KEY,
     collection_id TEXT REFERENCES request_collections(id) ON DELETE SET NULL,
@@ -238,6 +250,19 @@ pub struct RequestCollection {
     pub id: String,
     pub name: String,
     pub parent_id: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RequestTab {
+    pub id: String,
+    pub saved_request_id: Option<String>,
+    pub title: String,
+    pub method: String,
+    pub url: String,
+    pub headers_json: String,
+    pub body: Option<String>,
+    pub position: i64,
+    pub is_active: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -742,6 +767,63 @@ impl MetadataStore {
 
     pub async fn delete_collection(&self, id: &str) -> Result<()> {
         sqlx::query("DELETE FROM request_collections WHERE id = ?")
+            .bind(id)
+            .execute(&self.pool)
+            .await?;
+        Ok(())
+    }
+
+    // --------------------------------------------------------- request tabs
+
+    pub async fn list_request_tabs(&self) -> Result<Vec<RequestTab>> {
+        let rows = sqlx::query(
+            "SELECT id, saved_request_id, title, method, url, headers_json, body, position, is_active
+             FROM request_tabs ORDER BY position",
+        )
+        .fetch_all(&self.pool)
+        .await?;
+        Ok(rows
+            .into_iter()
+            .map(|r| RequestTab {
+                id: r.get("id"),
+                saved_request_id: r.get("saved_request_id"),
+                title: r.get("title"),
+                method: r.get("method"),
+                url: r.get("url"),
+                headers_json: r.get("headers_json"),
+                body: r.get("body"),
+                position: r.get("position"),
+                is_active: r.get::<i64, _>("is_active") != 0,
+            })
+            .collect())
+    }
+
+    pub async fn upsert_request_tab(&self, t: &RequestTab) -> Result<()> {
+        sqlx::query(
+            "INSERT INTO request_tabs
+                (id, saved_request_id, title, method, url, headers_json, body, position, is_active)
+             VALUES (?,?,?,?,?,?,?,?,?)
+             ON CONFLICT(id) DO UPDATE SET
+                saved_request_id=excluded.saved_request_id, title=excluded.title,
+                method=excluded.method, url=excluded.url, headers_json=excluded.headers_json,
+                body=excluded.body, position=excluded.position, is_active=excluded.is_active",
+        )
+        .bind(&t.id)
+        .bind(&t.saved_request_id)
+        .bind(&t.title)
+        .bind(&t.method)
+        .bind(&t.url)
+        .bind(&t.headers_json)
+        .bind(&t.body)
+        .bind(t.position)
+        .bind(t.is_active as i64)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    pub async fn delete_request_tab(&self, id: &str) -> Result<()> {
+        sqlx::query("DELETE FROM request_tabs WHERE id = ?")
             .bind(id)
             .execute(&self.pool)
             .await?;

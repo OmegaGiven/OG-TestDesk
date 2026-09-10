@@ -351,6 +351,18 @@ if (typeof window !== 'undefined' && !window.__TAURI_INTERNALS__) {
     saved_requests_list: () => ok(savedRequests),
     saved_request_save: ({ request }) => ok({ ...request, id: request.id || 'r-' + Date.now() }),
     saved_request_delete: () => ok(null),
+    request_tabs_list: () => ok(mockReqTabs),
+    request_tab_save: ({ tab }) => {
+      const s = { ...tab, id: tab.id || 'rt-' + Date.now() };
+      const i = mockReqTabs.findIndex((x) => x.id === s.id);
+      if (i >= 0) mockReqTabs[i] = s;
+      else mockReqTabs = [...mockReqTabs, s];
+      return ok(s);
+    },
+    request_tab_delete: ({ id }) => {
+      mockReqTabs = mockReqTabs.filter((t) => t.id !== id);
+      return ok(null);
+    },
     environments_list: () => ok(environments),
     environment_save: ({ environment }) => ok({ ...environment, id: environment.id || 'env-' + Date.now() }),
     environment_delete: () => ok(null),
@@ -413,6 +425,30 @@ if (typeof window !== 'undefined' && !window.__TAURI_INTERNALS__) {
   };
   let mcpCfg = null;
   let mockLimit = 10000;
+  let mockReqTabs = [
+    {
+      id: 'rt-1',
+      saved_request_id: 'r1',
+      title: 'List posts',
+      method: 'GET',
+      url: '{{baseUrl}}/posts',
+      headers_json: '{}',
+      body: null,
+      position: 0,
+      is_active: true
+    },
+    {
+      id: 'rt-2',
+      saved_request_id: 'r3',
+      title: 'Create post',
+      method: 'POST',
+      url: '{{baseUrl}}/posts',
+      headers_json: '{"Content-Type":"application/json"}',
+      body: '{\n  "title": "hello",\n  "body": "from OG TestDesk",\n  "userId": 1\n}',
+      position: 1,
+      is_active: false
+    }
+  ];
   let mcpAcls = { [DEMO_SHOP]: { exposed: true, allow_writes: false } };
   let mockSchedules = [
     {

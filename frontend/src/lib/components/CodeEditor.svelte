@@ -5,7 +5,21 @@
   import { defaultKeymap, history, historyKeymap, indentWithTab } from '@codemirror/commands';
   import { sql as sqlLang } from '@codemirror/lang-sql';
   import { json as jsonLang } from '@codemirror/lang-json';
-  import { syntaxHighlighting, defaultHighlightStyle, bracketMatching } from '@codemirror/language';
+  import { syntaxHighlighting, HighlightStyle, bracketMatching } from '@codemirror/language';
+  import { tags as t } from '@lezer/highlight';
+
+  // Theme-following highlight — colours are CSS vars, so they update live
+  // when the app theme changes without rebuilding the editor.
+  const appHighlight = HighlightStyle.define([
+    { tag: [t.keyword, t.operatorKeyword, t.modifier], color: 'var(--j-key)' },
+    { tag: [t.string, t.special(t.string)], color: 'var(--j-string)' },
+    { tag: [t.number, t.bool, t.null], color: 'var(--j-number)' },
+    { tag: [t.propertyName, t.definition(t.propertyName)], color: 'var(--j-key)' },
+    { tag: [t.comment], color: 'var(--text-muted)', fontStyle: 'italic' },
+    { tag: [t.function(t.variableName), t.function(t.propertyName)], color: 'var(--tool-sql-text)' },
+    { tag: [t.typeName, t.className], color: 'var(--j-bool)' },
+    { tag: [t.punctuation, t.separator, t.bracket], color: 'var(--text-secondary)' }
+  ]);
 
   export let value = '';
   export let language = 'sql'; // 'sql' | 'json' | 'text'
@@ -52,7 +66,7 @@
           history(),
           bracketMatching(),
           highlightActiveLine(),
-          syntaxHighlighting(defaultHighlightStyle, { fallback: true }),
+          syntaxHighlighting(appHighlight, { fallback: true }),
           keymap.of([...defaultKeymap, ...historyKeymap, indentWithTab]),
           runKey,
           langComp.of(langExt()),
@@ -66,16 +80,32 @@
             }
           }),
           EditorView.theme({
-            '&': { height: '100%', fontSize: '12.5px' },
+            '&': {
+              height: '100%',
+              fontSize: '12.5px',
+              color: 'var(--text-primary)',
+              backgroundColor: 'var(--surface-2)'
+            },
+            '.cm-content': { caretColor: 'var(--text-primary)' },
             '.cm-scroller': { fontFamily: 'var(--font-mono)', overflow: 'auto' },
             '&.cm-focused': { outline: 'none' },
+            '.cm-cursor, .cm-dropCursor': { borderLeftColor: 'var(--text-primary)' },
+            '&.cm-focused .cm-selectionBackground, .cm-selectionBackground, .cm-content ::selection': {
+              backgroundColor: 'color-mix(in srgb, var(--tool-sql-text) 22%, transparent)'
+            },
             '.cm-gutters': {
               background: 'var(--surface-1)',
               color: 'var(--text-muted)',
               border: 'none'
             },
-            '.cm-activeLine': { background: 'color-mix(in srgb, var(--text-secondary) 8%, transparent)' },
-            '.cm-activeLineGutter': { background: 'transparent' }
+            '.cm-activeLine': {
+              background: 'color-mix(in srgb, var(--text-secondary) 8%, transparent)'
+            },
+            '.cm-activeLineGutter': { background: 'transparent' },
+            '.cm-matchingBracket': {
+              background: 'color-mix(in srgb, var(--tool-sql-text) 25%, transparent)',
+              outline: 'none'
+            }
           })
         ]
       })

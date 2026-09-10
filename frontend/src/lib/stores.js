@@ -197,6 +197,93 @@ export async function saveGlobals(obj) {
 
 export const activeEnvironment = derived(environments, ($e) => $e.find((x) => x.is_active) || null);
 
+/* --------------------------------------------------------- request tabs */
+
+export const requestTabs = writable([]);
+export const activeRequestTabId = writable(null);
+export const activeRequestTab = derived([requestTabs, activeRequestTabId], ([$t, $id]) =>
+  $t.find((x) => x.id === $id)
+);
+
+export async function reloadRequestTabs() {
+  try {
+    let rows = await api.requestTabsList();
+    requestTabs.set(
+      rows.map((t) => ({ ...t, response: null, error: null, sending: false, dirty: false }))
+    );
+    const active = rows.find((t) => t.is_active);
+    activeRequestTabId.set(active?.id ?? rows[0]?.id ?? null);
+    if (rows.length === 0) await newRequestTab();
+  } catch (e) {
+    toastError(e);
+  }
+}
+
+export async function newRequestTab(seed = {}) {
+  const tabs = get(requestTabs);
+  let tab = {
+    id: '',
+    saved_request_id: seed.saved_request_id ?? null,
+    title: seed.title || 'Untitled',
+    method: seed.method || 'GET',
+    url: seed.url || '',
+    headers_json: seed.headers_json || '{}',
+    body: seed.body ?? null,
+    position: tabs.length,
+    is_active: true
+  };
+  tab = await api.requestTabSave(tab);
+  const local = { ...tab, response: null, error: null, sending: false, dirty: false };
+  requestTabs.update((t) => [...t, local]);
+  activeRequestTabId.set(tab.id);
+  return local;
+}
+
+export function touchRequestTab(id, patch) {
+  requestTabs.update((tabs) => tabs.map((t) => (t.id === id ? { ...t, ...patch } : t)));
+}
+
+let rtTimers = {};
+export function persistRequestTab(id, immediate = false) {
+  clearTimeout(rtTimers[id]);
+  const save = async () => {
+    const t = get(requestTabs).find((x) => x.id === id);
+    if (!t) return;
+    try {
+      await api.requestTabSave({
+        id: t.id,
+        saved_request_id: t.saved_request_id,
+        title: t.title,
+        method: t.method,
+        url: t.url,
+        headers_json: t.headers_json,
+        body: t.body,
+        position: t.position,
+        is_active: get(activeRequestTabId) === t.id
+      });
+      touchRequestTab(id, { dirty: false });
+    } catch (e) {
+      toastError(e);
+    }
+  };
+  if (immediate) save();
+  else rtTimers[id] = setTimeout(save, 600);
+}
+
+export async function closeRequestTab(id) {
+  clearTimeout(rtTimers[id]);
+  try {
+    await api.requestTabDelete(id);
+  } catch (e) {
+    toastError(e);
+  }
+  const tabs = get(requestTabs).filter((t) => t.id !== id);
+  requestTabs.set(tabs);
+  if (get(activeRequestTabId) === id) {
+    activeRequestTabId.set(tabs[tabs.length - 1]?.id ?? null);
+  }
+}
+
 /* ------------------------------------------------------- history recall */
 
 // Set by the Activity modal; consumed by SqlView / RequestsView.

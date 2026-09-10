@@ -6,7 +6,12 @@
     activeTool,
     newSqlTab,
     closeSqlTab,
-    persistSqlTab
+    persistSqlTab,
+    requestTabs,
+    activeRequestTabId,
+    newRequestTab,
+    closeRequestTab,
+    persistRequestTab
   } from '../stores.js';
   import { api } from '../api.js';
 
@@ -33,6 +38,22 @@
   function close(id, e) {
     e.stopPropagation();
     closeSqlTab(id);
+  }
+
+  function selectReqTab(id) {
+    activeTool.set('requests');
+    activeRequestTabId.set(id);
+    persistRequestTab(id, true);
+  }
+  async function addReqTab() {
+    activeTool.set('requests');
+    try {
+      await newRequestTab();
+    } catch (e) {}
+  }
+  function closeReq(id, e) {
+    e.stopPropagation();
+    closeRequestTab(id);
   }
 </script>
 
@@ -70,15 +91,40 @@
 
   <div class="divider" />
 
-  {#each TOOLS.slice(1) as tool}
-    <div
-      class="tool flat"
-      class:active={$activeTool === tool.id}
-      style="--tint: {tool.tint}; --tint-text: {tool.text};"
-    >
-      <button class="tool-label" on:click={() => activeTool.set(tool.id)}>{tool.label}</button>
-    </div>
-  {/each}
+  <!-- Requests tool: request tabs -->
+  <div
+    class="tool"
+    class:active={$activeTool === 'requests'}
+    style="--tint: var(--tool-requests-tint); --tint-text: var(--tool-requests-text);"
+  >
+    <button class="tool-label" on:click={() => activeTool.set('requests')}>Requests</button>
+    {#each $requestTabs as rt (rt.id)}
+      <button
+        class="tab"
+        class:active={$activeRequestTabId === rt.id && $activeTool === 'requests'}
+        style="--dot: var(--m-{(rt.method || 'get').toLowerCase()})"
+        on:click={() => selectReqTab(rt.id)}
+        title={rt.title}
+      >
+        <span class="rt-method" style="color: var(--m-{(rt.method || 'get').toLowerCase()})">
+          {rt.method}
+        </span>
+        {rt.dirty ? '•' : ''}{rt.title}
+        <span class="x" on:click={(e) => closeReq(rt.id, e)} role="button" tabindex="-1">×</span>
+      </button>
+    {/each}
+    <button class="add" title="New request" on:click={addReqTab}>+</button>
+  </div>
+
+  <div class="divider" />
+
+  <div
+    class="tool flat"
+    class:active={$activeTool === 'inspector'}
+    style="--tint: var(--tool-inspector-tint); --tint-text: var(--tool-inspector-text);"
+  >
+    <button class="tool-label" on:click={() => activeTool.set('inspector')}>Inspector</button>
+  </div>
 </nav>
 
 <style>
@@ -167,6 +213,10 @@
     background: color-mix(in srgb, var(--dot, var(--text-secondary)) 20%, transparent);
     color: var(--text-primary);
     font-weight: 500;
+  }
+  .rt-method {
+    font-size: 9px;
+    font-weight: 800;
   }
   .x {
     font-size: 12px;
