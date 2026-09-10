@@ -1,6 +1,9 @@
 <script>
   import { createEventDispatcher } from 'svelte';
+  import { downloadText, copyText, rowsToDelimited, rowsToObjects } from '../export.js';
+  import { toast } from '../stores.js';
   export let result;
+  export let name = 'result';
   const dispatch = createEventDispatcher();
 
   let sortCol = -1;
@@ -132,6 +135,25 @@
     colFilters = {};
   }
 
+  $: fileBase = (name || 'result').replace(/[^\w.-]+/g, '_').slice(0, 60) || 'result';
+  function doExport(fmt) {
+    if (fmt === 'csv') {
+      downloadText(`${fileBase}.csv`, rowsToDelimited(cols, rows, ','), 'text/csv');
+    } else if (fmt === 'tsv') {
+      downloadText(`${fileBase}.tsv`, rowsToDelimited(cols, rows, '\t'), 'text/tab-separated-values');
+    } else if (fmt === 'json') {
+      downloadText(
+        `${fileBase}.json`,
+        JSON.stringify(rowsToObjects(cols, rows), null, 2),
+        'application/json'
+      );
+    } else if (fmt === 'copy') {
+      copyText(rowsToDelimited(cols, rows, '\t')).then((ok) =>
+        toast(ok ? `Copied ${rows.length.toLocaleString()} rows` : 'Copy blocked', ok ? 'success' : 'error', 1800)
+      );
+    }
+  }
+
   function display(v) {
     if (v === null || v === undefined) return 'NULL';
     if (typeof v === 'object') return JSON.stringify(v);
@@ -197,7 +219,13 @@
       <button class="btn ghost sm" on:click={clearFilters}>Clear</button>
     {/if}
     <span style="flex:1" />
-    <span class="hint">contains · <code>&gt; 10</code> <code>!=x</code> <code>!text</code></span>
+    <span class="export">
+      <span class="ex-label">Export{hasFilter ? ' (filtered)' : result.has_more || result.page > 0 ? ' (page)' : ''}</span>
+      <button class="btn ghost sm" on:click={() => doExport('csv')}>CSV</button>
+      <button class="btn ghost sm" on:click={() => doExport('tsv')}>TSV</button>
+      <button class="btn ghost sm" on:click={() => doExport('json')}>JSON</button>
+      <button class="btn ghost sm" title="Copy as TSV (paste into a spreadsheet)" on:click={() => doExport('copy')}>⧉</button>
+    </span>
   </div>
 
   {#if result.truncated}
@@ -299,14 +327,15 @@
     font-family: var(--font-mono);
     color: var(--text-secondary);
   }
-  .hint {
+  .export {
+    display: flex;
+    align-items: center;
+    gap: 3px;
+  }
+  .ex-label {
     font-size: 10px;
     color: var(--text-muted);
-  }
-  .hint code {
-    background: var(--surface-3);
-    border-radius: 3px;
-    padding: 0 3px;
+    margin-right: 3px;
   }
   .trunc {
     padding: 6px 10px;

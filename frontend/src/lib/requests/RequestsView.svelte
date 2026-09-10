@@ -4,6 +4,7 @@
   import EnvModal from './EnvModal.svelte';
   import { api } from '../api.js';
   import { parsePostman } from './postman.js';
+  import { downloadText, copyText, toCurl } from '../export.js';
   import {
     requestCollections,
     savedRequests,
@@ -374,6 +375,31 @@
     sendToInspector('requests', `${draft.method} ${draft.url}`, json);
   }
 
+  function respFileBase() {
+    return (draft.name || 'response').replace(/[^\w.-]+/g, '_').slice(0, 60) || 'response';
+  }
+  function saveResponse() {
+    if (!response) return;
+    const json = response.is_json;
+    const text = json ? tryPretty(response.body) : response.body;
+    downloadText(
+      `${respFileBase()}.${json ? 'json' : 'txt'}`,
+      text,
+      json ? 'application/json' : 'text/plain'
+    );
+  }
+  async function copyResponse() {
+    if (!response) return;
+    const ok = await copyText(response.body);
+    toast(ok ? 'Response body copied' : 'Copy blocked', ok ? 'success' : 'error', 1500);
+  }
+  async function copyCurl() {
+    const headers = headersObject();
+    const body = ['GET', 'HEAD'].includes(draft.method) ? null : draft.body || null;
+    const ok = await copyText(toCurl(draft.method, draft.url, headers, body));
+    toast(ok ? 'curl command copied' : 'Copy blocked', ok ? 'success' : 'error', 1500);
+  }
+
   function statusClass(s) {
     if (s >= 200 && s < 300) return 'ok';
     if (s >= 300 && s < 400) return 'redir';
@@ -540,6 +566,9 @@
             {#if response.is_json}
               <button class="btn ghost sm" on:click={inspectResponse}>→ Inspector</button>
             {/if}
+            <button class="btn ghost sm" on:click={saveResponse}>Save</button>
+            <button class="btn ghost sm" title="Copy response body" on:click={copyResponse}>⧉ Body</button>
+            <button class="btn ghost sm" title="Copy request as curl" on:click={copyCurl}>curl</button>
             <div class="subtabs sm">
               <button class:active={respTab === 'body'} on:click={() => (respTab = 'body')}>Body</button>
               <button class:active={respTab === 'headers'} on:click={() => (respTab = 'headers')}>

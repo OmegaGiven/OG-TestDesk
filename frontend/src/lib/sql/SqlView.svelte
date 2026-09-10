@@ -192,36 +192,6 @@
     }
   }
 
-  function exportData(fmt) {
-    const r = tab?.result;
-    if (!r || !r.is_select) return;
-    let text, mime, ext;
-    if (fmt === 'json') {
-      const objs = r.rows.map((row) =>
-        Object.fromEntries(r.columns.map((c, i) => [c.name, row[i]]))
-      );
-      text = JSON.stringify(objs, null, 2);
-      mime = 'application/json';
-      ext = 'json';
-    } else {
-      const esc = (v) =>
-        v === null || v === undefined
-          ? ''
-          : `"${String(typeof v === 'object' ? JSON.stringify(v) : v).replace(/"/g, '""')}"`;
-      text = [
-        r.columns.map((c) => c.name).join(','),
-        ...r.rows.map((row) => row.map(esc).join(','))
-      ].join('\n');
-      mime = 'text/csv';
-      ext = 'csv';
-    }
-    const a = document.createElement('a');
-    a.href = URL.createObjectURL(new Blob([text], { type: mime }));
-    a.download = `${tab.title || 'result'}.${ext}`;
-    a.click();
-    URL.revokeObjectURL(a.href);
-  }
-
   function inspectResult() {
     const r = tab?.result;
     if (!r || !r.is_select) return;
@@ -327,8 +297,6 @@
             <button class="btn ghost sm" on:click={() => run(-1)}>Load all</button>
           {/if}
           <button class="btn ghost sm" on:click={inspectResult}>→ Inspector</button>
-          <button class="btn ghost sm" on:click={() => exportData('csv')}>CSV</button>
-          <button class="btn ghost sm" on:click={() => exportData('json')}>JSON</button>
         {/if}
       </div>
 
@@ -364,7 +332,7 @@
           {#if tab.error}
             <div class="err">{tab.error}</div>
           {:else}
-            <ResultGrid result={tab.result} on:inspect={inspectCell} />
+            <ResultGrid result={tab.result} name={tab.title} on:inspect={inspectCell} />
           {/if}
         </div>
       </div>
