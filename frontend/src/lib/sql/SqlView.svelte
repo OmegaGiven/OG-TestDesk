@@ -20,8 +20,7 @@
     historyLoad,
     appearance,
     savedQueries,
-    reloadSavedQueries,
-    connMenuOpen
+    reloadSavedQueries
   } from '../stores.js';
 
   let sqOpen =
@@ -248,16 +247,6 @@
 
 <div class="sql">
   <aside class="sidebar">
-    <div class="sb-head">
-      {#if sidebarConn}
-        <span class="dot" style="background:{sidebarConn.color || 'var(--conn-slate)'}" />
-        <span class="sb-conn">{sidebarConn.nickname}</span>
-      {/if}
-      <button class="btn ghost sm" title="Switch / manage connections" on:click={() => connMenuOpen.set(true)}>
-        {sidebarConn ? 'Switch ▾' : 'Connections ▾'}
-      </button>
-    </div>
-
     <div class="sq-section" class:open={sqOpen}>
       <button class="sec-head sq-toggle" on:click={() => (sqOpen = !sqOpen)}>
         <span class="chev">{sqOpen ? '▾' : '▸'}</span>
@@ -412,26 +401,6 @@
     display: flex;
     flex-direction: column;
     overflow: hidden;
-  }
-  .sb-head {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    padding: 7px 8px;
-    border-bottom: 1px solid var(--border);
-    flex-shrink: 0;
-  }
-  .sb-conn {
-    font-size: 12px;
-    font-weight: 700;
-    color: var(--text-primary);
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-    flex: 1;
-  }
-  .sb-head .btn {
-    flex-shrink: 0;
   }
   .sec-head {
     display: flex;
