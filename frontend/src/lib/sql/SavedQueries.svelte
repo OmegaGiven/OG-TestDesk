@@ -3,6 +3,7 @@
   import { writable } from 'svelte/store';
   import { api } from '../api.js';
   import FolderNode from './FolderNode.svelte';
+  import { ICONS } from '../icons.js';
   import {
     savedQueries,
     savedQueryFolders,
@@ -211,9 +212,9 @@
 <div class="sq">
   <div class="sq-tools">
     <input class="input sm" placeholder="Filter saved queries…" bind:value={filter} />
-    <button class="btn ghost sm" title="New query" on:click={() => newQuery(null)}>＋≡</button>
-    <button class="btn ghost sm" title="New folder" on:click={() => newFolder(null)}>＋⌸</button>
-    <button class="btn ghost sm" title="Refresh" on:click={reload}>⟳</button>
+    <button class="btn ghost sm" title="New query" on:click={() => newQuery(null)}>{ICONS.newQuery.glyph}</button>
+    <button class="btn ghost sm" title="New folder" on:click={() => newFolder(null)}>{ICONS.newFolder.glyph}</button>
+    <button class="btn ghost sm" title="Refresh" on:click={reload}>{ICONS.refresh.glyph}</button>
   </div>
 
   <div
@@ -230,8 +231,8 @@
             <span class="qname">{s.name}</span>
             {#if folderPath(s.folder_id)}<span class="qconn">{folderPath(s.folder_id)}</span>{/if}
           </button>
-          <button class="qact" title="Rename" on:click={() => renameQuery(s)}>✎</button>
-          <button class="qact" title="Delete" on:click={() => deleteQuery(s)}>✕</button>
+          <button class="qact" title="Rename" on:click={() => renameQuery(s)}>{ICONS.rename.glyph}</button>
+          <button class="qact" title="Delete" on:click={() => deleteQuery(s)}>{ICONS.delete.glyph}</button>
         </div>
       {/each}
       {#if matches.length === 0}<div class="none">No matches.</div>{/if}
@@ -245,8 +246,8 @@
             <span class="qname">{q.name}</span>
             {#if connName(q.connection_id)}<span class="qconn">{connName(q.connection_id)}</span>{/if}
           </button>
-          <button class="qact" title="Rename" on:click={() => renameQuery(q)}>✎</button>
-          <button class="qact" title="Delete" on:click={() => deleteQuery(q)}>✕</button>
+          <button class="qact" title="Rename" on:click={() => renameQuery(q)}>{ICONS.rename.glyph}</button>
+          <button class="qact" title="Delete" on:click={() => deleteQuery(q)}>{ICONS.delete.glyph}</button>
         </div>
       {/each}
       {#if rootFolders.length === 0 && rootQueries.length === 0}

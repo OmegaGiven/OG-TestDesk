@@ -1,6 +1,7 @@
 <script>
   import { get } from 'svelte/store';
   import { tick } from 'svelte';
+  import { ICONS } from '../icons.js';
   import CodeEditor from '../components/CodeEditor.svelte';
   import ResultGrid from './ResultGrid.svelte';
   import SchemaTree from './SchemaTree.svelte';
@@ -268,7 +269,7 @@
   <aside class="sidebar">
     <div class="sq-section" class:open={sqOpen}>
       <button class="sec-head sq-toggle" on:click={() => (sqOpen = !sqOpen)}>
-        <span class="chev">{sqOpen ? '▾' : '▸'}</span>
+        <span class="chev">{sqOpen ? ICONS.expandOpen.glyph : ICONS.expandClosed.glyph}</span>
         <span>Saved queries</span>
         <span class="sq-badge">{$savedQueries.length}</span>
       </button>
@@ -328,7 +329,7 @@
           {#if tab.result.page_size > 0 && (tab.result.has_more || tab.result.page > 0)}
             <button class="btn ghost sm" on:click={() => run(-1)}>Load all</button>
           {/if}
-          <button class="btn ghost sm" on:click={inspectResult}>→ Inspector</button>
+          <button class="btn ghost sm" on:click={inspectResult}>{ICONS.toInspector.glyph} Inspector</button>
         {/if}
       </div>
 

@@ -1,5 +1,6 @@
 <script>
   import Modal from './Modal.svelte';
+  import { ICONS } from '../icons.js';
 
   // Each section: plain text `body` lines (rendered as <p>), `code` blocks,
   // and `steps` (ordered). Searchable over title + keywords + all text.
@@ -21,7 +22,7 @@
       blocks: [
         { p: 'Add a connection with "+ New" in the SQL sidebar. Pick Postgres, MySQL/MariaDB, or SQLite, fill host/port/database/user (or a file path for SQLite), and give it an accent color. "Test" checks it before saving. Passwords go to the OS keychain, never the app database.' },
         { p: 'Each connection gets query tabs. Write SQL, then Run (⌘↵) or click ▶ Run. If you select text first, only the selection runs.' },
-        { p: 'The schema tree on the left is lazy — expand a table to load its columns. The ↵ icon next to a table opens a "SELECT * … LIMIT 100" tab and runs it.' },
+        { p: 'The schema tree on the left is lazy — expand a table to load its columns. The ↵ icon next to a table opens a "SELECT * FROM …" tab and runs it, paginated — scroll the results to keep pulling more of the table in.' },
         { p: 'Results grid: click a column header to sort, click a cell to select it (⌘C copies), and use → Inspector / CSV / JSON in the toolbar to send or export the result set.' }
       ]
     },
@@ -100,6 +101,19 @@
       ]
     },
     {
+      id: 'icons',
+      title: 'Icon reference',
+      keywords:
+        'icon glyph symbol button meaning legend reference ' +
+        Object.values(ICONS)
+          .map((i) => `${i.label} ${i.where}`)
+          .join(' '),
+      blocks: [
+        { p: 'Every icon button in the app, and where you\'ll run into it. This table reads straight from the app\'s own icon registry — if a glyph changes, this list changes with it.' },
+        { iconTable: true }
+      ]
+    },
+    {
       id: 'shortcuts',
       title: 'Keyboard shortcuts',
       keywords: 'keys hotkey shortcut cmd ctrl run save copy switch tool',
@@ -125,6 +139,10 @@
 
   let query = '';
   let activeId = SECTIONS[0].id;
+  if (typeof location !== 'undefined') {
+    const s = new URLSearchParams(location.search).get('helpsection');
+    if (s && SECTIONS.some((x) => x.id === s)) activeId = s;
+  }
 
   function sectionText(s) {
     return (
@@ -175,6 +193,21 @@
           <ol>
             {#each b.steps as step}<li>{step}</li>{/each}
           </ol>
+        {:else if b.iconTable}
+          <table class="icon-ref">
+            <thead>
+              <tr><th class="ic">Icon</th><th>Meaning</th><th>Where</th></tr>
+            </thead>
+            <tbody>
+              {#each Object.values(ICONS) as icon}
+                <tr>
+                  <td class="ic" style={icon.colorVar ? `color:var(${icon.colorVar})` : ''}>{icon.glyph}</td>
+                  <td>{icon.label}</td>
+                  <td class="where">{icon.where}</td>
+                </tr>
+              {/each}
+            </tbody>
+          </table>
         {/if}
       {/each}
     </article>
@@ -264,5 +297,37 @@
     overflow-x: auto;
     margin: 0 0 12px;
     white-space: pre;
+  }
+  .icon-ref {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 12px;
+    margin-bottom: 12px;
+  }
+  .icon-ref th {
+    text-align: left;
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+    color: var(--text-muted);
+    padding: 4px 8px;
+    border-bottom: 1px solid var(--border-strong);
+  }
+  .icon-ref td {
+    padding: 5px 8px;
+    border-bottom: 1px solid var(--border);
+    color: var(--text-secondary);
+    vertical-align: top;
+  }
+  .icon-ref td.ic {
+    width: 40px;
+    font-size: 14px;
+    text-align: center;
+    color: var(--text-primary);
+    font-family: var(--font-mono);
+  }
+  .icon-ref td.where {
+    color: var(--text-muted);
+    font-size: 11px;
   }
 </style>

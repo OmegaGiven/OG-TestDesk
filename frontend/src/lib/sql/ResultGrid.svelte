@@ -2,6 +2,7 @@
   import { createEventDispatcher } from 'svelte';
   import { downloadText, copyText, rowsToDelimited, rowsToObjects } from '../export.js';
   import { toast } from '../stores.js';
+  import { ICONS } from '../icons.js';
   export let result;
   export let name = 'result';
   export let loadingMore = false; // parent is fetching the next page
@@ -280,7 +281,7 @@
   <div class="empty">Run a query to see results.</div>
 {:else if !result.is_select}
   <div class="empty">
-    <div style="font-size:22px">✓</div>
+    <div style="font-size:22px">{ICONS.success.glyph}</div>
     {result.rows_affected} row{result.rows_affected === 1 ? '' : 's'} affected · {result.duration_ms} ms
   </div>
 {:else if baseRows.length === 0}
@@ -296,7 +297,7 @@
       class="btn ghost sm"
       class:on={showColFilters}
       title="Per-column filters"
-      on:click={() => (showColFilters = !showColFilters)}>⑂ Filters</button
+      on:click={() => (showColFilters = !showColFilters)}>{ICONS.columnFilters.glyph} Filters</button
     >
     <span class="cols-menu-wrap">
       <button
@@ -304,7 +305,7 @@
         class:on={colsMenuOpen}
         title="Show / hide columns"
         on:click={() => (colsMenuOpen = !colsMenuOpen)}
-        >☰ Columns{hiddenCols.size ? ` (${visibleIdx.length}/${cols.length})` : ''}</button
+        >{ICONS.columns.glyph} Columns{hiddenCols.size ? ` (${visibleIdx.length}/${cols.length})` : ''}</button
       >
       {#if colsMenuOpen}
         <div class="backdrop" on:click={() => (colsMenuOpen = false)} role="presentation" />
@@ -330,11 +331,11 @@
       <button class="btn ghost sm" on:click={clearFilters}>Clear</button>
     {/if}
     <button class="btn ghost sm" class:on={editing} title="Edit cells (view/export only, does not write to the DB)" on:click={() => (editing = !editing)}>
-      ✎ Edit
+      {ICONS.editCells.glyph} Edit
     </button>
     {#if editCount}
       <span class="fcount">{editCount.toLocaleString()} edited</span>
-      <button class="btn ghost sm" on:click={discardEdits}>↺ Discard</button>
+      <button class="btn ghost sm" on:click={discardEdits}>{ICONS.revert.glyph} Discard</button>
     {/if}
     <span style="flex:1" />
     <span class="export">
@@ -350,7 +351,7 @@
       <button class="btn ghost sm" on:click={() => doExport('csv')}>CSV</button>
       <button class="btn ghost sm" on:click={() => doExport('tsv')}>TSV</button>
       <button class="btn ghost sm" on:click={() => doExport('json')}>JSON</button>
-      <button class="btn ghost sm" title="Copy as TSV (paste into a spreadsheet)" on:click={() => doExport('copy')}>⧉</button>
+      <button class="btn ghost sm" title="Copy as TSV (paste into a spreadsheet)" on:click={() => doExport('copy')}>{ICONS.copy.glyph}</button>
     </span>
   </div>
 
@@ -372,7 +373,7 @@
                 <span class="cn">{cols[i].name}</span>
                 <span class="ty">{cols[i].type_name}</span>
               </span>
-              {#if sortCol === i}<span class="arr">{sortDir === 1 ? '▲' : '▼'}</span>{/if}
+              {#if sortCol === i}<span class="arr">{sortDir === 1 ? ICONS.sortAsc.glyph : ICONS.sortDesc.glyph}</span>{/if}
             </th>
           {/each}
         </tr>

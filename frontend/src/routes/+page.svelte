@@ -11,6 +11,7 @@
   import WindowControls from '../lib/components/WindowControls.svelte';
   import ConnectionsMenu from '../lib/sql/ConnectionsMenu.svelte';
   import { appearance, applyAppearance } from '../lib/stores.js';
+  import { ICONS } from '../lib/icons.js';
 
   const isMac =
     typeof navigator !== 'undefined' &&
@@ -106,11 +107,11 @@
   <div class="chrome" class:mac={isMac}>
     {#if isMac}<div class="tl-space"></div>{/if}
     <TopNav />
-    <button class="chrome-btn" on:click={() => (activityOpen = true)} title="History & schedules">⏱</button>
-    <button class="chrome-btn" on:click={() => (helpOpen = true)} title="Help">?</button>
-    <button class="chrome-btn" on:click={() => (settingsOpen = true)} title="Settings">⚙</button>
+    <button class="chrome-btn" on:click={() => (activityOpen = true)} title="History & schedules">{ICONS.history.glyph}</button>
+    <button class="chrome-btn" on:click={() => (helpOpen = true)} title="Help">{ICONS.help.glyph}</button>
+    <button class="chrome-btn" on:click={() => (settingsOpen = true)} title="Settings">{ICONS.settings.glyph}</button>
     <button class="chrome-btn" on:click={cycleTheme} title="Theme: {$theme}">
-      {$theme === 'dark' ? '☾' : $theme === 'light' ? '☀' : '◐'}
+      {$theme === 'dark' ? ICONS.themeDark.glyph : $theme === 'light' ? ICONS.themeLight.glyph : ICONS.themeSystem.glyph}
     </button>
     {#if !isMac}<WindowControls />{/if}
   </div>

@@ -1,6 +1,7 @@
 <script>
   import Modal from '../components/Modal.svelte';
   import { api } from '../api.js';
+  import { ICONS } from '../icons.js';
   import {
     environments,
     requestGlobals,
@@ -95,7 +96,7 @@
           <span class="name">{env.name}</span>
           <span class="cnt">{Object.keys(JSON.parse(env.variables_json || '{}')).length} vars</span>
           <button class="btn ghost sm" on:click={() => edit(env)}>Edit</button>
-          <button class="btn ghost sm danger" on:click={() => remove(env)}>✕</button>
+          <button class="btn ghost sm danger" on:click={() => remove(env)}>{ICONS.delete.glyph}</button>
         </div>
       {/each}
       {#if list.length === 0}<div class="muted">No environments yet.</div>{/if}

@@ -4,6 +4,7 @@
   import EnvModal from './EnvModal.svelte';
   import { api } from '../api.js';
   import { parsePostman } from './postman.js';
+  import { ICONS } from '../icons.js';
   import { downloadText, copyText, toCurl } from '../export.js';
   import {
     requestCollections,
@@ -432,7 +433,7 @@
     <div class="sec-head">
       <span>Collections</span>
       <div>
-        <button class="btn ghost sm" title="Import Postman collection / environment" on:click={() => fileInput.click()}>⇩</button>
+        <button class="btn ghost sm" title="Import Postman collection / environment" on:click={() => fileInput.click()}>{ICONS.importPostman.glyph}</button>
         <button class="btn ghost sm" on:click={newCollection}>+ Folder</button>
         <button class="btn ghost sm" on:click={() => newRequestTab()}>+ Req</button>
       </div>
@@ -448,7 +449,7 @@
       {#each grouped.collections as col (col.id)}
         <div class="col-head">
           <span>{col.name}</span>
-          <button class="btn ghost sm danger" on:click={() => delCollection(col)}>✕</button>
+          <button class="btn ghost sm danger" on:click={() => delCollection(col)}>{ICONS.delete.glyph}</button>
         </div>
         {#each col.items as s (s.id)}
           <div class="req-item" class:active={draft.id === s.id}>
@@ -456,7 +457,7 @@
               <span class="mm" style="color:var(--m-{s.method.toLowerCase()})">{s.method}</span>
               <span class="rn">{s.name}</span>
             </button>
-            <button class="del" on:click={() => delSaved(s)}>✕</button>
+            <button class="del" on:click={() => delSaved(s)}>{ICONS.delete.glyph}</button>
           </div>
         {/each}
       {/each}
@@ -468,7 +469,7 @@
               <span class="mm" style="color:var(--m-{s.method.toLowerCase()})">{s.method}</span>
               <span class="rn">{s.name}</span>
             </button>
-            <button class="del" on:click={() => delSaved(s)}>✕</button>
+            <button class="del" on:click={() => delSaved(s)}>{ICONS.delete.glyph}</button>
           </div>
         {/each}
       {/if}
@@ -564,10 +565,10 @@
             {#if response.content_type}<span class="meta ct">{response.content_type.split(';')[0]}</span>{/if}
             <span style="flex:1" />
             {#if response.is_json}
-              <button class="btn ghost sm" on:click={inspectResponse}>→ Inspector</button>
+              <button class="btn ghost sm" on:click={inspectResponse}>{ICONS.toInspector.glyph} Inspector</button>
             {/if}
             <button class="btn ghost sm" on:click={saveResponse}>Save</button>
-            <button class="btn ghost sm" title="Copy response body" on:click={copyResponse}>⧉ Body</button>
+            <button class="btn ghost sm" title="Copy response body" on:click={copyResponse}>{ICONS.copy.glyph} Body</button>
             <button class="btn ghost sm" title="Copy request as curl" on:click={copyCurl}>curl</button>
             <div class="subtabs sm">
               <button class:active={respTab === 'body'} on:click={() => (respTab = 'body')}>Body</button>

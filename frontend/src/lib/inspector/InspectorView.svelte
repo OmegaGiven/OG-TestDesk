@@ -1,6 +1,7 @@
 <script>
   import JsonNode from './JsonNode.svelte';
   import { inspectorPayload, toast } from '../stores.js';
+  import { ICONS } from '../icons.js';
 
   let mode = 'tree'; // tree | table | summary
   let filter = '';
@@ -273,7 +274,7 @@
       {:else if mode === 'raw'}
         <div class="raw-view">
           <div class="raw-view-tools">
-            <button class="btn ghost sm" on:click={() => copy(rawPretty)} disabled={!rawPretty}>⧉ Copy</button>
+            <button class="btn ghost sm" on:click={() => copy(rawPretty)} disabled={!rawPretty}>{ICONS.copy.glyph} Copy</button>
             <span class="mc">{rawPretty.length.toLocaleString()} chars</span>
           </div>
           <pre class="raw-pretty">{rawPretty}</pre>

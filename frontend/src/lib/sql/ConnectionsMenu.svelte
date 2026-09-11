@@ -10,6 +10,7 @@
     toast,
     toastError
   } from '../stores.js';
+  import { ICONS } from '../icons.js';
 
   let modal = null; // null | { existing }
   let testing = {}; // connId -> 'ok' | 'err' | undefined
@@ -58,10 +59,10 @@
               <span class="meta">
                 {c.kind}{c.host ? ` · ${c.host}` : ''}{c.database ? `/${c.database}` : ''}
               </span>
-              {#if testing[c.id] === 'ok'}<span class="st ok">●</span>{/if}
-              {#if testing[c.id] === 'err'}<span class="st err">●</span>{/if}
+              {#if testing[c.id] === 'ok'}<span class="st ok">{ICONS.connOk.glyph}</span>{/if}
+              {#if testing[c.id] === 'err'}<span class="st err">{ICONS.connErr.glyph}</span>{/if}
             </button>
-            <button class="edit" title="Edit" on:click={() => (modal = { existing: c })}>✎</button>
+            <button class="edit" title="Edit" on:click={() => (modal = { existing: c })}>{ICONS.rename.glyph}</button>
           </div>
         {/each}
         {#if $connections.length === 0}

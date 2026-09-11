@@ -16,6 +16,7 @@
     connMenuOpen
   } from '../stores.js';
   import { api } from '../api.js';
+  import { ICONS } from '../icons.js';
 
   $: tabsByConn = (connId) =>
     $sqlTabs.filter((t) => t.connection_id === connId).sort((a, b) => a.position - b.position);
@@ -139,7 +140,7 @@
                 title={tab.title}
               >
                 {tab.dirty ? '•' : ''}{tab.title}
-                <span class="x" on:click={(e) => close(tab.id, e)} role="button" tabindex="-1">×</span>
+                <span class="x" on:click={(e) => close(tab.id, e)} role="button" tabindex="-1">{ICONS.closeTab.glyph}</span>
               </button>
             {/each}
             <button class="add" title="New query" on:click={() => addTab(conn.id)}>+</button>
@@ -172,7 +173,7 @@
             {rt.method}
           </span>
           {rt.dirty ? '•' : ''}{rt.title}
-          <span class="x" on:click={(e) => closeReq(rt.id, e)} role="button" tabindex="-1">×</span>
+          <span class="x" on:click={(e) => closeReq(rt.id, e)} role="button" tabindex="-1">{ICONS.closeTab.glyph}</span>
         </button>
       {/each}
       <button class="add" title="New request" on:click={addReqTab}>+</button>

@@ -2,6 +2,7 @@
   import { createEventDispatcher } from 'svelte';
   import { api } from '../api.js';
   import { loadSchemas, toastError } from '../stores.js';
+  import { ICONS } from '../icons.js';
 
   export let conn;
   const dispatch = createEventDispatcher();
@@ -62,7 +63,7 @@
 <div class="tree">
   <div class="tools">
     <input class="input sm" placeholder="Filter tables…" bind:value={filter} />
-    <button class="btn ghost sm" title="Refresh" on:click={() => load(true)}>⟳</button>
+    <button class="btn ghost sm" title="Refresh" on:click={() => load(true)}>{ICONS.refresh.glyph}</button>
   </div>
 
   {#if loading && schemas.length === 0}
@@ -74,7 +75,7 @@
       {#each schemas as schema (schema.name)}
         {#if visibleRels(schema).length || !filter}
           <button class="node schema" on:click={() => toggleSchema(schema.name)}>
-            <span class="chev">{openSchemas.has(schema.name) ? '▾' : '▸'}</span>
+            <span class="chev">{openSchemas.has(schema.name) ? ICONS.expandOpen.glyph : ICONS.expandClosed.glyph}</span>
             {schema.name}
             <span class="count">{schema.relations.length}</span>
           </button>
@@ -83,21 +84,25 @@
               <div class="rel-wrap">
                 <div class="rel-row">
                   <button class="node rel" on:click={() => toggleRel(schema.name, rel.name)}>
-                    <span class="chev">{openRels.has(`${schema.name}.${rel.name}`) ? '▾' : '▸'}</span>
-                    <span class="ico">{rel.kind === 'view' ? '◇' : '▦'}</span>
+                    <span class="chev"
+                      >{openRels.has(`${schema.name}.${rel.name}`)
+                        ? ICONS.expandOpen.glyph
+                        : ICONS.expandClosed.glyph}</span
+                    >
+                    <span class="ico">{rel.kind === 'view' ? ICONS.view.glyph : ICONS.table.glyph}</span>
                     {rel.name}
                   </button>
                   <button
                     class="peek"
-                    title="SELECT * (100 rows)"
+                    title="Open the full table, paginated"
                     on:click={() => dispatch('open', { schema: schema.name, relation: rel.name })}
-                  >↵</button>
+                  >{ICONS.insertName.glyph}</button>
                 </div>
                 {#if openRels.has(`${schema.name}.${rel.name}`)}
                   <div class="cols">
                     {#each cols[`${schema.name}.${rel.name}`] || [] as c}
                       <div class="col">
-                        <span class="cn">{c.primary_key ? '🔑 ' : ''}{c.name}</span>
+                        <span class="cn">{c.primary_key ? ICONS.primaryKey.glyph + ' ' : ''}{c.name}</span>
                         <span class="ct">{c.data_type}{c.nullable ? '' : ' ·'}</span>
                       </div>
                     {/each}

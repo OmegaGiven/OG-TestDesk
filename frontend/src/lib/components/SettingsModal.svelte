@@ -2,6 +2,7 @@
   import Modal from './Modal.svelte';
   import { onMount } from 'svelte';
   import { api } from '../api.js';
+  import { ICONS } from '../icons.js';
   import {
     connections,
     appearance,
@@ -283,7 +284,7 @@
                     on:change={(e) => setVar(v.key, e.target.value.trim())}
                   />
                   {#if customSlice[v.key]}
-                    <button class="mini" title="Revert this one" on:click={() => clearVar(v.key)}>↺</button>
+                    <button class="mini" title="Revert this one" on:click={() => clearVar(v.key)}>{ICONS.revert.glyph}</button>
                   {:else}
                     <span class="mini dim" title="Inherits from the base palette">—</span>
                   {/if}

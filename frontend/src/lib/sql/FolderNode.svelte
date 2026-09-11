@@ -1,5 +1,6 @@
 <script>
   import { getContext } from 'svelte';
+  import { ICONS } from '../icons.js';
 
   export let folderId;
   export let depth = 0;
@@ -30,13 +31,15 @@
       on:dragleave={() => ctx.setDragOver(null)}
       on:drop|preventDefault|stopPropagation={() => ctx.drop(folderId)}
     >
-      <button class="chev" on:click={() => ctx.toggle(folderId)}>{open ? '▾' : '▸'}</button>
+      <button class="chev" on:click={() => ctx.toggle(folderId)}
+        >{open ? ICONS.expandOpen.glyph : ICONS.expandClosed.glyph}</button
+      >
       <button class="fname" title="Rename" on:click={() => ctx.renameFolder(folder)}>{folder.name}</button>
       <span class="fcount">{subs.length + qs.length}</span>
       <span class="facts">
-        <button title="New subfolder" on:click={() => ctx.newFolder(folderId)}>▸＋</button>
-        <button title="New query here" on:click={() => ctx.newQuery(folderId)}>≡＋</button>
-        <button title="Delete folder" on:click={() => ctx.deleteFolder(folder)}>✕</button>
+        <button title="New subfolder" on:click={() => ctx.newFolder(folderId)}>{ICONS.newSubfolder.glyph}</button>
+        <button title="New query here" on:click={() => ctx.newQuery(folderId)}>{ICONS.newQueryHere.glyph}</button>
+        <button title="Delete folder" on:click={() => ctx.deleteFolder(folder)}>{ICONS.delete.glyph}</button>
       </span>
     </div>
     {#if open}
@@ -54,8 +57,8 @@
             <span class="qname">{q.name}</span>
             {#if ctx.connName(q.connection_id)}<span class="qconn">{ctx.connName(q.connection_id)}</span>{/if}
           </button>
-          <button class="qact" title="Rename" on:click={() => ctx.renameQuery(q)}>✎</button>
-          <button class="qact" title="Delete" on:click={() => ctx.deleteQuery(q)}>✕</button>
+          <button class="qact" title="Rename" on:click={() => ctx.renameQuery(q)}>{ICONS.rename.glyph}</button>
+          <button class="qact" title="Delete" on:click={() => ctx.deleteQuery(q)}>{ICONS.delete.glyph}</button>
         </div>
       {/each}
     {/if}
