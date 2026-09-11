@@ -23,6 +23,7 @@ export const ICONS = {
   primaryKey: { glyph: '🔑', label: 'Primary key column', where: 'Schema tree' },
   insertName: { glyph: '↵', label: 'Insert name into the editor', where: 'Schema tree' },
   refresh: { glyph: '⟳', label: 'Refresh', where: 'Schema tree, saved queries' },
+  relationships: { glyph: '⛓', label: 'Table relationships (foreign keys)', where: 'Schema tree' },
 
   newQuery: { glyph: '+', label: 'New query', where: 'Saved queries sidebar' },
   newFolder: { glyph: '📁+', label: 'New folder', where: 'Saved queries sidebar' },

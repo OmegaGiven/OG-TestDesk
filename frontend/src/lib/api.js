@@ -18,6 +18,7 @@ export const api = {
   // schema
   schemasList: (config) => call('schemas_list', { config }),
   columnsList: (config, schema, relation) => call('columns_list', { config, schema, relation }),
+  foreignKeysList: (config) => call('foreign_keys_list', { config }),
 
   // query — page/pageSize omitted = full result (capped by max rows)
   queryRun: (config, sql, page = null, pageSize = null, count = null) =>

@@ -187,6 +187,12 @@ if (typeof window !== 'undefined' && !window.__TAURI_INTERNALS__) {
       ok({ kind: config.kind, version: config.kind === 'sqlite' ? '3.45.0' : '16.2 (mock)' }),
     schemas_list: () => ok(schemas),
     columns_list: ({ relation }) => ok(columns[relation] || []),
+    foreign_keys_list: () =>
+      ok([
+        { schema: 'main', table: 'orders', column: 'customer_id', ref_schema: 'main', ref_table: 'customers', ref_column: 'id' },
+        { schema: 'main', table: 'order_items', column: 'order_id', ref_schema: 'main', ref_table: 'orders', ref_column: 'id' },
+        { schema: 'main', table: 'order_items', column: 'product_id', ref_schema: 'main', ref_table: 'products', ref_column: 'id' }
+      ]),
     query_run: ({ sql, page, pageSize, count }) => {
       const s = (sql || '').toLowerCase();
       const paged = (allRows, cols, total, dur) => {

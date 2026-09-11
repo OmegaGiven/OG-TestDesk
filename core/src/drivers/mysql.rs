@@ -1,8 +1,8 @@
 use super::decode::my_value;
 use super::pool::mysql_pool;
 use super::{
-    run_query_body, Column, ConnConfig, DbDriver, DbKind, QueryOpts, QueryResult, Relation,
-    RelationKind, Schema, ServerInfo,
+    run_query_body, Column, ConnConfig, DbDriver, DbKind, ForeignKey, QueryOpts, QueryResult,
+    Relation, RelationKind, Schema, ServerInfo,
 };
 use anyhow::{Context, Result};
 use async_trait::async_trait;
@@ -136,5 +136,32 @@ impl DbDriver for MySqlDriverImpl {
             opts,
             my_value
         )
+    }
+
+    async fn list_foreign_keys(&self, cfg: &ConnConfig, password: Option<&str>) -> Result<Vec<ForeignKey>> {
+        let pool = mysql_pool(&conn_url(cfg, password)).await?;
+        let rows = sqlx::query(
+            r#"
+            SELECT table_schema, table_name, column_name,
+                   referenced_table_schema, referenced_table_name, referenced_column_name
+            FROM information_schema.key_column_usage
+            WHERE referenced_table_name IS NOT NULL
+              AND table_schema NOT IN ('mysql', 'information_schema', 'performance_schema', 'sys')
+            ORDER BY table_schema, table_name, column_name
+            "#,
+        )
+        .fetch_all(&pool)
+        .await?;
+        Ok(rows
+            .into_iter()
+            .map(|r| ForeignKey {
+                schema: r.get("table_schema"),
+                table: r.get("table_name"),
+                column: r.get("column_name"),
+                ref_schema: r.get("referenced_table_schema"),
+                ref_table: r.get("referenced_table_name"),
+                ref_column: r.get("referenced_column_name"),
+            })
+            .collect())
     }
 }

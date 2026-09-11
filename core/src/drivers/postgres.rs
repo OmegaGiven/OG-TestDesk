@@ -1,8 +1,8 @@
 use super::decode::pg_value;
 use super::pool::pg_pool;
 use super::{
-    run_query_body, Column, ConnConfig, DbDriver, DbKind, QueryOpts, QueryResult, Relation,
-    RelationKind, Schema, ServerInfo,
+    run_query_body, Column, ConnConfig, DbDriver, DbKind, ForeignKey, QueryOpts, QueryResult,
+    Relation, RelationKind, Schema, ServerInfo,
 };
 use anyhow::{Context, Result};
 use async_trait::async_trait;
@@ -147,5 +147,37 @@ impl DbDriver for PostgresDriverImpl {
         opts: QueryOpts,
     ) -> Result<QueryResult> {
         run_query_body!(pg_pool(&conn_url(cfg, password)).await?, sql, opts, pg_value)
+    }
+
+    async fn list_foreign_keys(&self, cfg: &ConnConfig, password: Option<&str>) -> Result<Vec<ForeignKey>> {
+        let pool = pg_pool(&conn_url(cfg, password)).await?;
+        let rows = sqlx::query(
+            r#"
+            SELECT
+                tc.table_schema, tc.table_name, kcu.column_name,
+                ccu.table_schema AS ref_schema, ccu.table_name AS ref_table, ccu.column_name AS ref_column
+            FROM information_schema.table_constraints tc
+            JOIN information_schema.key_column_usage kcu
+              ON kcu.constraint_name = tc.constraint_name AND kcu.table_schema = tc.table_schema
+            JOIN information_schema.constraint_column_usage ccu
+              ON ccu.constraint_name = tc.constraint_name AND ccu.table_schema = tc.table_schema
+            WHERE tc.constraint_type = 'FOREIGN KEY'
+              AND tc.table_schema NOT IN ('pg_catalog', 'information_schema')
+            ORDER BY tc.table_schema, tc.table_name, kcu.column_name
+            "#,
+        )
+        .fetch_all(&pool)
+        .await?;
+        Ok(rows
+            .into_iter()
+            .map(|r| ForeignKey {
+                schema: r.get("table_schema"),
+                table: r.get("table_name"),
+                column: r.get("column_name"),
+                ref_schema: r.get("ref_schema"),
+                ref_table: r.get("ref_table"),
+                ref_column: r.get("ref_column"),
+            })
+            .collect())
     }
 }

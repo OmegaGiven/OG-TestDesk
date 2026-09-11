@@ -71,6 +71,19 @@ pub struct Column {
     pub default: Option<String>,
 }
 
+/// One foreign-key edge: `schema.table.column` references
+/// `ref_schema.ref_table.ref_column`. Used to draw the table
+/// relationships popup in the schema tree.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ForeignKey {
+    pub schema: String,
+    pub table: String,
+    pub column: String,
+    pub ref_schema: String,
+    pub ref_table: String,
+    pub ref_column: String,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ServerInfo {
     pub kind: DbKind,
@@ -183,6 +196,10 @@ pub trait DbDriver: Send + Sync {
         sql: &str,
         opts: QueryOpts,
     ) -> Result<QueryResult>;
+    /// Every foreign key in the database (all schemas), for the
+    /// relationships popup. Best-effort — engines/versions that can't
+    /// answer cheaply may just return an empty list.
+    async fn list_foreign_keys(&self, cfg: &ConnConfig, password: Option<&str>) -> Result<Vec<ForeignKey>>;
 }
 
 /// Statements that can be safely wrapped as `SELECT * FROM (<sql>) x` for

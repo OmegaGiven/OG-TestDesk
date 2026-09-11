@@ -1,8 +1,8 @@
 use super::decode::sqlite_value;
 use super::pool::sqlite_pool;
 use super::{
-    run_query_body, Column, ConnConfig, DbDriver, DbKind, QueryOpts, QueryResult, Relation,
-    RelationKind, Schema, ServerInfo,
+    run_query_body, Column, ConnConfig, DbDriver, DbKind, ForeignKey, QueryOpts, QueryResult,
+    Relation, RelationKind, Schema, ServerInfo,
 };
 use anyhow::{anyhow, Context, Result};
 use async_trait::async_trait;
@@ -94,5 +94,35 @@ impl DbDriver for SqliteDriverImpl {
         opts: QueryOpts,
     ) -> Result<QueryResult> {
         run_query_body!(sqlite_pool(path_of(cfg)?).await?, sql, opts, sqlite_value)
+    }
+
+    async fn list_foreign_keys(&self, cfg: &ConnConfig, _password: Option<&str>) -> Result<Vec<ForeignKey>> {
+        let pool = sqlite_pool(path_of(cfg)?).await?;
+        let tables: Vec<String> = sqlx::query_scalar(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'",
+        )
+        .fetch_all(&pool)
+        .await?;
+
+        let mut out = Vec::new();
+        for table in tables {
+            // table_info()-safe: identifier comes from our own schema list.
+            let sql = format!("PRAGMA foreign_key_list(\"{}\")", table.replace('"', "\"\""));
+            let rows = sqlx::query(&sql).fetch_all(&pool).await?;
+            for r in rows {
+                let ref_table: String = r.get("table");
+                let column: String = r.get("from");
+                let ref_column: Option<String> = r.get("to");
+                out.push(ForeignKey {
+                    schema: "main".to_string(),
+                    table: table.clone(),
+                    column,
+                    ref_schema: "main".to_string(),
+                    ref_table,
+                    ref_column: ref_column.unwrap_or_default(),
+                });
+            }
+        }
+        Ok(out)
     }
 }

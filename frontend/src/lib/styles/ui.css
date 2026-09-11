@@ -114,6 +114,10 @@
   opacity: 0.4;
   cursor: not-allowed;
 }
+.icon-btn.on {
+  background: var(--tool-sql-tint);
+  color: var(--tool-sql-text);
+}
 .icon-btn:disabled:hover {
   background: none;
   color: var(--text-muted);

@@ -14,7 +14,23 @@
   let openRels = new Set(); // key `${schema}.${rel}`
   let cols = {}; // key -> Column[]
 
+  // relationships popup (foreign keys) — position:fixed anchored under the
+  // button so it isn't clipped by the sidebar's overflow:hidden
+  let fkMenuOpen = false;
+  let fks = null; // null = not loaded yet for this connection
+  let fkLoading = false;
+  let fkFilter = '';
+  let lastFkConn = null;
+  let fkBtn;
+  let fkPos = { top: 0, left: 0 };
+
+  const devFkMenu = typeof location !== 'undefined' && new URLSearchParams(location.search).has('fkmenu');
   $: if (conn) load();
+  $: if (conn && devFkMenu && !fkMenuOpen) openFks();
+  $: if (conn && conn.id !== lastFkConn) {
+    fks = null;
+    lastFkConn = conn.id;
+  }
 
   async function load(force = false) {
     loading = true;
@@ -28,6 +44,41 @@
       loading = false;
     }
   }
+
+  async function openFks() {
+    fkMenuOpen = !fkMenuOpen;
+    if (fkMenuOpen && fkBtn) {
+      const r = fkBtn.getBoundingClientRect();
+      fkPos = { top: r.bottom + 4, left: r.left };
+    }
+    if (fkMenuOpen && fks === null && !fkLoading) {
+      fkLoading = true;
+      try {
+        fks = await api.foreignKeysList(conn);
+      } catch (e) {
+        toastError(e);
+        fks = [];
+      } finally {
+        fkLoading = false;
+      }
+    }
+  }
+  $: fkByTable = (() => {
+    const q = fkFilter.trim().toLowerCase();
+    const rows = (fks || []).filter(
+      (f) =>
+        !q ||
+        f.table.toLowerCase().includes(q) ||
+        f.ref_table.toLowerCase().includes(q) ||
+        f.column.toLowerCase().includes(q)
+    );
+    const byTable = new Map();
+    for (const f of rows) {
+      if (!byTable.has(f.table)) byTable.set(f.table, []);
+      byTable.get(f.table).push(f);
+    }
+    return [...byTable.entries()].sort((a, b) => a[0].localeCompare(b[0]));
+  })();
 
   function toggleSchema(name) {
     openSchemas.has(name) ? openSchemas.delete(name) : openSchemas.add(name);
@@ -63,6 +114,43 @@
 <div class="tree">
   <div class="tools">
     <input class="input sm" placeholder="Filter tables…" bind:value={filter} />
+    <span class="fk-wrap">
+      <button
+        class="icon-btn"
+        class:on={fkMenuOpen}
+        title={ICONS.relationships.label}
+        bind:this={fkBtn}
+        on:click={openFks}>{ICONS.relationships.glyph}</button
+      >
+      {#if fkMenuOpen}
+        <div class="backdrop" on:click={() => (fkMenuOpen = false)} role="presentation" />
+        <div class="fk-menu" style="top:{fkPos.top}px; left:{fkPos.left}px">
+          <div class="fk-head">
+            <input class="input sm" placeholder="Filter relationships…" bind:value={fkFilter} />
+          </div>
+          <div class="fk-list">
+            {#if fkLoading}
+              <div class="msg">Reading foreign keys…</div>
+            {:else if fkByTable.length === 0}
+              <div class="msg">
+                {fks && fks.length === 0 ? 'No foreign keys found.' : 'No matches.'}
+              </div>
+            {:else}
+              {#each fkByTable as [table, rows] (table)}
+                <div class="fk-table">{table}</div>
+                {#each rows as f}
+                  <div class="fk-row">
+                    <span class="fk-col">{f.column}</span>
+                    <span class="fk-arrow">→</span>
+                    <span class="fk-ref">{f.ref_table}.{f.ref_column}</span>
+                  </div>
+                {/each}
+              {/each}
+            {/if}
+          </div>
+        </div>
+      {/if}
+    </span>
     <button class="icon-btn" title="Refresh" on:click={() => load(true)}>{ICONS.refresh.glyph}</button>
   </div>
 
@@ -134,6 +222,69 @@
     flex: 1;
     padding: 6px 8px;
     font-size: 11.5px;
+  }
+  .fk-wrap {
+    position: relative;
+  }
+  .fk-wrap .backdrop {
+    position: fixed;
+    inset: 0;
+    z-index: 800;
+  }
+  .fk-menu {
+    position: fixed;
+    z-index: 801;
+    width: 280px;
+    max-height: 360px;
+    display: flex;
+    flex-direction: column;
+    background: var(--surface-1);
+    border: 1px solid var(--border-strong);
+    border-radius: var(--radius-sm);
+    box-shadow: var(--shadow-pop);
+    overflow: hidden;
+  }
+  .fk-head {
+    padding: 6px;
+    border-bottom: 1px solid var(--border);
+  }
+  .fk-head .input.sm {
+    width: 100%;
+    padding: 6px 8px;
+    font-size: 11.5px;
+  }
+  .fk-list {
+    overflow: auto;
+    padding: 4px 0 8px;
+  }
+  .fk-table {
+    padding: 6px 10px 2px;
+    font-size: 10px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+    color: var(--text-secondary);
+  }
+  .fk-row {
+    display: flex;
+    align-items: baseline;
+    gap: 5px;
+    padding: 2px 10px 2px 16px;
+    font-size: 11.5px;
+    font-family: var(--font-mono);
+  }
+  .fk-col {
+    color: var(--text-primary);
+  }
+  .fk-arrow {
+    color: var(--text-muted);
+    font-size: 10px;
+  }
+  .fk-ref {
+    color: var(--tool-sql-text);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
   .scroll {
     overflow: auto;
