@@ -105,3 +105,81 @@ export function parsePostman(text) {
   }
   return null;
 }
+
+// ---------------------------------------------------------------- export
+
+function headersToArray(headersJson) {
+  let obj;
+  try {
+    obj = JSON.parse(headersJson || '{}');
+  } catch {
+    obj = {};
+  }
+  return Object.entries(obj).map(([key, value]) => ({ key, value: String(value ?? '') }));
+}
+
+function toPostmanRequest(r) {
+  const item = {
+    name: r.name,
+    request: {
+      method: r.method,
+      header: headersToArray(r.headers_json),
+      url: { raw: r.url }
+    }
+  };
+  if (r.body) {
+    item.request.body = { mode: 'raw', raw: r.body };
+  }
+  return item;
+}
+
+/**
+ * Build a Postman Collection v2.1 JSON object from our collections
+ * (`{id, name, parent_id}`) + saved requests (`{collection_id, ...}`).
+ * Nesting follows parent_id; requests with no collection_id land at the
+ * root alongside the top-level folders.
+ */
+export function toPostmanCollection(name, collections, requests) {
+  const byParent = new Map(); // parent_id (or null) -> collection[]
+  for (const c of collections) {
+    const key = c.parent_id || null;
+    if (!byParent.has(key)) byParent.set(key, []);
+    byParent.get(key).push(c);
+  }
+  const reqsByCollection = new Map();
+  for (const r of requests) {
+    const key = r.collection_id || null;
+    if (!reqsByCollection.has(key)) reqsByCollection.set(key, []);
+    reqsByCollection.get(key).push(r);
+  }
+
+  const buildFolder = (collectionId) => {
+    const subfolders = (byParent.get(collectionId) || []).map((c) => ({
+      name: c.name,
+      item: buildFolder(c.id)
+    }));
+    const ownRequests = (reqsByCollection.get(collectionId) || []).map(toPostmanRequest);
+    return [...subfolders, ...ownRequests];
+  };
+
+  return {
+    info: {
+      name: name || 'OG TestDesk export',
+      schema: 'https://schema.getpostman.com/json/collection/v2.1.0/collection.json'
+    },
+    item: buildFolder(null)
+  };
+}
+
+/** Build a Postman Environment JSON object from a plain {key: value} map. */
+export function toPostmanEnvironment(name, variables) {
+  return {
+    name: name || 'Environment',
+    values: Object.entries(variables || {}).map(([key, value]) => ({
+      key,
+      value: String(value ?? ''),
+      enabled: true
+    })),
+    _postman_variable_scope: 'environment'
+  };
+}

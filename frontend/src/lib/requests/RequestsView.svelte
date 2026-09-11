@@ -3,7 +3,7 @@
   import CodeEditor from '../components/CodeEditor.svelte';
   import EnvModal from './EnvModal.svelte';
   import { api } from '../api.js';
-  import { parsePostman } from './postman.js';
+  import { parsePostman, toPostmanCollection } from './postman.js';
   import { ICONS } from '../icons.js';
   import { downloadText, copyText, toCurl, rowsToDelimited } from '../export.js';
   import {
@@ -158,6 +158,112 @@
     paramsToUrl();
   }
 
+  // ---- Auth tab — a friendly composer over the Authorization header (and,
+  // for API keys, a header or query param). Nothing new is persisted: this
+  // just writes into the existing headers/params rows, so saved requests,
+  // curl export, etc. all see it automatically.
+  let authType = 'none'; // none | bearer | basic | apikey
+  let authBearer = '';
+  let authUser = '';
+  let authPass = '';
+  let authKeyName = '';
+  let authKeyValue = '';
+  let authKeyIn = 'header'; // header | query
+  let prevApiKeyName = '';
+  let authSyncedTab = null;
+  let authApplying = false;
+
+  function findRow(rows, key) {
+    const lower = key.toLowerCase();
+    return rows.find((r) => r.k.trim().toLowerCase() === lower && r.k.trim());
+  }
+  function upsertRow(rows, key, value) {
+    const lower = key.toLowerCase();
+    const idx = rows.findIndex((r) => r.k.trim().toLowerCase() === lower);
+    let next;
+    if (idx >= 0) {
+      next = rows.map((r, i) => (i === idx ? { ...r, v: value, on: true } : r));
+    } else {
+      next = [{ k: key, v: value, on: true }, ...rows.filter((r) => r.k.trim() || r.v.trim())];
+    }
+    return ensureTrailingRow(next);
+  }
+  function removeRow(rows, key) {
+    if (!key) return rows;
+    const lower = key.toLowerCase();
+    return ensureTrailingRow(rows.filter((r) => r.k.trim().toLowerCase() !== lower));
+  }
+
+  // Re-derive the Auth tab's fields from the current headers, best-effort,
+  // each time the tab is opened (not while it stays open + you're typing).
+  $: if (tab === 'auth' && authSyncedTab !== loadedTabId) {
+    syncAuthFromHeaders();
+    authSyncedTab = loadedTabId;
+  }
+  function syncAuthFromHeaders() {
+    authApplying = true;
+    const authHeader = findRow(draft.headers, 'authorization');
+    if (authHeader && /^bearer\s+/i.test(authHeader.v)) {
+      authType = 'bearer';
+      authBearer = authHeader.v.replace(/^bearer\s+/i, '');
+    } else if (authHeader && /^basic\s+/i.test(authHeader.v)) {
+      authType = 'basic';
+      try {
+        const [u, ...rest] = atob(authHeader.v.replace(/^basic\s+/i, '')).split(':');
+        authUser = u || '';
+        authPass = rest.join(':');
+      } catch {
+        authUser = '';
+        authPass = '';
+      }
+    } else {
+      authType = 'none';
+      authBearer = '';
+      authUser = '';
+      authPass = '';
+    }
+    authKeyName = '';
+    authKeyValue = '';
+    prevApiKeyName = '';
+    setTimeout(() => (authApplying = false), 0);
+  }
+  function applyAuth() {
+    if (authApplying) return;
+    if (authType === 'apikey' && prevApiKeyName && prevApiKeyName !== authKeyName) {
+      draft.headers = removeRow(draft.headers, prevApiKeyName);
+      draft.params = removeRow(draft.params, prevApiKeyName);
+    }
+    if (authType === 'none') {
+      draft.headers = removeRow(draft.headers, 'authorization');
+    } else if (authType === 'bearer') {
+      draft.headers = upsertRow(draft.headers, 'Authorization', authBearer ? `Bearer ${authBearer}` : '');
+    } else if (authType === 'basic') {
+      let token = '';
+      try {
+        token = btoa(`${authUser}:${authPass}`);
+      } catch {
+        token = '';
+      }
+      draft.headers = upsertRow(draft.headers, 'Authorization', token ? `Basic ${token}` : '');
+    } else if (authType === 'apikey') {
+      draft.headers = removeRow(draft.headers, 'authorization');
+      if (authKeyName) {
+        if (authKeyIn === 'header') {
+          draft.headers = upsertRow(draft.headers, authKeyName, authKeyValue);
+        } else {
+          draft.params = upsertRow(draft.params, authKeyName, authKeyValue);
+          paramsToUrl();
+        }
+      }
+      prevApiKeyName = authKeyName;
+    }
+  }
+  $: {
+    // reactive dependency list — re-apply whenever any auth field changes
+    authType, authBearer, authUser, authPass, authKeyName, authKeyValue, authKeyIn;
+    if (!hydrating) applyAuth();
+  }
+
   async function send() {
     if (!draft.url.trim()) return;
     const tabId = loadedTabId;
@@ -223,6 +329,7 @@
   // Demo helper: ?req=<name>&send loads a saved request and sends it.
   onMount(async () => {
     const q = new URLSearchParams(location.search);
+    if (q.has('reqtab')) tab = q.get('reqtab');
     const want = q.get('req');
     if (!want) return;
     for (let i = 0; i < 50 && !$savedRequests.length; i++) await tick();
@@ -291,6 +398,12 @@
     } catch (e) {
       toastError(e);
     }
+  }
+
+  function exportPostman() {
+    const pm = toPostmanCollection('OG TestDesk export', $requestCollections, $savedRequests);
+    downloadText('og-testdesk-collection.json', JSON.stringify(pm, null, 2), 'application/json');
+    toast('Exported as a Postman v2.1 collection', 'success', 2000);
   }
 
   let fileInput;
@@ -461,6 +574,7 @@
       <span>Collections</span>
       <div>
         <button class="btn ghost sm" title="Import Postman collection / environment" on:click={() => fileInput.click()}>{ICONS.importPostman.glyph}</button>
+        <button class="btn ghost sm" title="Export everything as a Postman collection" on:click={exportPostman}>{ICONS.exportPostman.glyph}</button>
         <button class="btn ghost sm" on:click={newCollection}>+ Folder</button>
         <button class="btn ghost sm" on:click={() => newRequestTab()}>+ Req</button>
       </div>
@@ -532,7 +646,7 @@
     <div class="rq-work">
       <div class="req-pane" style="height:{splitPct}%">
         <div class="subtabs">
-          {#each ['params', 'headers', 'body'] as t}
+          {#each ['params', 'headers', 'auth', 'body'] as t}
             <button class:active={tab === t} on:click={() => (tab = t)}>
               {t}
               {#if t === 'headers' && draft.headers.filter((h) => h.k).length}
@@ -541,11 +655,64 @@
               {#if t === 'params' && draft.params.filter((p) => p.k).length}
                 <span class="n">{draft.params.filter((p) => p.k).length}</span>
               {/if}
+              {#if t === 'auth' && authType !== 'none'}<span class="n">1</span>{/if}
             </button>
           {/each}
         </div>
 
-        {#if tab === 'params' || tab === 'headers'}
+        {#if tab === 'auth'}
+          <div class="auth-form">
+            <div class="field">
+              <label for="authType">Type</label>
+              <select id="authType" class="select" bind:value={authType}>
+                <option value="none">No auth</option>
+                <option value="bearer">Bearer token</option>
+                <option value="basic">Basic auth</option>
+                <option value="apikey">API key</option>
+              </select>
+            </div>
+            {#if authType === 'bearer'}
+              <div class="field">
+                <label for="authBearer">Token</label>
+                <input id="authBearer" class="input mono" bind:value={authBearer} placeholder="{'{{token}}'} or a raw value" />
+              </div>
+              <p class="hint">Sets <code>Authorization: Bearer &lt;token&gt;</code>.</p>
+            {:else if authType === 'basic'}
+              <div class="row2">
+                <div class="field">
+                  <label for="authUser">Username</label>
+                  <input id="authUser" class="input" bind:value={authUser} />
+                </div>
+                <div class="field">
+                  <label for="authPass">Password</label>
+                  <input id="authPass" class="input" type="password" bind:value={authPass} />
+                </div>
+              </div>
+              <p class="hint">Sets <code>Authorization: Basic &lt;base64(user:pass)&gt;</code>.</p>
+            {:else if authType === 'apikey'}
+              <div class="row2">
+                <div class="field">
+                  <label for="authKeyName">Key</label>
+                  <input id="authKeyName" class="input mono" bind:value={authKeyName} placeholder="X-API-Key" />
+                </div>
+                <div class="field">
+                  <label for="authKeyValue">Value</label>
+                  <input id="authKeyValue" class="input mono" bind:value={authKeyValue} />
+                </div>
+              </div>
+              <div class="field">
+                <label for="authKeyIn">Add to</label>
+                <select id="authKeyIn" class="select" bind:value={authKeyIn}>
+                  <option value="header">Header</option>
+                  <option value="query">Query param</option>
+                </select>
+              </div>
+              <p class="hint">Adds the key to your {authKeyIn === 'header' ? 'Headers' : 'Params'} tab.</p>
+            {:else}
+              <p class="hint">No authorization header is sent.</p>
+            {/if}
+          </div>
+        {:else if tab === 'params' || tab === 'headers'}
           {@const rows = tab === 'params' ? draft.params : draft.headers}
           <div class="kv-grid">
             {#each rows as row}
@@ -837,6 +1004,29 @@
     align-items: center;
     gap: 8px;
     padding: 6px 8px;
+  }
+  .auth-form {
+    overflow: auto;
+    padding: 10px 12px;
+    max-width: 420px;
+  }
+  .auth-form .row2 {
+    display: flex;
+    gap: 10px;
+  }
+  .auth-form .row2 .field {
+    flex: 1;
+  }
+  .auth-form .hint {
+    font-size: 11px;
+    color: var(--text-muted);
+    margin: 2px 0 0;
+  }
+  .auth-form .hint code {
+    font-family: var(--font-mono);
+    background: var(--surface-2);
+    padding: 1px 4px;
+    border-radius: 3px;
   }
   .body-editor,
   .resp-body {

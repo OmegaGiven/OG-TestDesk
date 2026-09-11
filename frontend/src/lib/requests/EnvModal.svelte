@@ -2,6 +2,8 @@
   import Modal from '../components/Modal.svelte';
   import { api } from '../api.js';
   import { ICONS } from '../icons.js';
+  import { downloadText } from '../export.js';
+  import { toPostmanEnvironment } from './postman.js';
   import {
     environments,
     requestGlobals,
@@ -77,6 +79,12 @@
       toastError(e);
     }
   }
+  function exportEnv(name, variables) {
+    const pm = toPostmanEnvironment(name, variables);
+    const file = (name || 'environment').replace(/[^\w.-]+/g, '_').slice(0, 60) || 'environment';
+    downloadText(`${file}.postman_environment.json`, JSON.stringify(pm, null, 2), 'application/json');
+    toast('Exported as a Postman environment', 'success', 2000);
+  }
 </script>
 
 <Modal title="Environments" width="520px" on:close>
@@ -86,6 +94,9 @@
         <span class="radio on">★</span>
         <span class="name">Globals</span>
         <span class="cnt">{Object.keys($requestGlobals).length} vars · always on</span>
+        <button class="icon-btn sm" title="Export as Postman environment" on:click={() => exportEnv('Globals', $requestGlobals)}
+          >{ICONS.exportPostman.glyph}</button
+        >
         <button class="btn ghost sm" on:click={editGlobals}>Edit</button>
       </div>
       {#each list as env (env.id)}
@@ -95,6 +106,12 @@
           </button>
           <span class="name">{env.name}</span>
           <span class="cnt">{Object.keys(JSON.parse(env.variables_json || '{}')).length} vars</span>
+          <button
+            class="icon-btn sm"
+            title="Export as Postman environment"
+            on:click={() => exportEnv(env.name, JSON.parse(env.variables_json || '{}'))}
+            >{ICONS.exportPostman.glyph}</button
+          >
           <button class="btn ghost sm" on:click={() => edit(env)}>Edit</button>
           <button class="icon-btn sm danger" on:click={() => remove(env)}>{ICONS.delete.glyph}</button>
         </div>

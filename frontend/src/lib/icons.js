@@ -44,5 +44,6 @@ export const ICONS = {
   connOk: { glyph: '●', label: 'Connection reachable', where: 'Connections dropdown', colorVar: '--ok' },
   connErr: { glyph: '●', label: 'Connection failed', where: 'Connections dropdown', colorVar: '--danger' },
 
-  importPostman: { glyph: '⇩', label: 'Import a Postman collection / environment', where: 'Requests sidebar' }
+  importPostman: { glyph: '⇩', label: 'Import a Postman collection / environment', where: 'Requests sidebar' },
+  exportPostman: { glyph: '⇧', label: 'Export everything as a Postman collection', where: 'Requests sidebar' }
 };
