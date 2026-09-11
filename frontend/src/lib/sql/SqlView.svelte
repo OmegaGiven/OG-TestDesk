@@ -630,10 +630,18 @@
     line-height: 1;
   }
   .tb-tz {
+    height: 26px;
+    display: inline-flex;
+    align-items: center;
+    padding: 0 9px;
+    border-radius: var(--radius-sm);
+    border: 1px solid var(--border-strong);
+    background: var(--surface-2);
     font-size: 10.5px;
     font-family: var(--font-mono);
     color: var(--text-muted);
     white-space: nowrap;
+    line-height: 1;
   }
   .tb-tz.muted {
     font-style: italic;

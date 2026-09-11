@@ -18,11 +18,12 @@
     tabGroupOverride,
     groupOf,
     reorderGroups,
-    moveTabToGroup
+    moveTabToGroup,
+    INSPECTOR_TAB_ID
   } from '../stores.js';
   import { ICONS } from '../icons.js';
 
-  const REQUESTS_KEY = 'requests';
+  const inspectorTab = { id: INSPECTOR_TAB_ID, title: 'Inspector' };
 
   function selectTab(id) {
     activeTool.set('sql');
@@ -56,12 +57,20 @@
     closeRequestTab(id);
   }
 
-  // ---- group the tabs (SQL + Requests) by connection, honoring any
-  // manual drag-to-regroup override, in the user's saved group order
+  function selectInspector() {
+    activeTool.set('inspector');
+  }
+
+  // ---- group tabs by connection, honoring any manual drag-to-regroup
+  // override, in the user's saved group order. Only SQL tabs, request
+  // tabs, and the Inspector "tab" that have been dragged into a
+  // connection's group end up here — anything with no override renders
+  // standalone in the loose row below instead.
   function groupBy(list, kind, overrides) {
     const map = new Map();
     for (const tab of list) {
       const key = groupOf(kind, tab, overrides);
+      if (key == null) continue;
       if (!map.has(key)) map.set(key, []);
       map.get(key).push({ kind, tab });
     }
@@ -69,10 +78,11 @@
   }
   $: sqlByGroup = groupBy($sqlTabs, 'sql', $tabGroupOverride);
   $: reqByGroup = groupBy($requestTabs, 'request', $tabGroupOverride);
+  $: inspByGroup = groupBy([inspectorTab], 'inspector', $tabGroupOverride);
   $: allKeys = (() => {
     const order = [...$groupOrder];
     const seen = new Set(order);
-    for (const k of [...sqlByGroup.keys(), ...reqByGroup.keys()]) {
+    for (const k of [...sqlByGroup.keys(), ...reqByGroup.keys(), ...inspByGroup.keys()]) {
       if (!seen.has(k)) {
         seen.add(k);
         order.push(k);
@@ -82,16 +92,21 @@
   })();
   $: renderGroups = allKeys
     .map((key) => {
-      const items = [...(sqlByGroup.get(key) || []), ...(reqByGroup.get(key) || [])].sort(
-        (a, b) => (a.tab.position ?? 0) - (b.tab.position ?? 0)
-      );
-      if (key === REQUESTS_KEY) {
-        return { key, kind: 'requests', label: 'Requests', items };
-      }
+      const items = [
+        ...(sqlByGroup.get(key) || []),
+        ...(reqByGroup.get(key) || []),
+        ...(inspByGroup.get(key) || [])
+      ].sort((a, b) => (a.tab.position ?? 0) - (b.tab.position ?? 0));
       const conn = $connections.find((c) => c.id === key);
       return { key, kind: 'conn', conn, items };
     })
-    .filter((g) => g.items.length && (g.kind === 'requests' || g.conn));
+    .filter((g) => g.items.length && g.conn);
+
+  // ---- standalone (ungrouped) request tabs + the Inspector pill
+  $: looseRequestTabs = $requestTabs.filter(
+    (tab) => groupOf('request', tab, $tabGroupOverride) == null
+  );
+  $: looseInspector = groupOf('inspector', inspectorTab, $tabGroupOverride) == null;
 
   // ---- drag & drop: reorder whole groups, or drag a tab into another group
   let draggedGroup = null;
@@ -187,7 +202,7 @@
       <div
         class="tool"
         class:over={dragOverKey === g.key}
-        style="--c: {g.kind === 'conn' ? g.conn.color || 'var(--conn-slate)' : 'var(--tool-requests-text)'}"
+        style="--c: {g.conn.color || 'var(--conn-slate)'}"
         on:dragover={(e) => onGroupDragOver(g.key, e)}
         on:dragleave={() => (dragOverKey = null)}
         on:drop={() => onGroupDrop(g.key)}
@@ -199,7 +214,7 @@
           on:click={() => connMenuOpen.set(true)}
           title="Drag to reorder · click to switch connection"
         >
-          {g.kind === 'requests' ? 'Requests' : g.label ?? g.conn.nickname}
+          {g.conn.nickname}
         </button>
         {#each g.items as item (item.kind + ':' + item.tab.id)}
           {#if item.kind === 'sql'}
@@ -216,7 +231,7 @@
                 >{ICONS.closeTab.glyph}</span
               >
             </button>
-          {:else}
+          {:else if item.kind === 'request'}
             <button
               class="tab"
               class:active={$activeRequestTabId === item.tab.id && $activeTool === 'requests'}
@@ -233,15 +248,58 @@
                 >{ICONS.closeTab.glyph}</span
               >
             </button>
+          {:else}
+            <button
+              class="tab"
+              class:active={$activeTool === 'inspector'}
+              draggable="true"
+              on:dragstart|stopPropagation={(e) => onTabDragStart('inspector', item.tab, e)}
+              on:click={selectInspector}
+              title="Inspector"
+            >
+              <span class="insp-icon" style="color: var(--tool-inspector-text)">I</span>
+              Inspector
+            </button>
           {/if}
         {/each}
-        <button
-          class="icon-btn sm"
-          title={g.kind === 'requests' ? 'New request' : 'New query'}
-          on:click={() => (g.kind === 'requests' ? addReqTab() : addTab(g.key))}>+</button
-        >
+        <button class="icon-btn sm" title="New query" on:click={() => addTab(g.key)}>+</button>
       </div>
     {/each}
+
+    {#each looseRequestTabs as tab (tab.id)}
+      <button
+        class="tab loose"
+        class:active={$activeRequestTabId === tab.id && $activeTool === 'requests'}
+        draggable="true"
+        on:dragstart={(e) => onTabDragStart('request', tab, e)}
+        on:click={() => selectReqTab(tab.id)}
+        title={tab.title}
+      >
+        <span class="rt-method" style="color: var(--m-{(tab.method || 'get').toLowerCase()})">
+          {tab.method}
+        </span>
+        {tab.dirty ? '•' : ''}{tab.title}
+        <span class="x" on:click={(e) => closeReq(tab.id, e)} role="button" tabindex="-1"
+          >{ICONS.closeTab.glyph}</span
+        >
+      </button>
+    {/each}
+
+    {#if looseInspector}
+      <button
+        class="tab loose"
+        class:active={$activeTool === 'inspector'}
+        draggable="true"
+        on:dragstart={(e) => onTabDragStart('inspector', inspectorTab, e)}
+        on:click={selectInspector}
+        title="Inspector"
+      >
+        <span class="insp-icon" style="color: var(--tool-inspector-text)">I</span>
+        Inspector
+      </button>
+    {/if}
+
+    <button class="icon-btn sm loose-add" title="New request" on:click={addReqTab}>+</button>
   </div>
 
   <button
@@ -379,6 +437,24 @@
   .rt-method {
     font-size: 9px;
     font-weight: 800;
+  }
+  .tab.loose {
+    flex-shrink: 0;
+  }
+  .insp-icon {
+    font-size: 9px;
+    font-weight: 800;
+    font-style: italic;
+    width: 12px;
+    height: 12px;
+    line-height: 12px;
+    text-align: center;
+    border-radius: 3px;
+    box-shadow: inset 0 0 0 1px currentColor;
+    display: inline-block;
+  }
+  .loose-add {
+    flex-shrink: 0;
   }
   .x {
     font-size: 12px;

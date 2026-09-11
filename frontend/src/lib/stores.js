@@ -142,15 +142,18 @@ export async function loadSchemas(conn, force = false) {
 export const connMenuOpen = writable(false);
 
 /* ---------------------------------------------------- top-bar tab groups */
-// The top bar shows one colored, draggable group per connection plus a
-// "Requests" group. A tab's group is normally its own connection
-// (SQL tabs) or "requests" (request tabs), but either kind of tab can be
-// dragged into any other group purely for organization — that override,
-// and the left-to-right order of the groups themselves, are cosmetic and
-// saved locally (not synced to the backend).
+// The top bar shows one colored, draggable group per DB connection.
+// Request tabs and the single Inspector "tab" have no group of their
+// own — they float independently (a request's method badge already
+// marks what it is) — but either can be dragged into a connection's
+// group purely for organization. That override, and the left-to-right
+// order of the groups themselves, are cosmetic and saved locally (not
+// synced to the backend).
 const GROUP_ORDER_KEY = 'ogtestdesk.groupOrder';
 const TAB_GROUP_KEY = 'ogtestdesk.tabGroupOverride';
-const REQUESTS_GROUP = 'requests';
+/** Stable synthetic id for the one shared Inspector view, so it can be
+ * dragged into a connection group like any other tab. */
+export const INSPECTOR_TAB_ID = '__inspector__';
 
 function loadJson(key, fallback) {
   try {
@@ -166,7 +169,7 @@ function saveJson(key, value) {
   } catch {}
 }
 
-export const groupOrder = writable(loadJson(GROUP_ORDER_KEY, [REQUESTS_GROUP]));
+export const groupOrder = writable(loadJson(GROUP_ORDER_KEY, []));
 groupOrder.subscribe((v) => saveJson(GROUP_ORDER_KEY, v));
 
 /** Push a group key to the end of the order if it isn't already tracked. */
@@ -187,9 +190,10 @@ export function reorderGroups(draggedKey, targetKey) {
 export const tabGroupOverride = writable(loadJson(TAB_GROUP_KEY, {}));
 tabGroupOverride.subscribe((v) => saveJson(TAB_GROUP_KEY, v));
 
-/** A SQL tab's natural group is its connection; a request tab's is "requests". */
+/** Only a SQL tab has a natural group (its own connection) — request
+ * tabs and the Inspector float loose until dragged somewhere. */
 export function naturalGroup(kind, tab) {
-  return kind === 'sql' ? tab.connection_id : REQUESTS_GROUP;
+  return kind === 'sql' ? tab.connection_id : null;
 }
 export function groupOf(kind, tab, overrides) {
   return overrides[tab.id] ?? naturalGroup(kind, tab);
@@ -197,7 +201,7 @@ export function groupOf(kind, tab, overrides) {
 export function moveTabToGroup(kind, tab, groupKey) {
   tabGroupOverride.update((m) => {
     const next = { ...m };
-    if (groupKey === naturalGroup(kind, tab)) delete next[tab.id];
+    if (groupKey == null || groupKey === naturalGroup(kind, tab)) delete next[tab.id];
     else next[tab.id] = groupKey;
     return next;
   });

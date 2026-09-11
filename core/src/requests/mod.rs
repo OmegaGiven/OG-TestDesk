@@ -101,3 +101,53 @@ pub async fn send(req: &HttpRequest) -> Result<HttpResponse> {
         size_bytes,
     })
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn req(url: &str, headers: &[(&str, &str)], body: Option<&str>) -> HttpRequest {
+        HttpRequest {
+            method: "GET".into(),
+            url: url.into(),
+            headers: headers.iter().map(|(k, v)| (k.to_string(), v.to_string())).collect(),
+            body: body.map(|s| s.to_string()),
+            timeout_secs: None,
+        }
+    }
+
+    #[test]
+    fn apply_environment_substitutes_url_headers_and_body() {
+        let mut vars = HashMap::new();
+        vars.insert("baseUrl".to_string(), "https://api.example.com".to_string());
+        vars.insert("token".to_string(), "secret123".to_string());
+
+        let mut r = req(
+            "{{baseUrl}}/posts",
+            &[("Authorization", "Bearer {{token}}")],
+            Some("{\"owner\":\"{{token}}\"}"),
+        );
+        apply_environment(&mut r, &vars);
+
+        assert_eq!(r.url, "https://api.example.com/posts");
+        assert_eq!(r.headers.get("Authorization").unwrap(), "Bearer secret123");
+        assert_eq!(r.body.unwrap(), "{\"owner\":\"secret123\"}");
+    }
+
+    #[test]
+    fn apply_environment_leaves_unknown_placeholders_untouched() {
+        let vars = HashMap::new();
+        let mut r = req("{{baseUrl}}/posts", &[], None);
+        apply_environment(&mut r, &vars);
+        assert_eq!(r.url, "{{baseUrl}}/posts");
+    }
+
+    #[test]
+    fn apply_environment_substitutes_in_header_names_too() {
+        let mut vars = HashMap::new();
+        vars.insert("hdr".to_string(), "X-Custom".to_string());
+        let mut r = req("https://example.com", &[("{{hdr}}", "value")], None);
+        apply_environment(&mut r, &vars);
+        assert!(r.headers.contains_key("X-Custom"));
+    }
+}
