@@ -1,5 +1,6 @@
 <script>
   import { get } from 'svelte/store';
+  import { tick } from 'svelte';
   import CodeEditor from '../components/CodeEditor.svelte';
   import ResultGrid from './ResultGrid.svelte';
   import SchemaTree from './SchemaTree.svelte';
@@ -24,7 +25,7 @@
   } from '../stores.js';
 
   let sqOpen =
-    typeof location !== 'undefined' && new URLSearchParams(location.search).has('savedqueries');
+    typeof location === 'undefined' || !new URLSearchParams(location.search).has('savedqueriesclosed');
   let consumedHistory = null;
 
   $: if ($historyLoad && $historyLoad.kind === 'sql' && $historyLoad.at !== consumedHistory) {
@@ -106,10 +107,12 @@
   async function openRelation(e) {
     const { schema, relation } = e.detail;
     const c = sidebarConn;
+    // No LIMIT — the paged run + infinite scroll below handles browsing the
+    // whole table without pulling it all into memory at once.
     const q =
       c.kind === 'sqlite'
-        ? `SELECT * FROM ${quote(c, relation)} LIMIT 100;`
-        : `SELECT * FROM ${quote(c, schema)}.${quote(c, relation)} LIMIT 100;`;
+        ? `SELECT * FROM ${quote(c, relation)};`
+        : `SELECT * FROM ${quote(c, schema)}.${quote(c, relation)};`;
     const t = await newSqlTab(c.id, q);
     touchSqlTab(t.id, { title: relation });
     persistSqlTab(t.id, true);
@@ -164,13 +167,34 @@
     }
   }
 
-  function nextPage() {
-    const r = tab?.result;
-    if (r?.has_more) run(r.page + 1);
-  }
-  function prevPage() {
-    const r = tab?.result;
-    if (r && r.page > 0) run(r.page - 1);
+  // Infinite scroll: fetch the next page and append it to the rows already
+  // loaded, instead of replacing them — so scrolling (while still searching
+  // / filtering client-side) keeps pulling more of the table in.
+  let appendFlag = false;
+  async function loadMore() {
+    const t = get(activeSqlTab);
+    const r = t?.result;
+    if (!t || !r || !r.has_more || t.running || !t.execSql) return;
+    const conn = get(connections).find((c) => c.id === t.connection_id);
+    if (!conn) return;
+    touchSqlTab(t.id, { running: true });
+    try {
+      const size = get(appearance).pageSize ?? 500;
+      const next = await api.queryRun(conn, t.execSql, r.page + 1, size, false);
+      const merged = {
+        ...next,
+        rows: [...r.rows, ...next.rows],
+        row_count: r.row_count + next.row_count,
+        total: r.total ?? next.total
+      };
+      appendFlag = true;
+      touchSqlTab(t.id, { result: merged, running: false });
+      await tick();
+      appendFlag = false;
+    } catch (e) {
+      touchSqlTab(t.id, { running: false });
+      toastError(e);
+    }
   }
 
   function selectionOrAll(text) {
@@ -287,18 +311,15 @@
         </span>
         {#if tab.result?.is_select && tab.result.page_size > 0}
           {@const r = tab.result}
-          {@const from = r.page * r.page_size + 1}
-          {@const to = r.page * r.page_size + r.row_count}
           <span class="pager">
-            <button class="pg" on:click={prevPage} disabled={r.page === 0 || tab.running}>◀</button>
             <span class="pg-info">
-              {from.toLocaleString()}–{to.toLocaleString()}{r.total != null
+              {r.row_count.toLocaleString()}{r.total != null
                 ? ` of ${r.total.toLocaleString()}`
                 : r.has_more
-                  ? ' of many'
-                  : ''}
+                  ? '+'
+                  : ''} rows loaded
             </span>
-            <button class="pg" on:click={nextPage} disabled={!r.has_more || tab.running}>▶</button>
+            {#if r.has_more}<span class="pg-hint">— scroll for more</span>{/if}
             {#if r.count_ms != null}<span class="pg-ct">count {r.count_ms}ms</span>{/if}
           </span>
         {/if}
@@ -343,7 +364,13 @@
           {#if tab.error}
             <div class="err">{tab.error}</div>
           {:else}
-            <ResultGrid result={tab.result} name={tab.title} />
+            <ResultGrid
+              result={tab.result}
+              name={tab.title}
+              loadingMore={tab.running}
+              appending={appendFlag}
+              on:loadmore={loadMore}
+            />
           {/if}
         </div>
       </div>
@@ -565,23 +592,12 @@
     font-size: 11px;
     color: var(--text-secondary);
   }
-  .pg {
-    border: 1px solid var(--border-strong);
-    background: var(--surface-2);
-    color: var(--text-primary);
-    border-radius: var(--radius-sm);
-    width: 22px;
-    height: 22px;
-    cursor: pointer;
-    font-size: 9px;
-  }
-  .pg:disabled {
-    opacity: 0.35;
-    cursor: not-allowed;
-  }
   .pg-info {
     font-family: var(--font-mono);
     padding: 0 4px;
+  }
+  .pg-hint {
+    color: var(--text-muted);
   }
   .pg-ct {
     color: var(--text-muted);

@@ -1,8 +1,12 @@
 <script>
+  import { createEventDispatcher } from 'svelte';
   import { downloadText, copyText, rowsToDelimited, rowsToObjects } from '../export.js';
   import { toast } from '../stores.js';
   export let result;
   export let name = 'result';
+  export let loadingMore = false; // parent is fetching the next page
+  export let appending = false; // true while `result` is being replaced by an append (keep scroll/edits)
+  const dispatch = createEventDispatcher();
 
   let sortCol = -1;
   let sortDir = 1;
@@ -29,6 +33,53 @@
     // keep at least one column visible
     hiddenCols = new Set(cols.slice(1).map((_, i) => i + 1));
   }
+
+  // ---- inline edits (view/export only — never written back to the DB)
+  let editing = false;
+  let edits = new Map(); // row (array ref, stable across sort/filter/append) -> {colIndex: value}
+  $: editCount = [...edits.values()].reduce((n, e) => n + Object.keys(e).length, 0);
+
+  function coerceEdit(original, str) {
+    if (str.trim() === '') return null;
+    if (typeof original === 'number') {
+      const n = Number(str);
+      return Number.isNaN(n) ? str : n;
+    }
+    if (typeof original === 'boolean') return str.trim().toLowerCase() === 'true';
+    return str;
+  }
+  function cellVal(row, c) {
+    const e = edits.get(row);
+    return e && Object.prototype.hasOwnProperty.call(e, c) ? e[c] : row[c];
+  }
+  function hasEdit(row, c) {
+    const e = edits.get(row);
+    return !!e && Object.prototype.hasOwnProperty.call(e, c);
+  }
+  function setEdit(row, c, str) {
+    const original = row[c];
+    const val = coerceEdit(original, str);
+    const next = new Map(edits);
+    const rowEdits = { ...(next.get(row) || {}) };
+    if (val === original) delete rowEdits[c];
+    else rowEdits[c] = val;
+    if (Object.keys(rowEdits).length) next.set(row, rowEdits);
+    else next.delete(row);
+    edits = next;
+  }
+  function discardEdits() {
+    edits = new Map();
+  }
+  $: exportRows =
+    edits.size === 0
+      ? rows
+      : rows.map((row) => {
+          const e = edits.get(row);
+          if (!e) return row;
+          const copy = row.slice();
+          for (const c in e) copy[+c] = e[c];
+          return copy;
+        });
 
   if (typeof location !== 'undefined') {
     const q = new URLSearchParams(location.search);
@@ -84,14 +135,25 @@
   $: padTop = startIdx * ROW_H;
   $: padBottom = Math.max(0, (total - endIdx) * ROW_H);
 
+  function maybeLoadMore() {
+    if (!scrollEl || loadingMore || !result?.has_more) return;
+    const remaining = scrollEl.scrollHeight - scrollEl.scrollTop - scrollEl.clientHeight;
+    if (remaining < 400) dispatch('loadmore');
+  }
   function onScroll() {
     scrollTop = scrollEl ? scrollEl.scrollTop : 0;
+    maybeLoadMore();
   }
+  $: if (scrollEl && total >= 0 && viewH && !loadingMore) maybeLoadMore();
+
   let lastResult;
   $: if (result !== lastResult) {
     lastResult = result;
-    scrollTop = 0;
-    if (scrollEl) scrollEl.scrollTop = 0;
+    if (!appending) {
+      scrollTop = 0;
+      if (scrollEl) scrollEl.scrollTop = 0;
+      edits = new Map();
+    }
     // keep sort + filters across paging; clear only when column set changes
     const colKey = cols.map((c) => c.name).join('');
     if (colKey !== lastColKey) {
@@ -160,18 +222,18 @@
   $: fileBase = (name || 'result').replace(/[^\w.-]+/g, '_').slice(0, 60) || 'result';
   function doExport(fmt) {
     if (fmt === 'csv') {
-      downloadText(`${fileBase}.csv`, rowsToDelimited(cols, rows, ','), 'text/csv');
+      downloadText(`${fileBase}.csv`, rowsToDelimited(cols, exportRows, ','), 'text/csv');
     } else if (fmt === 'tsv') {
-      downloadText(`${fileBase}.tsv`, rowsToDelimited(cols, rows, '\t'), 'text/tab-separated-values');
+      downloadText(`${fileBase}.tsv`, rowsToDelimited(cols, exportRows, '\t'), 'text/tab-separated-values');
     } else if (fmt === 'json') {
       downloadText(
         `${fileBase}.json`,
-        JSON.stringify(rowsToObjects(cols, rows), null, 2),
+        JSON.stringify(rowsToObjects(cols, exportRows), null, 2),
         'application/json'
       );
     } else if (fmt === 'copy') {
-      copyText(rowsToDelimited(cols, rows, '\t')).then((ok) =>
-        toast(ok ? `Copied ${rows.length.toLocaleString()} rows` : 'Copy blocked', ok ? 'success' : 'error', 1800)
+      copyText(rowsToDelimited(cols, exportRows, '\t')).then((ok) =>
+        toast(ok ? `Copied ${exportRows.length.toLocaleString()} rows` : 'Copy blocked', ok ? 'success' : 'error', 1800)
       );
     }
   }
@@ -194,7 +256,8 @@
   }
   async function copyCell() {
     if (!selected) return;
-    const v = rows[selected[0]]?.[selected[1]];
+    const row = rows[selected[0]];
+    const v = row ? cellVal(row, selected[1]) : undefined;
     if (v === undefined) return;
     try {
       await navigator.clipboard.writeText(
@@ -266,9 +329,24 @@
       <span class="fcount">{total.toLocaleString()} of {baseRows.length.toLocaleString()}</span>
       <button class="btn ghost sm" on:click={clearFilters}>Clear</button>
     {/if}
+    <button class="btn ghost sm" class:on={editing} title="Edit cells (view/export only, does not write to the DB)" on:click={() => (editing = !editing)}>
+      ✎ Edit
+    </button>
+    {#if editCount}
+      <span class="fcount">{editCount.toLocaleString()} edited</span>
+      <button class="btn ghost sm" on:click={discardEdits}>↺ Discard</button>
+    {/if}
     <span style="flex:1" />
     <span class="export">
-      <span class="ex-label">Export{hasFilter ? ' (filtered)' : result.has_more || result.page > 0 ? ' (page)' : ''}</span>
+      <span class="ex-label"
+        >Export{editCount
+          ? ' (edited)'
+          : hasFilter
+            ? ' (filtered)'
+            : result.has_more || result.page > 0
+              ? ' (loaded)'
+              : ''}</span
+      >
       <button class="btn ghost sm" on:click={() => doExport('csv')}>CSV</button>
       <button class="btn ghost sm" on:click={() => doExport('tsv')}>TSV</button>
       <button class="btn ghost sm" on:click={() => doExport('json')}>JSON</button>
@@ -325,19 +403,37 @@
           <tr>
             <td class="rownum">{startIdx + vi + 1}</td>
             {#each visibleIdx as c (c)}
-              <td
-                class={cls(row[c])}
-                class:sel={selected && selected[0] === startIdx + vi && selected[1] === c}
-                on:click={() => pick(startIdx + vi, c)}
-                title={display(row[c])}
-              >
-                {display(row[c])}
-              </td>
+              {#if editing}
+                <td class="editing-cell" class:edited={hasEdit(row, c)}>
+                  <input
+                    class="cell-edit"
+                    value={cellVal(row, c) === null || cellVal(row, c) === undefined ? '' : display(cellVal(row, c))}
+                    on:click|stopPropagation
+                    on:change={(e) => setEdit(row, c, e.target.value)}
+                    on:keydown={(e) => {
+                      if (e.key === 'Enter') e.target.blur();
+                    }}
+                  />
+                </td>
+              {:else}
+                <td
+                  class={cls(cellVal(row, c))}
+                  class:sel={selected && selected[0] === startIdx + vi && selected[1] === c}
+                  class:edited={hasEdit(row, c)}
+                  on:click={() => pick(startIdx + vi, c)}
+                  title={display(cellVal(row, c))}
+                >
+                  {display(cellVal(row, c))}
+                </td>
+              {/if}
             {/each}
           </tr>
         {/each}
         {#if padBottom}
           <tr class="spacer"><td colspan={visibleIdx.length + 1} style="height:{padBottom}px"></td></tr>
+        {/if}
+        {#if loadingMore}
+          <tr class="loading-more"><td colspan={visibleIdx.length + 1}>Loading more…</td></tr>
         {/if}
       </tbody>
     </table>
@@ -573,6 +669,31 @@
   }
   td.json {
     color: var(--j-key);
+  }
+  td.edited,
+  .editing-cell.edited {
+    background: color-mix(in srgb, var(--warn) 20%, transparent);
+  }
+  .editing-cell {
+    padding: 1px 2px;
+  }
+  .cell-edit {
+    width: 100%;
+    font: inherit;
+    font-family: var(--font-mono);
+    padding: 2px 5px;
+    border: 1px solid var(--border-strong);
+    border-radius: 3px;
+    background: var(--surface-2);
+    color: var(--text-primary);
+  }
+  .loading-more td {
+    text-align: center;
+    color: var(--text-muted);
+    font-family: var(--font-sans);
+    font-size: 11px;
+    padding: 8px;
+    border-right: none;
   }
   tbody tr:not(.spacer):hover td {
     background: color-mix(in srgb, var(--tool-sql-text) 7%, transparent);

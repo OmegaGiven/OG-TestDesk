@@ -11,11 +11,13 @@
   let rawText = '';
 
   if (typeof location !== 'undefined') {
-    const raw = new URLSearchParams(location.search).get('inspectraw');
+    const q = new URLSearchParams(location.search);
+    const raw = q.get('inspectraw');
     if (raw) {
       rawMode = true;
       rawText = raw;
     }
+    if (q.has('inspectmode')) mode = q.get('inspectmode');
   }
   let rawError = '';
 
@@ -159,12 +161,24 @@
     root && typeof root === 'object' && !Array.isArray(root)
       ? Object.entries(root).map(([k, v]) => ({ k, t: v === null ? 'null' : Array.isArray(v) ? 'array' : typeof v, s: sizeOf(v) }))
       : [];
+
+  // Raw mode — the whole loaded payload, pretty-printed, read-only.
+  $: rawPretty =
+    root === undefined || root === null
+      ? ''
+      : (() => {
+          try {
+            return JSON.stringify(root, null, 2);
+          } catch {
+            return String(root);
+          }
+        })();
 </script>
 
 <div class="inspector">
   <div class="toolbar">
     <div class="modes">
-      {#each ['tree', 'table', 'summary'] as m}
+      {#each ['tree', 'table', 'summary', 'raw'] as m}
         <button class:active={mode === m} on:click={() => (mode = m)}>{m}</button>
       {/each}
     </div>
@@ -255,6 +269,14 @@
               </tbody>
             </table>
           {/if}
+        </div>
+      {:else if mode === 'raw'}
+        <div class="raw-view">
+          <div class="raw-view-tools">
+            <button class="btn ghost sm" on:click={() => copy(rawPretty)} disabled={!rawPretty}>⧉ Copy</button>
+            <span class="mc">{rawPretty.length.toLocaleString()} chars</span>
+          </div>
+          <pre class="raw-pretty">{rawPretty}</pre>
         </div>
       {/if}
     </div>
@@ -372,6 +394,28 @@
   .ok-tag {
     font-size: 10px;
     color: var(--ok);
+  }
+  .raw-view {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+  }
+  .raw-view-tools {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 8px;
+    border-bottom: 1px solid var(--border);
+  }
+  .raw-pretty {
+    flex: 1;
+    margin: 0;
+    padding: 10px;
+    overflow: auto;
+    font-family: var(--font-mono);
+    font-size: 12px;
+    color: var(--text-primary);
+    white-space: pre;
   }
   .empty {
     padding: 30px;

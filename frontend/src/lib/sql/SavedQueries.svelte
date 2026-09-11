@@ -211,6 +211,7 @@
 <div class="sq">
   <div class="sq-tools">
     <input class="input sm" placeholder="Filter saved queries…" bind:value={filter} />
+    <button class="btn ghost sm" title="New query" on:click={() => newQuery(null)}>＋≡</button>
     <button class="btn ghost sm" title="New folder" on:click={() => newFolder(null)}>＋⌸</button>
     <button class="btn ghost sm" title="Refresh" on:click={reload}>⟳</button>
   </div>
