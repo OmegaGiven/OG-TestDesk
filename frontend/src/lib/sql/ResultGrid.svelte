@@ -1,10 +1,8 @@
 <script>
-  import { createEventDispatcher } from 'svelte';
   import { downloadText, copyText, rowsToDelimited, rowsToObjects } from '../export.js';
   import { toast } from '../stores.js';
   export let result;
   export let name = 'result';
-  const dispatch = createEventDispatcher();
 
   let sortCol = -1;
   let sortDir = 1;
@@ -169,7 +167,6 @@
 
   function pick(r, c) {
     selected = [r, c];
-    dispatch('inspect', { column: cols[c].name, value: rows[r][c] });
   }
   async function copyCell() {
     if (!selected) return;

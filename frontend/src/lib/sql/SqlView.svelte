@@ -222,10 +222,6 @@
     sendToInspector('sql', `${tab.title} (${r.row_count} rows)`, objs);
   }
 
-  function inspectCell(e) {
-    sendToInspector('sql', `${tab.title} · ${e.detail.column}`, e.detail.value);
-  }
-
   // splitter drag
   function startDrag() {
     dragging = true;
@@ -347,7 +343,7 @@
           {#if tab.error}
             <div class="err">{tab.error}</div>
           {:else}
-            <ResultGrid result={tab.result} name={tab.title} on:inspect={inspectCell} />
+            <ResultGrid result={tab.result} name={tab.title} />
           {/if}
         </div>
       </div>
