@@ -11,6 +11,7 @@
   let search = '';
   let colFilters = {}; // colIndex -> string
   let showColFilters = false;
+  let headerRowH = 24; // measured, drives the filter-row's sticky offset
 
   if (typeof location !== 'undefined') {
     const q = new URLSearchParams(location.search);
@@ -235,18 +236,20 @@
   <div class="grid" bind:this={scrollEl} on:scroll={onScroll} bind:clientHeight={viewH} tabindex="0">
     <table>
       <thead>
-        <tr>
+        <tr bind:clientHeight={headerRowH}>
           <th class="rownum">#</th>
           {#each cols as c, i}
             <th on:click={() => sortBy(i)} title="{c.type_name} — click to sort">
-              {c.name}
-              <span class="ty">{c.type_name}</span>
+              <span class="th-row">
+                <span class="cn">{c.name}</span>
+                <span class="ty">{c.type_name}</span>
+              </span>
               {#if sortCol === i}<span class="arr">{sortDir === 1 ? '▲' : '▼'}</span>{/if}
             </th>
           {/each}
         </tr>
         {#if showColFilters}
-          <tr class="filter-row">
+          <tr class="filter-row" style="--filter-top: {headerRowH}px">
             <th class="rownum"></th>
             {#each cols as c, i}
               <th>
@@ -388,10 +391,22 @@
     font-family: var(--font-sans);
     font-size: 11px;
     font-weight: 600;
+    height: auto;
+    white-space: normal;
+    vertical-align: middle;
     z-index: 2;
   }
+  .th-row {
+    display: flex;
+    align-items: baseline;
+    flex-wrap: wrap;
+    gap: 2px 8px;
+  }
+  .cn {
+    flex-shrink: 0;
+  }
   thead tr.filter-row th {
-    top: 34px;
+    top: var(--filter-top, 24px);
     cursor: default;
     padding: 2px 4px;
     z-index: 2;
@@ -409,11 +424,12 @@
     color: var(--text-primary);
   }
   .ty {
-    display: block;
+    margin-left: auto;
     font-weight: 400;
     font-size: 9px;
     color: var(--text-muted);
     text-transform: lowercase;
+    white-space: nowrap;
   }
   .arr {
     font-size: 8px;
