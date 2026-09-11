@@ -213,7 +213,7 @@
   <div class="sq-tools">
     <input class="input sm" placeholder="Filter saved queries…" bind:value={filter} />
     <button class="icon-btn" title="New query" on:click={() => newQuery(null)}>{ICONS.newQuery.glyph}</button>
-    <button class="icon-btn" title="New folder" on:click={() => newFolder(null)}>{ICONS.newFolder.glyph}</button>
+    <button class="icon-btn" title="New folder" on:click={() => newFolder(null)}>{@html ICONS.newFolder.svg}</button>
     <button class="icon-btn" title="Refresh" on:click={reload}>{ICONS.refresh.glyph}</button>
   </div>
 

@@ -38,7 +38,7 @@
       <span class="fcount">{subs.length + qs.length}</span>
       <span class="facts">
         <button class="icon-btn sm" title="New subfolder" on:click={() => ctx.newFolder(folderId)}
-          >{ICONS.newSubfolder.glyph}</button
+          >{@html ICONS.newSubfolder.svg}</button
         >
         <button class="icon-btn sm" title="New query here" on:click={() => ctx.newQuery(folderId)}
           >{ICONS.newQueryHere.glyph}</button

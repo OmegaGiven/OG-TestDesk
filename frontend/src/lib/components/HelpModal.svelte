@@ -201,7 +201,9 @@
             <tbody>
               {#each Object.values(ICONS) as icon}
                 <tr>
-                  <td class="ic" style={icon.colorVar ? `color:var(${icon.colorVar})` : ''}>{icon.glyph}</td>
+                  <td class="ic" style={icon.colorVar ? `color:var(${icon.colorVar})` : ''}>
+                    {#if icon.svg}{@html icon.svg}{:else}{icon.glyph}{/if}
+                  </td>
                   <td>{icon.label}</td>
                   <td class="where">{icon.where}</td>
                 </tr>

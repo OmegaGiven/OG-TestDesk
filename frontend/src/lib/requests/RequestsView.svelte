@@ -913,9 +913,10 @@
     appearance: none;
     -webkit-appearance: none;
     -moz-appearance: none;
+    height: var(--ctrl-h);
     font-weight: 800;
     font-size: 12px;
-    padding: 6px 22px 6px 8px;
+    padding: 0 22px 0 8px;
     border-radius: var(--radius-sm);
     border: 1px solid var(--border-strong);
     background-color: var(--surface-2);

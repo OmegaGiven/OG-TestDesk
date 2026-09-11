@@ -190,7 +190,9 @@
                   <div class="cols">
                     {#each cols[`${schema.name}.${rel.name}`] || [] as c}
                       <div class="col">
-                        <span class="cn">{c.primary_key ? ICONS.primaryKey.glyph + ' ' : ''}{c.name}</span>
+                        <span class="cn">
+                          {#if c.primary_key}<span class="pk-ico" title="Primary key">{@html ICONS.primaryKey.svg}</span>{/if}{c.name}
+                        </span>
                         <span class="ct">{c.data_type}{c.nullable ? '' : ' ·'}</span>
                       </div>
                     {/each}
@@ -356,6 +358,12 @@
   }
   .cn {
     color: var(--text-primary);
+  }
+  .pk-ico {
+    display: inline-flex;
+    vertical-align: -1px;
+    margin-right: 3px;
+    color: var(--j-number);
   }
   .ct {
     color: var(--text-muted);
