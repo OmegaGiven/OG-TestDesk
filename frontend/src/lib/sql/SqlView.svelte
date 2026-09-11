@@ -55,6 +55,35 @@
   let splitPct = 55;
   let dragging = false;
 
+  const SIDEBAR_W_KEY = 'ogtestdesk.sql.sidebarW';
+  function loadSidebarW() {
+    try {
+      const n = Number(localStorage.getItem(SIDEBAR_W_KEY));
+      return n >= 180 && n <= 480 ? n : 260;
+    } catch {
+      return 260;
+    }
+  }
+  let sidebarW = loadSidebarW();
+  let draggingSidebar = false;
+  function startSidebarDrag() {
+    draggingSidebar = true;
+  }
+  function onSidebarMove(e) {
+    if (!draggingSidebar) return;
+    const host = document.querySelector('.sql');
+    if (!host) return;
+    const rect = host.getBoundingClientRect();
+    sidebarW = Math.min(480, Math.max(180, e.clientX - rect.left));
+  }
+  function endSidebarDrag() {
+    if (!draggingSidebar) return;
+    draggingSidebar = false;
+    try {
+      localStorage.setItem(SIDEBAR_W_KEY, String(Math.round(sidebarW)));
+    } catch {}
+  }
+
   $: conns = $connections;
   $: tab = $activeSqlTab;
   $: tabConn = tab ? conns.find((c) => c.id === tab.connection_id) : null;
@@ -263,10 +292,19 @@
   }
 </script>
 
-<svelte:window on:mousemove={onMove} on:mouseup={endDrag} />
+<svelte:window
+  on:mousemove={(e) => {
+    onMove(e);
+    onSidebarMove(e);
+  }}
+  on:mouseup={() => {
+    endDrag();
+    endSidebarDrag();
+  }}
+/>
 
 <div class="sql">
-  <aside class="sidebar">
+  <aside class="sidebar" style="width:{sidebarW}px">
     <div class="sq-section" class:open={sqOpen}>
       <button class="sec-head sq-toggle" on:click={() => (sqOpen = !sqOpen)}>
         <span class="chev">{sqOpen ? ICONS.expandOpen.glyph : ICONS.expandClosed.glyph}</span>
@@ -286,6 +324,8 @@
       </div>
     {/if}
   </aside>
+
+  <div class="sidebar-resizer" on:mousedown={startSidebarDrag} role="separator" tabindex="-1"></div>
 
   <section class="main">
     {#if !tab}
@@ -417,13 +457,20 @@
     overflow: hidden;
   }
   .sidebar {
-    width: 260px;
     flex-shrink: 0;
-    border-right: 1px solid var(--border);
     background: var(--surface-1);
     display: flex;
     flex-direction: column;
     overflow: hidden;
+  }
+  .sidebar-resizer {
+    width: 5px;
+    flex-shrink: 0;
+    cursor: col-resize;
+    background: var(--border);
+  }
+  .sidebar-resizer:hover {
+    background: var(--tool-sql-text);
   }
   .sec-head {
     display: flex;

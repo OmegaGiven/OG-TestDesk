@@ -564,12 +564,50 @@
   function endDrag() {
     dragging = false;
   }
+
+  const SIDEBAR_W_KEY = 'ogtestdesk.requests.sidebarW';
+  function loadSidebarW() {
+    try {
+      const n = Number(localStorage.getItem(SIDEBAR_W_KEY));
+      return n >= 180 && n <= 480 ? n : 250;
+    } catch {
+      return 250;
+    }
+  }
+  let sidebarW = loadSidebarW();
+  let draggingSidebar = false;
+  function startSidebarDrag() {
+    draggingSidebar = true;
+  }
+  function onSidebarMove(e) {
+    if (!draggingSidebar) return;
+    const host = document.querySelector('.rq');
+    if (!host) return;
+    const rect = host.getBoundingClientRect();
+    sidebarW = Math.min(480, Math.max(180, e.clientX - rect.left));
+  }
+  function endSidebarDrag() {
+    if (!draggingSidebar) return;
+    draggingSidebar = false;
+    try {
+      localStorage.setItem(SIDEBAR_W_KEY, String(Math.round(sidebarW)));
+    } catch {}
+  }
 </script>
 
-<svelte:window on:mousemove={onMove} on:mouseup={endDrag} />
+<svelte:window
+  on:mousemove={(e) => {
+    onMove(e);
+    onSidebarMove(e);
+  }}
+  on:mouseup={() => {
+    endDrag();
+    endSidebarDrag();
+  }}
+/>
 
 <div class="rq">
-  <aside class="sidebar">
+  <aside class="sidebar" style="width:{sidebarW}px">
     <div class="sec-head">
       <span>Collections</span>
       <div>
@@ -624,6 +662,8 @@
       </button>
     </div>
   </aside>
+
+  <div class="sidebar-resizer" on:mousedown={startSidebarDrag} role="separator" tabindex="-1"></div>
 
   <section class="main">
     <div class="urlbar">
@@ -816,12 +856,20 @@
     overflow: hidden;
   }
   .sidebar {
-    width: 250px;
     flex-shrink: 0;
-    border-right: 1px solid var(--border);
     background: var(--surface-1);
     display: flex;
     flex-direction: column;
+    overflow: hidden;
+  }
+  .sidebar-resizer {
+    width: 5px;
+    flex-shrink: 0;
+    cursor: col-resize;
+    background: var(--border);
+  }
+  .sidebar-resizer:hover {
+    background: var(--tool-requests-text);
   }
   .sec-head {
     display: flex;
