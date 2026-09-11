@@ -15,4 +15,4 @@ pub use storage::metadata::{
     Environment, HistoryEntry, MetadataStore, QueryTab, RequestCollection, RequestHistoryEntry,
     RequestTab, SavedQuery, SavedQueryFolder, SavedRequest, Schedule,
 };
-pub use storage::secrets::SecretsStore;
+pub use storage::secrets::{SecretsBackend, SecretsStore};

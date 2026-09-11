@@ -24,6 +24,7 @@ export function fontStack(list, key) {
 
 export const COLOR_THEMES = {
   default: { label: 'Default', light: {}, dark: {} },
+  custom: { label: 'Custom', light: {}, dark: {}, custom: true },
 
   nord: {
     label: 'Nord',
@@ -185,17 +186,98 @@ export const COLOR_THEMES = {
   }
 };
 
-export function applyColorTheme(name, mode) {
+// Editable palette for the custom-theme builder. Only solid colours the
+// user picks directly; the tool *tints* are derived from the tool text
+// colours so there's less to fiddle with.
+export const THEME_VARS = [
+  { group: 'Surfaces', key: '--surface-0', label: 'Background (deepest)' },
+  { group: 'Surfaces', key: '--surface-1', label: 'Panel' },
+  { group: 'Surfaces', key: '--surface-2', label: 'Raised / input' },
+  { group: 'Surfaces', key: '--surface-3', label: 'Hover / active' },
+  { group: 'Text', key: '--text-primary', label: 'Primary text' },
+  { group: 'Text', key: '--text-secondary', label: 'Secondary text' },
+  { group: 'Text', key: '--text-muted', label: 'Muted text' },
+  { group: 'Borders', key: '--border', label: 'Border' },
+  { group: 'Borders', key: '--border-strong', label: 'Border (strong)' },
+  { group: 'Tool hues', key: '--tool-sql-text', label: 'SQL' },
+  { group: 'Tool hues', key: '--tool-requests-text', label: 'Requests' },
+  { group: 'Tool hues', key: '--tool-inspector-text', label: 'Inspector' },
+  { group: 'Status', key: '--ok', label: 'OK / success' },
+  { group: 'Status', key: '--warn', label: 'Warning' },
+  { group: 'Status', key: '--danger', label: 'Danger' },
+  { group: 'JSON', key: '--j-key', label: 'Key' },
+  { group: 'JSON', key: '--j-string', label: 'String' },
+  { group: 'JSON', key: '--j-number', label: 'Number' },
+  { group: 'JSON', key: '--j-bool', label: 'Boolean' }
+];
+
+const TINT_FROM = {
+  '--tool-sql-tint': '--tool-sql-text',
+  '--tool-requests-tint': '--tool-requests-text',
+  '--tool-inspector-tint': '--tool-inspector-text'
+};
+
+const ALL_THEME_KEYS = new Set([
+  ...THEME_VARS.map((v) => v.key),
+  ...Object.keys(TINT_FROM),
+  ...Object.values(COLOR_THEMES).flatMap((t) => [
+    ...Object.keys(t.light || {}),
+    ...Object.keys(t.dark || {})
+  ])
+]);
+
+/**
+ * @param {string} name  preset key, or 'custom'
+ * @param {'light'|'dark'} mode
+ * @param {{light?:object, dark?:object}} [custom]  overrides for 'custom'
+ */
+export function applyColorTheme(name, mode, custom) {
   const root = document.documentElement;
-  const preset = COLOR_THEMES[name] || COLOR_THEMES.default;
-  const all = new Set([
-    ...Object.keys(COLOR_THEMES.nord.light),
-    ...Object.keys(COLOR_THEMES.nord.dark),
-    ...Object.keys(COLOR_THEMES.sepia.light),
-    ...Object.keys(COLOR_THEMES.ocean.dark),
-    ...Object.keys(COLOR_THEMES.contrast.dark)
-  ]);
-  for (const v of all) root.style.removeProperty(v);
-  const vars = mode === 'dark' ? preset.dark : preset.light;
+  for (const v of ALL_THEME_KEYS) root.style.removeProperty(v);
+
+  let vars;
+  if (name === 'custom') {
+    vars = { ...((custom && custom[mode]) || {}) };
+    // derive tool tints from the chosen tool hues
+    for (const [tint, src] of Object.entries(TINT_FROM)) {
+      if (vars[src] && !vars[tint]) {
+        vars[tint] = `color-mix(in srgb, ${vars[src]} ${mode === 'dark' ? 26 : 15}%, transparent)`;
+      }
+    }
+  } else {
+    const preset = COLOR_THEMES[name] || COLOR_THEMES.default;
+    vars = mode === 'dark' ? preset.dark : preset.light;
+  }
   for (const [k, val] of Object.entries(vars)) root.style.setProperty(k, val);
+}
+
+/** Current effective value of a theme var (for seeding the custom editor). */
+export function readThemeVar(key) {
+  try {
+    return getComputedStyle(document.documentElement).getPropertyValue(key).trim();
+  } catch {
+    return '';
+  }
+}
+
+/** Snapshot the currently-applied palette into a {light|dark: {...}} slice. */
+export function snapshotTheme(mode) {
+  const out = {};
+  for (const { key } of THEME_VARS) {
+    const v = readThemeVar(key);
+    if (v) out[key] = normalizeHex(v);
+  }
+  return { [mode]: out };
+}
+
+// Turn "rgb(12, 68, 124)" into "#0c447c" so <input type=color> is happy.
+export function normalizeHex(v) {
+  if (!v) return v;
+  v = v.trim();
+  if (v[0] === '#') return v.length === 4 ? '#' + [...v.slice(1)].map((c) => c + c).join('') : v;
+  const m = v.match(/rgba?\(([^)]+)\)/i);
+  if (!m) return v;
+  const [r, g, b] = m[1].split(',').map((x) => parseFloat(x));
+  const h = (n) => Math.max(0, Math.min(255, Math.round(n))).toString(16).padStart(2, '0');
+  return `#${h(r)}${h(g)}${h(b)}`;
 }

@@ -15,6 +15,7 @@ export const APPEARANCE_DEFAULT = {
   fontMono: 'system',
   fontScale: 1,
   colorTheme: 'default',
+  customTheme: { light: {}, dark: {} },
   pageSize: 500
 };
 
@@ -52,7 +53,7 @@ export function applyAppearance(a) {
   root.style.zoom = String(a.fontScale ?? 1);
   if (a.gutter > 0) root.dataset.gutter = '1';
   else delete root.dataset.gutter;
-  applyColorTheme(a.colorTheme || 'default', effectiveMode());
+  applyColorTheme(a.colorTheme || 'default', effectiveMode(), a.customTheme);
   try {
     localStorage.setItem(APPEARANCE_KEY, JSON.stringify(a));
   } catch {}
@@ -81,14 +82,14 @@ export function applyTheme(t) {
     localStorage.setItem(THEME_KEY, t);
   } catch {}
   // colour theme depends on light/dark, re-apply
-  if (typeof document !== 'undefined') applyColorTheme(get(appearance).colorTheme, effectiveMode());
+  if (typeof document !== 'undefined') applyColorTheme(get(appearance).colorTheme, effectiveMode(), get(appearance).customTheme);
 }
 theme.subscribe((t) => {
   if (typeof document !== 'undefined') applyTheme(t);
 });
 if (typeof window !== 'undefined' && window.matchMedia) {
   window.matchMedia('(prefers-color-scheme: dark)').addEventListener?.('change', () => {
-    if (get(theme) === 'system') applyColorTheme(get(appearance).colorTheme, effectiveMode());
+    if (get(theme) === 'system') applyColorTheme(get(appearance).colorTheme, effectiveMode(), get(appearance).customTheme);
   });
 }
 

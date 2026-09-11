@@ -168,8 +168,14 @@
     background: var(--surface-1);
     border-bottom: 1px solid var(--border);
   }
+  .chrome {
+    min-width: 0;
+    overflow: hidden;
+  }
   .chrome :global(.topnav) {
-    flex: 1;
+    flex: 1 1 0;
+    width: 0;
+    min-width: 0;
     border-bottom: none;
   }
   .chrome-btn {

@@ -12,8 +12,8 @@ use tokio::sync::Mutex as AsyncMutex;
 use og_testdesk_core::{
     apply_environment, drivers, requests as http_requests, Column, ConnConfig, Environment,
     HistoryEntry, HttpRequest, HttpResponse, MetadataStore, QueryResult, QueryTab,
-    RequestCollection, RequestTab, SavedQuery, SavedQueryFolder, SavedRequest, Schema, SecretsStore,
-    ServerInfo,
+    RequestCollection, RequestTab, SavedQuery, SavedQueryFolder, SavedRequest, Schema,
+    SecretsBackend, SecretsStore, ServerInfo,
 };
 use tauri::{Manager, State};
 
@@ -295,6 +295,11 @@ async fn saved_query_save(state: State<'_, AppState>, mut query: SavedQuery) -> 
 #[tauri::command]
 async fn saved_query_delete(state: State<'_, AppState>, id: String) -> R<()> {
     state.metadata.delete_saved_query(&id).await.map_err(err)
+}
+
+#[tauri::command]
+fn secrets_status() -> SecretsBackend {
+    SecretsStore::backend()
 }
 
 #[tauri::command]
@@ -644,6 +649,7 @@ async fn main() {
         .expect("no app data dir")
         .join("OGTestDesk");
     std::fs::create_dir_all(&app_data_dir).expect("create app data dir");
+    SecretsStore::init_fallback(app_data_dir.clone());
     let db_path = std::env::var("OGTESTDESK_DB_PATH")
         .unwrap_or_else(|_| app_data_dir.join("og_testdesk.db").to_string_lossy().into());
 
@@ -714,6 +720,7 @@ async fn main() {
             saved_queries_list,
             saved_query_save,
             saved_query_delete,
+            secrets_status,
             saved_query_folders_list,
             saved_query_folder_save,
             saved_query_folder_delete,

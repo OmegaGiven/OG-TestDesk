@@ -1,4 +1,5 @@
 <script>
+  import { onMount, tick } from 'svelte';
   import {
     connections,
     sqlTabs,
@@ -15,12 +16,6 @@
     connMenuOpen
   } from '../stores.js';
   import { api } from '../api.js';
-
-  const TOOLS = [
-    { id: 'sql', label: 'SQL', tint: 'var(--tool-sql-tint)', text: 'var(--tool-sql-text)' },
-    { id: 'requests', label: 'Requests', tint: 'var(--tool-requests-tint)', text: 'var(--tool-requests-text)' },
-    { id: 'inspector', label: 'Inspector', tint: 'var(--tool-inspector-tint)', text: 'var(--tool-inspector-text)' }
-  ];
 
   $: tabsByConn = (connId) =>
     $sqlTabs.filter((t) => t.connection_id === connId).sort((a, b) => a.position - b.position);
@@ -56,104 +51,216 @@
     e.stopPropagation();
     closeRequestTab(id);
   }
+
+  // ---- horizontal scroll without a scrollbar
+  let scroller;
+  let overflowing = false;
+  let canLeft = false;
+  let canRight = false;
+
+  function refresh() {
+    if (!scroller) return;
+    const max = scroller.scrollWidth - scroller.clientWidth;
+    overflowing = max > 2;
+    canLeft = scroller.scrollLeft > 1;
+    canRight = scroller.scrollLeft < max - 1;
+  }
+  function nudge(dir) {
+    scroller?.scrollBy({ left: dir * Math.max(160, scroller.clientWidth * 0.6), behavior: 'smooth' });
+  }
+  function onWheel(e) {
+    if (!scroller) return;
+    // let a plain vertical wheel scroll the bar sideways
+    if (Math.abs(e.deltaY) > Math.abs(e.deltaX)) {
+      scroller.scrollLeft += e.deltaY;
+      e.preventDefault();
+    }
+  }
+
+  onMount(() => {
+    refresh();
+    const ro = new ResizeObserver(refresh);
+    if (scroller) {
+      ro.observe(scroller);
+      for (const child of scroller.children) ro.observe(child);
+    }
+    window.addEventListener('resize', refresh);
+    // layout / font settling
+    const timers = [60, 250, 700].map((t) => setTimeout(refresh, t));
+    return () => {
+      ro.disconnect();
+      window.removeEventListener('resize', refresh);
+      timers.forEach(clearTimeout);
+    };
+  });
+
+  // re-check when the tab set changes
+  $: if ($sqlTabs || $requestTabs || $connections) tick().then(refresh);
 </script>
 
 <nav class="topnav">
-  <!-- SQL tool: connection groups with tabs -->
-  <div
-    class="tool"
-    class:active={$activeTool === 'sql'}
-    style="--tint: var(--tool-sql-tint); --tint-text: var(--tool-sql-text);"
+  <button
+    class="edge left"
+    class:show={overflowing}
+    disabled={!canLeft}
+    tabindex="-1"
+    title="Scroll left"
+    on:click={() => nudge(-1)}>‹</button
   >
-    <button
-      class="tool-label"
-      title="Connections"
-      on:click={() => {
-        activeTool.set('sql');
-        connMenuOpen.update((v) => !v);
-      }}
+
+  <div class="scroller" bind:this={scroller} on:scroll={refresh} on:wheel={onWheel}>
+    <!-- SQL tool: connection groups with tabs -->
+    <div
+      class="tool"
+      class:active={$activeTool === 'sql'}
+      style="--tint: var(--tool-sql-tint); --tint-text: var(--tool-sql-text);"
     >
-      SQL <span class="caret">▾</span>
-    </button>
-    {#each $connections as conn (conn.id)}
-      {#if tabsByConn(conn.id).length}
-        <div class="conn" style="--c: {conn.color || 'var(--conn-slate)'}">
-          <button class="conn-label" on:click={() => connMenuOpen.set(true)} title="Switch / manage">
-            {conn.nickname}
-          </button>
-          {#each tabsByConn(conn.id) as tab (tab.id)}
-            <button
-              class="tab"
-              class:active={$activeSqlTabId === tab.id && $activeTool === 'sql'}
-              on:click={() => selectTab(tab.id)}
-              title={tab.title}
-            >
-              {tab.dirty ? '•' : ''}{tab.title}
-              <span class="x" on:click={(e) => close(tab.id, e)} role="button" tabindex="-1">×</span>
-            </button>
-          {/each}
-          <button class="add" title="New query" on:click={() => addTab(conn.id)}>+</button>
-        </div>
-      {/if}
-    {/each}
-    {#if $connections.length === 0}
-      <span class="hint">no connections</span>
-    {/if}
-  </div>
-
-  <div class="divider" />
-
-  <!-- Requests tool: request tabs -->
-  <div
-    class="tool"
-    class:active={$activeTool === 'requests'}
-    style="--tint: var(--tool-requests-tint); --tint-text: var(--tool-requests-text);"
-  >
-    <button class="tool-label" on:click={() => activeTool.set('requests')}>Requests</button>
-    {#each $requestTabs as rt (rt.id)}
       <button
-        class="tab"
-        class:active={$activeRequestTabId === rt.id && $activeTool === 'requests'}
-        style="--dot: var(--m-{(rt.method || 'get').toLowerCase()})"
-        on:click={() => selectReqTab(rt.id)}
-        title={rt.title}
+        class="tool-label"
+        title="Connections"
+        on:click={() => {
+          activeTool.set('sql');
+          connMenuOpen.update((v) => !v);
+        }}
       >
-        <span class="rt-method" style="color: var(--m-{(rt.method || 'get').toLowerCase()})">
-          {rt.method}
-        </span>
-        {rt.dirty ? '•' : ''}{rt.title}
-        <span class="x" on:click={(e) => closeReq(rt.id, e)} role="button" tabindex="-1">×</span>
+        SQL <span class="caret">▾</span>
       </button>
-    {/each}
-    <button class="add" title="New request" on:click={addReqTab}>+</button>
+      {#each $connections as conn (conn.id)}
+        {#if tabsByConn(conn.id).length}
+          <div class="conn" style="--c: {conn.color || 'var(--conn-slate)'}">
+            <button class="conn-label" on:click={() => connMenuOpen.set(true)} title="Switch / manage">
+              {conn.nickname}
+            </button>
+            {#each tabsByConn(conn.id) as tab (tab.id)}
+              <button
+                class="tab"
+                class:active={$activeSqlTabId === tab.id && $activeTool === 'sql'}
+                on:click={() => selectTab(tab.id)}
+                title={tab.title}
+              >
+                {tab.dirty ? '•' : ''}{tab.title}
+                <span class="x" on:click={(e) => close(tab.id, e)} role="button" tabindex="-1">×</span>
+              </button>
+            {/each}
+            <button class="add" title="New query" on:click={() => addTab(conn.id)}>+</button>
+          </div>
+        {/if}
+      {/each}
+      {#if $connections.length === 0}
+        <span class="hint">no connections</span>
+      {/if}
+    </div>
+
+    <div class="divider" />
+
+    <!-- Requests tool: request tabs -->
+    <div
+      class="tool"
+      class:active={$activeTool === 'requests'}
+      style="--tint: var(--tool-requests-tint); --tint-text: var(--tool-requests-text);"
+    >
+      <button class="tool-label" on:click={() => activeTool.set('requests')}>Requests</button>
+      {#each $requestTabs as rt (rt.id)}
+        <button
+          class="tab"
+          class:active={$activeRequestTabId === rt.id && $activeTool === 'requests'}
+          style="--dot: var(--m-{(rt.method || 'get').toLowerCase()})"
+          on:click={() => selectReqTab(rt.id)}
+          title={rt.title}
+        >
+          <span class="rt-method" style="color: var(--m-{(rt.method || 'get').toLowerCase()})">
+            {rt.method}
+          </span>
+          {rt.dirty ? '•' : ''}{rt.title}
+          <span class="x" on:click={(e) => closeReq(rt.id, e)} role="button" tabindex="-1">×</span>
+        </button>
+      {/each}
+      <button class="add" title="New request" on:click={addReqTab}>+</button>
+    </div>
+
+    <div class="divider" />
+
+    <div
+      class="tool flat"
+      class:active={$activeTool === 'inspector'}
+      style="--tint: var(--tool-inspector-tint); --tint-text: var(--tool-inspector-text);"
+    >
+      <button class="tool-label" on:click={() => activeTool.set('inspector')}>Inspector</button>
+    </div>
   </div>
 
-  <div class="divider" />
-
-  <div
-    class="tool flat"
-    class:active={$activeTool === 'inspector'}
-    style="--tint: var(--tool-inspector-tint); --tint-text: var(--tool-inspector-text);"
+  <button
+    class="edge right"
+    class:show={overflowing}
+    disabled={!canRight}
+    tabindex="-1"
+    title="Scroll right"
+    on:click={() => nudge(1)}>›</button
   >
-    <button class="tool-label" on:click={() => activeTool.set('inspector')}>Inspector</button>
-  </div>
 </nav>
 
 <style>
   .topnav {
     display: flex;
+    align-items: stretch;
+    background: var(--surface-1);
+    border-bottom: 1px solid var(--border);
+    min-width: 0;
+    overflow: hidden;
+    -webkit-app-region: drag;
+  }
+  .scroller {
+    flex: 1;
+    min-width: 0;
+    display: flex;
     align-items: center;
     gap: var(--nav-gap, 5px);
     padding: var(--nav-pad, 6px) calc(var(--nav-pad, 6px) + 2px);
-    overflow-x: auto;
     white-space: nowrap;
-    background: var(--surface-1);
-    border-bottom: 1px solid var(--border);
-    flex-shrink: 0;
-    -webkit-app-region: drag;
+    overflow-x: auto;
+    overflow-y: hidden;
+    scrollbar-width: none; /* Firefox */
+  }
+  .scroller::-webkit-scrollbar {
+    display: none; /* Chromium / WebKit */
   }
   .topnav button {
     -webkit-app-region: no-drag;
+  }
+  /* left/right scroll affordances — only take space when usable */
+  .edge {
+    flex-shrink: 0;
+    width: 0;
+    border: none;
+    background: var(--surface-1);
+    color: var(--text-secondary);
+    font-size: 15px;
+    line-height: 1;
+    cursor: pointer;
+    padding: 0;
+    overflow: hidden;
+    opacity: 0;
+    transition:
+      width 0.12s ease,
+      opacity 0.12s ease;
+  }
+  .edge.show {
+    width: 22px;
+    opacity: 1;
+  }
+  .edge:disabled {
+    opacity: 0.28;
+    cursor: default;
+  }
+  .edge:not(:disabled):hover {
+    background: var(--surface-3);
+    color: var(--text-primary);
+  }
+  .edge.left {
+    box-shadow: 6px 0 6px -4px rgba(0, 0, 0, 0.18);
+  }
+  .edge.right {
+    box-shadow: -6px 0 6px -4px rgba(0, 0, 0, 0.18);
   }
   .divider {
     width: 1px;
@@ -169,6 +276,7 @@
     background: var(--tint);
     border-radius: var(--radius);
     padding: calc(var(--nav-gap, 5px) - 1px);
+    flex-shrink: 0;
   }
   .tool.active {
     box-shadow: 0 0 0 1.5px var(--tint-text) inset;
@@ -190,7 +298,6 @@
     display: flex;
     align-items: center;
     gap: 2px;
-    /* whole group tinted with the connection colour */
     background: color-mix(in srgb, var(--c, var(--conn-slate)) 22%, var(--surface-2));
     box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--c, var(--conn-slate)) 38%, transparent);
     border-radius: 6px;
