@@ -71,6 +71,19 @@ pub struct Column {
     pub default: Option<String>,
 }
 
+/// A user-defined SQL function / procedure / aggregate.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SqlFunction {
+    pub schema: String,
+    pub name: String,
+    /// "function" | "procedure" | "aggregate" | "window" — best-effort,
+    /// not all engines distinguish these.
+    pub kind: String,
+    /// Argument list as engine-formatted text, e.g. "a integer, b text".
+    pub arguments: String,
+    pub return_type: Option<String>,
+}
+
 /// One foreign-key edge: `schema.table.column` references
 /// `ref_schema.ref_table.ref_column`. Used to draw the table
 /// relationships popup in the schema tree.
@@ -200,6 +213,10 @@ pub trait DbDriver: Send + Sync {
     /// relationships popup. Best-effort — engines/versions that can't
     /// answer cheaply may just return an empty list.
     async fn list_foreign_keys(&self, cfg: &ConnConfig, password: Option<&str>) -> Result<Vec<ForeignKey>>;
+    /// User-defined functions/procedures (all schemas), for the schema
+    /// tree's Functions tab. SQLite has no such catalog — its impl
+    /// returns an empty list.
+    async fn list_functions(&self, cfg: &ConnConfig, password: Option<&str>) -> Result<Vec<SqlFunction>>;
 }
 
 /// Statements that can be safely wrapped as `SELECT * FROM (<sql>) x` for

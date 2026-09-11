@@ -1,7 +1,7 @@
 <script>
   import { createEventDispatcher } from 'svelte';
   import { api } from '../api.js';
-  import { loadSchemas, toastError } from '../stores.js';
+  import { loadSchemas, toast, toastError } from '../stores.js';
   import { ICONS } from '../icons.js';
 
   export let conn;
@@ -14,6 +14,47 @@
   let openRels = new Set(); // key `${schema}.${rel}`
   let cols = {}; // key -> Column[]
 
+  // "Tables" vs "Functions" tab
+  let browseTab = 'tables';
+  let funcs = null; // null = not loaded yet for this connection
+  let funcsLoading = false;
+  let lastFuncsConn = null;
+
+  $: if (conn && conn.id !== lastFuncsConn) {
+    funcs = null;
+    lastFuncsConn = conn.id;
+  }
+  $: if (conn && browseTab === 'functions' && funcs === null && !funcsLoading) loadFunctions();
+
+  async function loadFunctions() {
+    funcsLoading = true;
+    try {
+      funcs = await api.functionsList(conn);
+    } catch (e) {
+      toastError(e);
+      funcs = [];
+    } finally {
+      funcsLoading = false;
+    }
+  }
+  $: funcsBySchema = (() => {
+    const q = filter.trim().toLowerCase();
+    const rows = (funcs || []).filter((f) => !q || f.name.toLowerCase().includes(q) || f.schema.toLowerCase().includes(q));
+    const bySchema = new Map();
+    for (const f of rows) {
+      if (!bySchema.has(f.schema)) bySchema.set(f.schema, []);
+      bySchema.get(f.schema).push(f);
+    }
+    return [...bySchema.entries()].sort((a, b) => a[0].localeCompare(b[0]));
+  })();
+  async function copyFunctionCall(f) {
+    const text = `${f.schema}.${f.name}(${f.arguments})`;
+    try {
+      await navigator.clipboard.writeText(text);
+      toast(`Copied ${f.name}(...)`, 'success', 1500);
+    } catch {}
+  }
+
   // relationships popup (foreign keys) — position:fixed anchored under the
   // button so it isn't clipped by the sidebar's overflow:hidden
   let fkMenuOpen = false;
@@ -25,6 +66,9 @@
   let fkPos = { top: 0, left: 0 };
 
   const devFkMenu = typeof location !== 'undefined' && new URLSearchParams(location.search).has('fkmenu');
+  if (typeof location !== 'undefined' && new URLSearchParams(location.search).get('browsetab') === 'functions') {
+    browseTab = 'functions';
+  }
   $: if (conn) load();
   $: if (conn && devFkMenu && !fkMenuOpen) openFks();
   $: if (conn && conn.id !== lastFkConn) {
@@ -113,7 +157,11 @@
 
 <div class="tree">
   <div class="tools">
-    <input class="input sm" placeholder="Filter tables…" bind:value={filter} />
+    <input
+      class="input sm"
+      placeholder={browseTab === 'functions' ? 'Filter functions…' : 'Filter tables…'}
+      bind:value={filter}
+    />
     <span class="fk-wrap">
       <button
         class="icon-btn"
@@ -151,10 +199,50 @@
         </div>
       {/if}
     </span>
-    <button class="icon-btn" title="Refresh" on:click={() => load(true)}>{ICONS.refresh.glyph}</button>
+    <button
+      class="icon-btn"
+      title="Refresh"
+      on:click={() => (browseTab === 'functions' ? loadFunctions() : load(true))}
+      >{ICONS.refresh.glyph}</button
+    >
   </div>
 
-  {#if loading && schemas.length === 0}
+  <div class="browse-tabs">
+    <button class:active={browseTab === 'tables'} on:click={() => (browseTab = 'tables')}>
+      Tables <span class="count">{schemas.reduce((n, s) => n + s.relations.length, 0)}</span>
+    </button>
+    <button class:active={browseTab === 'functions'} on:click={() => (browseTab = 'functions')}>
+      Functions {#if funcs}<span class="count">{funcs.length}</span>{/if}
+    </button>
+  </div>
+
+  {#if browseTab === 'functions'}
+    {#if funcsLoading && funcs === null}
+      <div class="msg">Reading functions…</div>
+    {:else if funcsBySchema.length === 0}
+      <div class="msg">
+        {funcs && funcs.length === 0
+          ? conn?.kind === 'sqlite'
+            ? 'SQLite has no user-defined function catalog to browse.'
+            : 'No functions found.'
+          : 'No matches.'}
+      </div>
+    {:else}
+      <div class="scroll">
+        {#each funcsBySchema as [schema, rows] (schema)}
+          <div class="fn-schema">{schema}</div>
+          {#each rows as f (f.schema + '.' + f.name)}
+            <button class="fn-row" title="Copy {f.name}({f.arguments})" on:click={() => copyFunctionCall(f)}>
+              <span class="fn-kind">{f.kind}</span>
+              <span class="fn-name">{f.name}</span>
+              <span class="fn-sig">({f.arguments})</span>
+              {#if f.return_type}<span class="fn-ret">→ {f.return_type}</span>{/if}
+            </button>
+          {/each}
+        {/each}
+      </div>
+    {/if}
+  {:else if loading && schemas.length === 0}
     <div class="msg">Loading schema…</div>
   {:else if schemas.length === 0}
     <div class="msg">No tables.</div>
@@ -224,6 +312,86 @@
     flex: 1;
     padding: 6px 8px;
     font-size: 11.5px;
+  }
+  .browse-tabs {
+    display: flex;
+    border-bottom: 1px solid var(--border);
+  }
+  .browse-tabs button {
+    flex: 1;
+    background: none;
+    border: none;
+    border-bottom: 2px solid transparent;
+    cursor: pointer;
+    padding: 6px 4px;
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--text-muted);
+  }
+  .browse-tabs button:hover {
+    color: var(--text-secondary);
+  }
+  .browse-tabs button.active {
+    color: var(--tool-sql-text);
+    border-bottom-color: var(--tool-sql-text);
+  }
+  .browse-tabs .count {
+    font-size: 9px;
+    font-weight: 400;
+    color: var(--text-muted);
+  }
+  .fn-schema {
+    padding: 8px 8px 3px;
+    font-size: 10px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+    color: var(--text-secondary);
+  }
+  .fn-row {
+    display: flex;
+    align-items: baseline;
+    gap: 6px;
+    width: 100%;
+    text-align: left;
+    background: none;
+    border: none;
+    cursor: pointer;
+    padding: 4px 8px 4px 16px;
+    font-family: var(--font-mono);
+    font-size: 11px;
+    color: var(--text-primary);
+    overflow: hidden;
+  }
+  .fn-row:hover {
+    background: var(--surface-3);
+  }
+  .fn-kind {
+    flex-shrink: 0;
+    font-size: 8px;
+    font-weight: 700;
+    text-transform: uppercase;
+    color: var(--tool-sql-text);
+    background: var(--tool-sql-tint);
+    border-radius: 3px;
+    padding: 1px 4px;
+    font-family: var(--font-sans);
+  }
+  .fn-name {
+    flex-shrink: 0;
+    font-weight: 600;
+  }
+  .fn-sig {
+    color: var(--text-muted);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .fn-ret {
+    flex-shrink: 0;
+    margin-left: auto;
+    color: var(--j-key);
+    font-size: 10px;
   }
   .fk-wrap {
     position: relative;

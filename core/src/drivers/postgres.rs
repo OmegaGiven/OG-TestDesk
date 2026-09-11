@@ -2,7 +2,7 @@ use super::decode::pg_value;
 use super::pool::pg_pool;
 use super::{
     run_query_body, Column, ConnConfig, DbDriver, DbKind, ForeignKey, QueryOpts, QueryResult,
-    Relation, RelationKind, Schema, ServerInfo,
+    Relation, RelationKind, Schema, ServerInfo, SqlFunction,
 };
 use anyhow::{Context, Result};
 use async_trait::async_trait;
@@ -177,6 +177,41 @@ impl DbDriver for PostgresDriverImpl {
                 ref_schema: r.get("ref_schema"),
                 ref_table: r.get("ref_table"),
                 ref_column: r.get("ref_column"),
+            })
+            .collect())
+    }
+
+    async fn list_functions(&self, cfg: &ConnConfig, password: Option<&str>) -> Result<Vec<SqlFunction>> {
+        let pool = pg_pool(&conn_url(cfg, password)).await?;
+        let rows = sqlx::query(
+            r#"
+            SELECT
+                n.nspname AS schema,
+                p.proname AS name,
+                CASE p.prokind
+                    WHEN 'p' THEN 'procedure'
+                    WHEN 'a' THEN 'aggregate'
+                    WHEN 'w' THEN 'window'
+                    ELSE 'function'
+                END AS kind,
+                pg_get_function_arguments(p.oid) AS arguments,
+                pg_get_function_result(p.oid) AS return_type
+            FROM pg_proc p
+            JOIN pg_namespace n ON n.oid = p.pronamespace
+            WHERE n.nspname NOT IN ('pg_catalog', 'information_schema')
+            ORDER BY n.nspname, p.proname
+            "#,
+        )
+        .fetch_all(&pool)
+        .await?;
+        Ok(rows
+            .into_iter()
+            .map(|r| SqlFunction {
+                schema: r.get("schema"),
+                name: r.get("name"),
+                kind: r.get("kind"),
+                arguments: r.get::<Option<String>, _>("arguments").unwrap_or_default(),
+                return_type: r.get("return_type"),
             })
             .collect())
     }

@@ -165,6 +165,15 @@ async fn foreign_keys_list(config: ConnConfig) -> R<Vec<og_testdesk_core::Foreig
         .map_err(err)
 }
 
+#[tauri::command]
+async fn functions_list(config: ConnConfig) -> R<Vec<og_testdesk_core::SqlFunction>> {
+    let pw = SecretsStore::get(&config.id).map_err(err)?;
+    drivers::driver_for(config.kind)
+        .list_functions(&config, pw.as_deref())
+        .await
+        .map_err(err)
+}
+
 // -------------------------------------------------------------------- query
 
 #[tauri::command]
@@ -739,6 +748,7 @@ async fn main() {
             schemas_list,
             columns_list,
             foreign_keys_list,
+            functions_list,
             query_run,
             tabs_list_all,
             tab_save,

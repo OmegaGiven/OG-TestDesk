@@ -193,6 +193,12 @@ if (typeof window !== 'undefined' && !window.__TAURI_INTERNALS__) {
         { schema: 'main', table: 'order_items', column: 'order_id', ref_schema: 'main', ref_table: 'orders', ref_column: 'id' },
         { schema: 'main', table: 'order_items', column: 'product_id', ref_schema: 'main', ref_table: 'products', ref_column: 'id' }
       ]),
+    functions_list: () =>
+      ok([
+        { schema: 'main', name: 'order_total', kind: 'function', arguments: 'order_id integer', return_type: 'numeric' },
+        { schema: 'main', name: 'customer_lifetime_value', kind: 'function', arguments: 'customer_id integer', return_type: 'numeric' },
+        { schema: 'main', name: 'recalc_revenue', kind: 'procedure', arguments: '', return_type: null }
+      ]),
     query_run: ({ sql, page, pageSize, count }) => {
       const s = (sql || '').toLowerCase();
       const paged = (allRows, cols, total, dur) => {

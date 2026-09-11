@@ -2,7 +2,7 @@ use super::decode::my_value;
 use super::pool::mysql_pool;
 use super::{
     run_query_body, Column, ConnConfig, DbDriver, DbKind, ForeignKey, QueryOpts, QueryResult,
-    Relation, RelationKind, Schema, ServerInfo,
+    Relation, RelationKind, Schema, ServerInfo, SqlFunction,
 };
 use anyhow::{Context, Result};
 use async_trait::async_trait;
@@ -161,6 +161,42 @@ impl DbDriver for MySqlDriverImpl {
                 ref_schema: r.get("referenced_table_schema"),
                 ref_table: r.get("referenced_table_name"),
                 ref_column: r.get("referenced_column_name"),
+            })
+            .collect())
+    }
+
+    async fn list_functions(&self, cfg: &ConnConfig, password: Option<&str>) -> Result<Vec<SqlFunction>> {
+        let pool = mysql_pool(&conn_url(cfg, password)).await?;
+        let rows = sqlx::query(
+            r#"
+            SELECT
+                r.ROUTINE_SCHEMA AS schema_name,
+                r.ROUTINE_NAME AS name,
+                LOWER(r.ROUTINE_TYPE) AS kind,
+                COALESCE((
+                    SELECT GROUP_CONCAT(CONCAT(p.PARAMETER_NAME, ' ', p.DTD_IDENTIFIER)
+                                         ORDER BY p.ORDINAL_POSITION SEPARATOR ', ')
+                    FROM information_schema.parameters p
+                    WHERE p.SPECIFIC_SCHEMA = r.ROUTINE_SCHEMA
+                      AND p.SPECIFIC_NAME = r.ROUTINE_NAME
+                      AND p.PARAMETER_MODE IS NOT NULL
+                ), '') AS arguments,
+                r.DTD_IDENTIFIER AS return_type
+            FROM information_schema.routines r
+            WHERE r.ROUTINE_SCHEMA NOT IN ('mysql', 'information_schema', 'performance_schema', 'sys')
+            ORDER BY r.ROUTINE_SCHEMA, r.ROUTINE_NAME
+            "#,
+        )
+        .fetch_all(&pool)
+        .await?;
+        Ok(rows
+            .into_iter()
+            .map(|r| SqlFunction {
+                schema: r.get("schema_name"),
+                name: r.get("name"),
+                kind: r.get("kind"),
+                arguments: r.get("arguments"),
+                return_type: r.get("return_type"),
             })
             .collect())
     }
