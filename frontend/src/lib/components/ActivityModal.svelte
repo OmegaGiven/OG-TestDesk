@@ -6,6 +6,7 @@
   import {
     connections,
     savedRequests,
+    savedQueries,
     loadFromHistory,
     toast,
     toastError
@@ -21,9 +22,14 @@
   let editing = null;
 
   onMount(() => {
-    const at = new URLSearchParams(location.search).get('atab');
+    const q = new URLSearchParams(location.search);
+    const at = q.get('atab');
     if (at === 'schedules') tab = 'schedules';
     if (at === 'requests') histKind = 'request';
+    if (q.has('newschedule')) {
+      tab = 'schedules';
+      newSchedule();
+    }
     reload();
   });
   async function reload() {
@@ -230,6 +236,25 @@
           {#each $connections as c}<option value={c.id}>{c.nickname}</option>{/each}
         </select>
       </div>
+      {#if $savedQueries.length}
+        <div class="field">
+          <label>Load from a saved query</label>
+          <select
+            class="select"
+            on:change={(e) => {
+              const q = $savedQueries.find((x) => x.id === e.target.value);
+              if (q) {
+                editing.sql_text = q.sql_text;
+                if (q.connection_id) editing.connection_id = q.connection_id;
+              }
+              e.target.value = '';
+            }}
+          >
+            <option value="">— pick one to fill the SQL box below —</option>
+            {#each $savedQueries as q}<option value={q.id}>{q.name}</option>{/each}
+          </select>
+        </div>
+      {/if}
       <div class="field">
         <label>SQL</label>
         <textarea class="textarea" rows="4" bind:value={editing.sql_text}></textarea>
