@@ -13,6 +13,7 @@
   --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
   --font-mono: 'JetBrains Mono', 'SF Mono', 'Menlo', 'Consolas', monospace;
   --shadow-pop: 0 8px 30px rgba(0, 0, 0, 0.14), 0 2px 8px rgba(0, 0, 0, 0.08);
+  color-scheme: light;
 
   /* Tool hues — SQL / Requests / Inspector. Reuse everywhere that
      tool's content shows up (buttons, badges, selection state). */
@@ -55,8 +56,43 @@
   --j-null: #888780;
 }
 
-:root[data-theme='dark'],
-:root:not([data-theme='light']) {
+/* "System" theme mode (no data-theme attribute) follows the OS. Kept as
+   its own block, duplicating [data-theme='dark'] below, because a media
+   query can't be composed into an attribute selector. */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme='light']) {
+    --surface-0: #17171a;
+    --surface-1: #1e1e22;
+    --surface-2: #26262b;
+    --surface-3: #2f2f35;
+    --text-primary: #f1efe8;
+    --text-secondary: #b4b2a9;
+    --text-muted: #888780;
+    --border: rgba(255, 255, 255, 0.1);
+    --border-strong: rgba(255, 255, 255, 0.2);
+    --shadow-pop: 0 8px 30px rgba(0, 0, 0, 0.5), 0 2px 8px rgba(0, 0, 0, 0.35);
+
+    --tool-sql-tint: #0c447c40;
+    --tool-sql-text: #85b7eb;
+    --tool-requests-tint: #27500a44;
+    --tool-requests-text: #97c459;
+    --tool-inspector-tint: #3c348944;
+    --tool-inspector-text: #afa9ec;
+
+    --m-get: #3ec296;
+    --m-post: #e6ac3f;
+    --m-put: #5ea3e0;
+    --m-patch: #a888f5;
+    --m-delete: #ef6b6a;
+
+    --j-key: #b794f6;
+    --j-string: #6bcf9a;
+    --j-number: #e0a458;
+    --j-bool: #ec6f9e;
+    --j-null: #888780;
+
+    color-scheme: dark;
+  }
 }
 
 [data-theme='dark'] {
@@ -89,6 +125,8 @@
   --j-number: #e0a458;
   --j-bool: #ec6f9e;
   --j-null: #888780;
+
+  color-scheme: dark;
 }
 
 * {

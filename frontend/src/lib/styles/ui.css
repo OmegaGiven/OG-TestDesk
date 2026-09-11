@@ -57,6 +57,25 @@
   background: var(--surface-2);
   color: var(--text-primary);
 }
+.select {
+  /* Drop native OS chrome (which ignores background/color on some
+     platforms — the "white Mac-looking box" complaint) and draw our own
+     caret so the closed control is fully themed. The open options list
+     is still OS-drawn; browsers don't expose a cross-platform way to
+     skin that part. */
+  appearance: none;
+  -webkit-appearance: none;
+  -moz-appearance: none;
+  padding-right: 26px;
+  cursor: pointer;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'%3E%3Cpath d='M1 1l4 4 4-4' fill='none' stroke='%23888780' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 9px center;
+}
+.select:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
 .textarea {
   font-family: var(--font-mono);
   resize: vertical;

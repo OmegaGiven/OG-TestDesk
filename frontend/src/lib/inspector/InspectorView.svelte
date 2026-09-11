@@ -2,6 +2,7 @@
   import JsonNode from './JsonNode.svelte';
   import { inspectorPayload, toast } from '../stores.js';
   import { ICONS } from '../icons.js';
+  import { downloadText, copyText, rowsToDelimited } from '../export.js';
 
   let mode = 'tree'; // tree | table | summary
   let filter = '';
@@ -174,6 +175,26 @@
             return String(root);
           }
         })();
+
+  // Export the loaded payload — JSON always, CSV when it's an array of
+  // objects (same shape Table mode needs).
+  $: fileBase = (label || 'inspector').replace(/[^\w.-]+/g, '_').slice(0, 60) || 'inspector';
+  function doExport(fmt) {
+    if (root === undefined || root === null) return;
+    if (fmt === 'json') {
+      downloadText(`${fileBase}.json`, rawPretty, 'application/json');
+    } else if (fmt === 'csv') {
+      if (!tableRows) {
+        toast('CSV needs an array of objects — switch to Table mode to check the shape', 'error', 3000);
+        return;
+      }
+      const csvCols = tableCols.map((name) => ({ name }));
+      const csvRows = tableRows.map((r) => tableCols.map((c) => r[c]));
+      downloadText(`${fileBase}.csv`, rowsToDelimited(csvCols, csvRows, ','), 'text/csv');
+    } else if (fmt === 'copy') {
+      copyText(rawPretty).then((ok) => toast(ok ? 'Copied' : 'Copy blocked', ok ? 'success' : 'error', 1500));
+    }
+  }
 </script>
 
 <div class="inspector">
@@ -191,6 +212,14 @@
       {#if filter}<span class="mc">{matchCount} match{matchCount === 1 ? '' : 'es'}</span>{/if}
     {/if}
     <span style="flex:1" />
+    {#if root !== undefined && root !== null}
+      <span class="export">
+        <span class="ex-label">Export</span>
+        <button class="btn ghost sm" on:click={() => doExport('csv')}>CSV</button>
+        <button class="btn ghost sm" on:click={() => doExport('json')}>JSON</button>
+        <button class="btn ghost sm" title="Copy pretty JSON" on:click={() => doExport('copy')}>{ICONS.copy.glyph}</button>
+      </span>
+    {/if}
     <button class="btn ghost sm" class:active={rawMode} on:click={() => (rawMode = !rawMode)}>
       {rawMode ? '← Loaded data' : 'Paste JSON'}
     </button>
@@ -345,6 +374,16 @@
   .mc {
     font-size: 10px;
     color: var(--text-muted);
+  }
+  .export {
+    display: flex;
+    align-items: center;
+    gap: 3px;
+  }
+  .ex-label {
+    font-size: 10px;
+    color: var(--text-muted);
+    margin-right: 3px;
   }
   .btn.ghost.sm.active {
     background: var(--tool-inspector-tint);

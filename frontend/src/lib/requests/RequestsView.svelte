@@ -5,7 +5,7 @@
   import { api } from '../api.js';
   import { parsePostman } from './postman.js';
   import { ICONS } from '../icons.js';
-  import { downloadText, copyText, toCurl } from '../export.js';
+  import { downloadText, copyText, toCurl, rowsToDelimited } from '../export.js';
   import {
     requestCollections,
     savedRequests,
@@ -394,6 +394,33 @@
     const ok = await copyText(response.body);
     toast(ok ? 'Response body copied' : 'Copy blocked', ok ? 'success' : 'error', 1500);
   }
+  // CSV export when the JSON body is an array of objects (or has one
+  // array-of-objects field, e.g. { data: [...] }).
+  function responseRows() {
+    if (!response?.is_json) return null;
+    let v;
+    try {
+      v = JSON.parse(response.body);
+    } catch {
+      return null;
+    }
+    const isObjArray = (x) => Array.isArray(x) && x.every((r) => r && typeof r === 'object' && !Array.isArray(r));
+    if (isObjArray(v)) return v;
+    if (v && typeof v === 'object') {
+      for (const val of Object.values(v)) if (isObjArray(val)) return val;
+    }
+    return null;
+  }
+  function exportResponseCsv() {
+    const rows = responseRows();
+    if (!rows) {
+      toast('CSV needs a JSON array of objects in the response body', 'error', 3000);
+      return;
+    }
+    const cols = [...new Set(rows.flatMap((r) => Object.keys(r)))].map((name) => ({ name }));
+    const csvRows = rows.map((r) => cols.map((c) => r[c.name]));
+    downloadText(`${respFileBase()}.csv`, rowsToDelimited(cols, csvRows, ','), 'text/csv');
+  }
   async function copyCurl() {
     const headers = headersObject();
     const body = ['GET', 'HEAD'].includes(draft.method) ? null : draft.body || null;
@@ -566,8 +593,11 @@
             <span style="flex:1" />
             {#if response.is_json}
               <button class="btn ghost sm" on:click={inspectResponse}>{ICONS.toInspector.glyph} Inspector</button>
+              <button class="btn ghost sm" title="Export as CSV (needs an array of objects)" on:click={exportResponseCsv}
+                >Export CSV</button
+              >
             {/if}
-            <button class="btn ghost sm" on:click={saveResponse}>Save</button>
+            <button class="btn ghost sm" on:click={saveResponse}>{response.is_json ? 'Export JSON' : 'Save'}</button>
             <button class="btn ghost sm" title="Copy response body" on:click={copyResponse}>{ICONS.copy.glyph} Body</button>
             <button class="btn ghost sm" title="Copy request as curl" on:click={copyCurl}>curl</button>
             <div class="subtabs sm">
@@ -713,12 +743,19 @@
     background: var(--surface-1);
   }
   .method {
+    appearance: none;
+    -webkit-appearance: none;
+    -moz-appearance: none;
     font-weight: 800;
     font-size: 12px;
-    padding: 6px 8px;
+    padding: 6px 22px 6px 8px;
     border-radius: var(--radius-sm);
     border: 1px solid var(--border-strong);
-    background: var(--surface-2);
+    background-color: var(--surface-2);
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'%3E%3Cpath d='M1 1l4 4 4-4' fill='none' stroke='%23888780' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right 7px center;
+    cursor: pointer;
   }
   .url {
     flex: 1;
