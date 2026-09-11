@@ -91,7 +91,7 @@
       const conn = $connections.find((c) => c.id === key);
       return { key, kind: 'conn', conn, items };
     })
-    .filter((g) => g.kind === 'requests' || (g.conn && g.items.length));
+    .filter((g) => g.items.length && (g.kind === 'requests' || g.conn));
 
   // ---- drag & drop: reorder whole groups, or drag a tab into another group
   let draggedGroup = null;
@@ -242,12 +242,6 @@
         >
       </div>
     {/each}
-
-    <div class="divider" />
-
-    <button class="tool flat" class:active={$activeTool === 'inspector'} on:click={() => activeTool.set('inspector')}>
-      <span class="group-label" style="color: var(--tool-inspector-text)">Inspector</span>
-    </button>
   </div>
 
   <button
@@ -334,13 +328,6 @@
   .edge.right {
     box-shadow: -6px 0 6px -4px rgba(0, 0, 0, 0.18);
   }
-  .divider {
-    width: 1px;
-    height: 20px;
-    background: var(--border-strong);
-    margin: 0 4px;
-    flex-shrink: 0;
-  }
   .tool {
     display: flex;
     align-items: center;
@@ -354,15 +341,6 @@
   }
   .tool.over {
     box-shadow: inset 0 0 0 2px var(--c, var(--tool-sql-text));
-  }
-  .tool.flat {
-    background: var(--tool-inspector-tint);
-    box-shadow: none;
-    cursor: pointer;
-    padding: 4px 2px;
-  }
-  .tool.flat.active {
-    box-shadow: 0 0 0 1.5px var(--tool-inspector-text) inset;
   }
   .group-label {
     font-size: 10.5px;

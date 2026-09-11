@@ -60,8 +60,19 @@
 {#if $connMenuOpen}
   <div class="backdrop" on:mousedown|self={close} role="presentation">
     <div class="menu">
+      <div class="other-tools">
+        <button class="tool-row" on:click={openNewRequest}>
+          <span class="tool-dot" style="background:var(--tool-requests-text)" />
+          New request
+        </button>
+        <button class="tool-row" on:click={openInspector}>
+          <span class="tool-dot" style="background:var(--tool-inspector-text)" />
+          Inspector
+        </button>
+      </div>
+
       <header>
-        <span>Connections</span>
+        <span>DB Connections</span>
         <button class="btn ghost sm" on:click={() => (modal = { existing: null })}>+ New</button>
       </header>
 
@@ -83,17 +94,6 @@
         {#if $connections.length === 0}
           <div class="empty">No connections. Add one to start querying.</div>
         {/if}
-      </div>
-
-      <div class="other-tools">
-        <button class="tool-row" on:click={openNewRequest}>
-          <span class="tool-dot" style="background:var(--tool-requests-text)" />
-          New request
-        </button>
-        <button class="tool-row" on:click={openInspector}>
-          <span class="tool-dot" style="background:var(--tool-inspector-text)" />
-          Inspector
-        </button>
       </div>
     </div>
   </div>
@@ -199,7 +199,7 @@
     color: var(--text-muted);
   }
   .other-tools {
-    border-top: 1px solid var(--border);
+    border-bottom: 1px solid var(--border);
     padding: 4px 0;
   }
   .tool-row {
