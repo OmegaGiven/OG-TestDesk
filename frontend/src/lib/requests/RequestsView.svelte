@@ -665,6 +665,7 @@
     gap: 7px;
     background: none;
     border: none;
+    color: var(--text-primary);
     padding: 5px 8px;
     cursor: pointer;
     text-align: left;
