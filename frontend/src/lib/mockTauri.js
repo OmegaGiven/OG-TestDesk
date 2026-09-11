@@ -199,6 +199,15 @@ if (typeof window !== 'undefined' && !window.__TAURI_INTERNALS__) {
         { schema: 'main', name: 'customer_lifetime_value', kind: 'function', arguments: 'customer_id integer', return_type: 'numeric' },
         { schema: 'main', name: 'recalc_revenue', kind: 'procedure', arguments: '', return_type: null }
       ]),
+    db_time: ({ config }) => {
+      // sqlite (our demo conn) is always UTC; pretend the Postgres demo
+      // conn is on UTC-5 so the "different from your system" case shows.
+      const offsetSecs = config.kind === 'sqlite' ? 0 : -5 * 3600;
+      const d = new Date(Date.now() + offsetSecs * 1000);
+      const pad = (n) => String(n).padStart(2, '0');
+      const local_time = `${d.getUTCFullYear()}-${pad(d.getUTCMonth() + 1)}-${pad(d.getUTCDate())} ${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}:${pad(d.getUTCSeconds())}`;
+      return ok({ local_time, tz_name: config.kind === 'sqlite' ? 'UTC' : 'Etc/GMT+5', utc_offset_secs: offsetSecs });
+    },
     query_run: ({ sql, page, pageSize, count }) => {
       const s = (sql || '').toLowerCase();
       const paged = (allRows, cols, total, dur) => {

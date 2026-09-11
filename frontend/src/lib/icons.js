@@ -58,6 +58,7 @@ export const ICONS = {
   sortDesc: { glyph: '▼', label: 'Sorted descending — click to clear', where: 'Result grid column header' },
   success: { glyph: '✓', label: 'Statement executed successfully', where: 'Result pane' },
   toInspector: { glyph: '→', label: 'Send to Inspector', where: 'SQL results, request response' },
+  saveFile: { glyph: '⇩', label: 'Save this query to a .sql file', where: 'SQL toolbar' },
 
   connOk: { glyph: '●', label: 'Connection reachable', where: 'Connections dropdown', colorVar: '--ok' },
   connErr: { glyph: '●', label: 'Connection failed', where: 'Connections dropdown', colorVar: '--danger' },

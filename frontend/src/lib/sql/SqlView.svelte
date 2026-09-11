@@ -8,6 +8,7 @@
   import SavedQueries from './SavedQueries.svelte';
   import ConnectionModal from './ConnectionModal.svelte';
   import { api } from '../api.js';
+  import { downloadText } from '../export.js';
   import {
     connections,
     sqlTabs,
@@ -90,6 +91,38 @@
   // schema tree + fallbacks follow the active tab's connection
   $: sidebarConn = tabConn || conns[0];
   $: sidebarConnId = sidebarConn?.id;
+
+  // ---- DB clock, shown next to the connection badge so a DB on a
+  // different timezone (or a stopped/drifted clock) is obvious at a glance
+  let dbTime = null;
+  let dbTimeConnId = null;
+  let dbTimeErr = false;
+  $: if (tabConn && tabConn.id !== dbTimeConnId) loadDbTime(tabConn);
+  async function loadDbTime(conn) {
+    dbTimeConnId = conn.id;
+    dbTimeErr = false;
+    try {
+      dbTime = await api.dbTime(conn);
+    } catch {
+      dbTime = null;
+      dbTimeErr = true;
+    }
+  }
+  function fmtOffset(secs) {
+    const sign = secs >= 0 ? '+' : '−';
+    const abs = Math.abs(secs);
+    const h = Math.floor(abs / 3600);
+    const m = Math.floor((abs % 3600) / 60);
+    return `UTC${sign}${h}${m ? ':' + String(m).padStart(2, '0') : ''}`;
+  }
+  function fmtDiff(dbSecs) {
+    const localSecs = -new Date().getTimezoneOffset() * 60;
+    const diff = dbSecs - localSecs;
+    if (Math.abs(diff) < 60) return 'same as your system';
+    const h = Math.abs(diff) / 3600;
+    const hh = Number.isInteger(h) ? h : h.toFixed(1);
+    return `${hh}h ${diff > 0 ? 'ahead of' : 'behind'} you`;
+  }
 
   // ---- SQL variables: {{name}} tokens filled from slots above the editor
   const VAR_RE = /\{\{\s*([A-Za-z_]\w*)\s*\}\}/g;
@@ -259,6 +292,12 @@
     }
   }
 
+  function saveToFile() {
+    if (!tab) return;
+    const base = (tab.title || 'query').replace(/[^\w.-]+/g, '_').slice(0, 60) || 'query';
+    downloadText(`${base}.sql`, tab.sql_text, 'application/sql');
+  }
+
   async function openSavedQuery(e) {
     const s = e.detail;
     const connId =
@@ -349,10 +388,23 @@
           {tab.running ? 'Running…' : '▶ Run'}
         </button>
         <button class="btn sm" on:click={saveQuery}>Save</button>
+        <button class="icon-btn" title={ICONS.saveFile.label} on:click={saveToFile}
+          >{ICONS.saveFile.glyph}</button
+        >
         <span class="tb-conn">
           <span class="dot" style="background:{tabConn?.color || 'var(--conn-slate)'}" />
           {tabConn?.nickname}
         </span>
+        {#if dbTime}
+          <span
+            class="tb-tz"
+            title="Server local time: {dbTime.local_time}{dbTime.tz_name ? ` (${dbTime.tz_name})` : ''}"
+          >
+            {fmtOffset(dbTime.utc_offset_secs)} · {fmtDiff(dbTime.utc_offset_secs)}
+          </span>
+        {:else if dbTimeErr}
+          <span class="tb-tz muted">clock unavailable</span>
+        {/if}
         {#if tab.result?.is_select && tab.result.page_size > 0}
           {@const r = tab.result}
           <span class="pager">
@@ -576,6 +628,15 @@
     color: var(--text-secondary);
     font-weight: 600;
     line-height: 1;
+  }
+  .tb-tz {
+    font-size: 10.5px;
+    font-family: var(--font-mono);
+    color: var(--text-muted);
+    white-space: nowrap;
+  }
+  .tb-tz.muted {
+    font-style: italic;
   }
   .workarea {
     flex: 1;

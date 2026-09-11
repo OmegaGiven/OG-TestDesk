@@ -1,8 +1,8 @@
 use super::decode::my_value;
 use super::pool::mysql_pool;
 use super::{
-    run_query_body, Column, ConnConfig, DbDriver, DbKind, ForeignKey, QueryOpts, QueryResult,
-    Relation, RelationKind, Schema, ServerInfo, SqlFunction,
+    run_query_body, Column, ConnConfig, DbDriver, DbKind, DbTime, ForeignKey, QueryOpts,
+    QueryResult, Relation, RelationKind, Schema, ServerInfo, SqlFunction,
 };
 use anyhow::{Context, Result};
 use async_trait::async_trait;
@@ -199,5 +199,24 @@ impl DbDriver for MySqlDriverImpl {
                 return_type: r.get("return_type"),
             })
             .collect())
+    }
+
+    async fn server_time(&self, cfg: &ConnConfig, password: Option<&str>) -> Result<DbTime> {
+        let pool = mysql_pool(&conn_url(cfg, password)).await?;
+        let row = sqlx::query(
+            r#"
+            SELECT
+                DATE_FORMAT(NOW(), '%Y-%m-%d %H:%i:%s') AS local_time,
+                @@session.time_zone AS tz_name,
+                TIMESTAMPDIFF(SECOND, UTC_TIMESTAMP(), NOW()) AS utc_offset_secs
+            "#,
+        )
+        .fetch_one(&pool)
+        .await?;
+        Ok(DbTime {
+            local_time: row.get("local_time"),
+            tz_name: row.get("tz_name"),
+            utc_offset_secs: row.get("utc_offset_secs"),
+        })
     }
 }

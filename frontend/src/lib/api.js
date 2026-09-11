@@ -20,6 +20,7 @@ export const api = {
   columnsList: (config, schema, relation) => call('columns_list', { config, schema, relation }),
   foreignKeysList: (config) => call('foreign_keys_list', { config }),
   functionsList: (config) => call('functions_list', { config }),
+  dbTime: (config) => call('db_time', { config }),
 
   // query — page/pageSize omitted = full result (capped by max rows)
   queryRun: (config, sql, page = null, pageSize = null, count = null) =>

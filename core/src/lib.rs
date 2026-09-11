@@ -8,8 +8,8 @@ pub mod storage;
 
 pub use drivers::{
     driver_for, max_rows, set_max_rows, stmt_returns_rows, Column, ConnConfig, DbDriver, DbKind,
-    ForeignKey, QueryColumn, QueryOpts, QueryResult, Relation, RelationKind, Schema, ServerInfo,
-    SqlFunction,
+    DbTime, ForeignKey, QueryColumn, QueryOpts, QueryResult, Relation, RelationKind, Schema,
+    ServerInfo, SqlFunction,
 };
 pub use requests::{apply_environment, HttpRequest, HttpResponse};
 pub use storage::metadata::{

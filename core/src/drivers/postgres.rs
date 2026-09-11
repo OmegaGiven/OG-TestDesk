@@ -1,8 +1,8 @@
 use super::decode::pg_value;
 use super::pool::pg_pool;
 use super::{
-    run_query_body, Column, ConnConfig, DbDriver, DbKind, ForeignKey, QueryOpts, QueryResult,
-    Relation, RelationKind, Schema, ServerInfo, SqlFunction,
+    run_query_body, Column, ConnConfig, DbDriver, DbKind, DbTime, ForeignKey, QueryOpts,
+    QueryResult, Relation, RelationKind, Schema, ServerInfo, SqlFunction,
 };
 use anyhow::{Context, Result};
 use async_trait::async_trait;
@@ -214,5 +214,24 @@ impl DbDriver for PostgresDriverImpl {
                 return_type: r.get("return_type"),
             })
             .collect())
+    }
+
+    async fn server_time(&self, cfg: &ConnConfig, password: Option<&str>) -> Result<DbTime> {
+        let pool = pg_pool(&conn_url(cfg, password)).await?;
+        let row = sqlx::query(
+            r#"
+            SELECT
+                to_char(now(), 'YYYY-MM-DD HH24:MI:SS') AS local_time,
+                current_setting('TIMEZONE') AS tz_name,
+                EXTRACT(TIMEZONE FROM now())::bigint AS utc_offset_secs
+            "#,
+        )
+        .fetch_one(&pool)
+        .await?;
+        Ok(DbTime {
+            local_time: row.get("local_time"),
+            tz_name: row.get("tz_name"),
+            utc_offset_secs: row.get("utc_offset_secs"),
+        })
     }
 }

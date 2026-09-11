@@ -1,8 +1,8 @@
 use super::decode::sqlite_value;
 use super::pool::sqlite_pool;
 use super::{
-    run_query_body, Column, ConnConfig, DbDriver, DbKind, ForeignKey, QueryOpts, QueryResult,
-    Relation, RelationKind, Schema, ServerInfo, SqlFunction,
+    run_query_body, Column, ConnConfig, DbDriver, DbKind, DbTime, ForeignKey, QueryOpts,
+    QueryResult, Relation, RelationKind, Schema, ServerInfo, SqlFunction,
 };
 use anyhow::{anyhow, Context, Result};
 use async_trait::async_trait;
@@ -131,5 +131,18 @@ impl DbDriver for SqliteDriverImpl {
         // to introspect — scalar functions are loaded as native extensions,
         // not SQL objects. Nothing to list.
         Ok(Vec::new())
+    }
+
+    async fn server_time(&self, cfg: &ConnConfig, _password: Option<&str>) -> Result<DbTime> {
+        let pool = sqlite_pool(path_of(cfg)?).await?;
+        // SQLite's date/time functions always operate in UTC.
+        let local_time: String = sqlx::query_scalar("SELECT datetime('now')")
+            .fetch_one(&pool)
+            .await?;
+        Ok(DbTime {
+            local_time,
+            tz_name: Some("UTC".to_string()),
+            utc_offset_secs: 0,
+        })
     }
 }

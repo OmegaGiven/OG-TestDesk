@@ -71,6 +71,19 @@ pub struct Column {
     pub default: Option<String>,
 }
 
+/// The server/session's notion of "now" — shown next to Run so it's
+/// obvious when a DB isn't on the same clock/timezone as this machine.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DbTime {
+    /// Server local wall-clock time (session timezone applied), as text.
+    pub local_time: String,
+    /// Session timezone name/setting, when the engine exposes one
+    /// (Postgres/MySQL). `None` for engines with no such concept.
+    pub tz_name: Option<String>,
+    /// Session's offset from UTC, in seconds east of UTC.
+    pub utc_offset_secs: i64,
+}
+
 /// A user-defined SQL function / procedure / aggregate.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SqlFunction {
@@ -217,6 +230,8 @@ pub trait DbDriver: Send + Sync {
     /// tree's Functions tab. SQLite has no such catalog — its impl
     /// returns an empty list.
     async fn list_functions(&self, cfg: &ConnConfig, password: Option<&str>) -> Result<Vec<SqlFunction>>;
+    /// The server's current time + session timezone offset.
+    async fn server_time(&self, cfg: &ConnConfig, password: Option<&str>) -> Result<DbTime>;
 }
 
 /// Statements that can be safely wrapped as `SELECT * FROM (<sql>) x` for
