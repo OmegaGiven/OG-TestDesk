@@ -239,11 +239,25 @@ export async function closeSqlTab(id) {
 /* ------------------------------------------------------------- Inspector */
 
 // Payload handed to the Inspector from SQL results / HTTP responses.
-export const inspectorPayload = writable(null); // { source, label, json }
+// `meta` (optional) carries what's needed to re-run the source query for
+// a saved chart later — { connectionId, sql } for SQL results.
+export const inspectorPayload = writable(null); // { source, label, json, meta }
 
-export function sendToInspector(source, label, json) {
-  inspectorPayload.set({ source, label, json, at: Date.now() });
+export function sendToInspector(source, label, json, meta = null) {
+  inspectorPayload.set({ source, label, json, meta, at: Date.now() });
   activeTool.set('inspector');
+}
+
+/* -------------------------------------------------------- saved charts */
+
+export const savedCharts = writable([]);
+
+export async function reloadSavedCharts() {
+  try {
+    savedCharts.set(await api.savedChartsList());
+  } catch (e) {
+    toastError(e);
+  }
 }
 
 /* --------------------------------------------------------- Requests state */

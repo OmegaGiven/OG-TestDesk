@@ -1,10 +1,12 @@
 <script>
   import JsonNode from './JsonNode.svelte';
+  import ChartView from './ChartView.svelte';
   import { inspectorPayload, toast } from '../stores.js';
   import { ICONS } from '../icons.js';
   import { downloadText, copyText, rowsToDelimited } from '../export.js';
 
-  let mode = 'tree'; // tree | table | summary
+  let mode = 'tree'; // tree | table | summary | raw | chart
+  let consumedChartOpen = null;
   let filter = '';
   let expandSet = new Set();
   let bump = 0; // force reactivity when expandSet mutates
@@ -25,6 +27,10 @@
 
   $: payload = $inspectorPayload;
   $: root = rawMode ? parseRaw(rawText) : payload?.json;
+  $: if (payload?.source === 'chart-reopen' && payload.at !== consumedChartOpen) {
+    consumedChartOpen = payload.at;
+    mode = 'chart';
+  }
   $: label = rawMode ? 'Pasted JSON' : payload?.label || 'Nothing loaded';
 
   // Auto-expand the first two levels whenever a new payload loads.
@@ -200,7 +206,7 @@
 <div class="inspector">
   <div class="toolbar">
     <div class="modes">
-      {#each ['tree', 'table', 'summary', 'raw'] as m}
+      {#each ['tree', 'table', 'summary', 'raw', 'chart'] as m}
         <button class:active={mode === m} on:click={() => (mode = m)}>{m}</button>
       {/each}
     </div>
@@ -308,6 +314,19 @@
           </div>
           <pre class="raw-pretty">{rawPretty}</pre>
         </div>
+      {:else if mode === 'chart'}
+        {#if tableRows}
+          {#key payload?.at}
+            <ChartView
+              rows={tableRows}
+              cols={tableCols}
+              meta={payload?.source === 'sql' ? payload.meta : null}
+              existing={payload?.source === 'chart-reopen' ? payload.meta?.existingChart : null}
+            />
+          {/key}
+        {:else}
+          <div class="empty">Chart mode needs an array of objects — try Table mode first to check the shape.</div>
+        {/if}
       {/if}
     </div>
 

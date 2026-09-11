@@ -50,6 +50,10 @@ export const api = {
   savedQueryFoldersList: () => call('saved_query_folders_list'),
   savedQueryFolderSave: (folder) => call('saved_query_folder_save', { folder }),
   savedQueryFolderDelete: (id) => call('saved_query_folder_delete', { id }),
+  savedChartsList: () => call('saved_charts_list'),
+  savedChartData: (id) => call('saved_chart_data', { id }),
+  savedChartSave: (chart) => call('saved_chart_save', { chart }),
+  savedChartDelete: (id) => call('saved_chart_delete', { id }),
 
   // request collections
   collectionsList: () => call('collections_list'),

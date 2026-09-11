@@ -273,7 +273,10 @@
     const r = tab?.result;
     if (!r || !r.is_select) return;
     const objs = r.rows.map((row) => Object.fromEntries(r.columns.map((c, i) => [c.name, row[i]])));
-    sendToInspector('sql', `${tab.title} (${r.row_count} rows)`, objs);
+    sendToInspector('sql', `${tab.title} (${r.row_count} rows)`, objs, {
+      connectionId: tab.connection_id,
+      sql: tab.execSql || tab.sql_text
+    });
   }
 
   // splitter drag

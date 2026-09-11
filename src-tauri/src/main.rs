@@ -12,7 +12,7 @@ use tokio::sync::Mutex as AsyncMutex;
 use og_testdesk_core::{
     apply_environment, drivers, requests as http_requests, Column, ConnConfig, Environment,
     HistoryEntry, HttpRequest, HttpResponse, MetadataStore, QueryResult, QueryTab,
-    RequestCollection, RequestTab, SavedQuery, SavedQueryFolder, SavedRequest, Schema,
+    RequestCollection, RequestTab, SavedChart, SavedQuery, SavedQueryFolder, SavedRequest, Schema,
     SecretsBackend, SecretsStore, ServerInfo,
 };
 use tauri::{Manager, State};
@@ -339,6 +339,32 @@ async fn saved_query_folder_delete(state: State<'_, AppState>, id: String) -> R<
         .delete_saved_query_folder(&id)
         .await
         .map_err(err)
+}
+
+// -------------------------------------------------------------- saved charts
+
+#[tauri::command]
+async fn saved_charts_list(state: State<'_, AppState>) -> R<Vec<SavedChart>> {
+    state.metadata.list_saved_charts().await.map_err(err)
+}
+
+#[tauri::command]
+async fn saved_chart_data(state: State<'_, AppState>, id: String) -> R<Option<String>> {
+    state.metadata.chart_data(&id).await.map_err(err)
+}
+
+#[tauri::command]
+async fn saved_chart_save(state: State<'_, AppState>, mut chart: SavedChart) -> R<SavedChart> {
+    if chart.id.is_empty() {
+        chart.id = new_id();
+    }
+    state.metadata.upsert_saved_chart(&chart).await.map_err(err)?;
+    Ok(chart)
+}
+
+#[tauri::command]
+async fn saved_chart_delete(state: State<'_, AppState>, id: String) -> R<()> {
+    state.metadata.delete_saved_chart(&id).await.map_err(err)
 }
 
 // -------------------------------------------------------------- collections
@@ -734,6 +760,10 @@ async fn main() {
             saved_query_folders_list,
             saved_query_folder_save,
             saved_query_folder_delete,
+            saved_charts_list,
+            saved_chart_data,
+            saved_chart_save,
+            saved_chart_delete,
             collections_list,
             collection_save,
             collection_delete,

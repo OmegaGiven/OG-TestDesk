@@ -393,6 +393,20 @@ if (typeof window !== 'undefined' && !window.__TAURI_INTERNALS__) {
       mockSavedQueries = mockSavedQueries.filter((x) => x.id !== id);
       return ok(null);
     },
+    saved_charts_list: () => ok(mockSavedCharts.map(({ data_json, ...c }) => ({ ...c, has_data: !!data_json }))),
+    saved_chart_data: ({ id }) => ok(mockSavedCharts.find((c) => c.id === id)?.data_json ?? null),
+    saved_chart_save: ({ chart }) => {
+      const c = { sort_order: 0, ...chart, id: chart.id || 'sc-' + Date.now(), created_at: chart.created_at || Math.floor(Date.now() / 1000) };
+      const i = mockSavedCharts.findIndex((x) => x.id === c.id);
+      if (i >= 0) mockSavedCharts[i] = { ...mockSavedCharts[i], ...c, data_json: c.data_json ?? mockSavedCharts[i].data_json };
+      else mockSavedCharts = [...mockSavedCharts, c];
+      const { data_json, ...rest } = c;
+      return ok({ ...rest, has_data: !!data_json });
+    },
+    saved_chart_delete: ({ id }) => {
+      mockSavedCharts = mockSavedCharts.filter((x) => x.id !== id);
+      return ok(null);
+    },
     saved_query_folders_list: () => ok(mockSavedQueryFolders),
     saved_query_folder_save: ({ folder }) => {
       const f = { sort_order: 0, ...folder, id: folder.id || 'sqf-' + Date.now() };
@@ -555,6 +569,30 @@ if (typeof window !== 'undefined' && !window.__TAURI_INTERNALS__) {
       body: '{\n  "title": "hello",\n  "body": "from OG TestDesk",\n  "userId": 1\n}',
       position: 1,
       is_active: false
+    }
+  ];
+  let mockSavedCharts = [
+    {
+      id: 'sc-1',
+      name: 'Revenue by status',
+      connection_id: DEMO_SHOP,
+      saved_query_id: null,
+      sql_text: 'SELECT status, COUNT(*) AS n, ROUND(SUM(total),2) AS revenue FROM orders GROUP BY status;',
+      chart_type: 'bar',
+      x_field: 'status',
+      y_fields_json: '["revenue"]',
+      options_json: '{}',
+      data_json: JSON.stringify([
+        { status: 'delivered', n: 21, revenue: 18422.55 },
+        { status: 'paid', n: 17, revenue: 14201.1 },
+        { status: 'shipped', n: 15, revenue: 12980.4 },
+        { status: 'pending', n: 12, revenue: 9004.22 },
+        { status: 'refunded', n: 10, revenue: 7411.98 }
+      ]),
+      row_count: 5,
+      last_run_at: Math.floor(Date.now() / 1000) - 3600,
+      sort_order: 0,
+      created_at: Math.floor(Date.now() / 1000) - 86400
     }
   ];
   let mcpAcls = { [DEMO_SHOP]: { exposed: true, allow_writes: false } };

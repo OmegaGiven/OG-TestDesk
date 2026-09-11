@@ -27,6 +27,7 @@
     reloadRequests,
     reloadRequestTabs,
     reloadSavedQueries,
+    reloadSavedCharts,
     sendToInspector
   } from '../lib/stores.js';
 
@@ -52,7 +53,8 @@
       reloadTabs(),
       reloadRequests(),
       reloadRequestTabs(),
-      reloadSavedQueries()
+      reloadSavedQueries(),
+      reloadSavedCharts()
     ]);
 
     // Dev/demo helpers via query string (no effect in normal use):
@@ -95,6 +97,15 @@
         },
         meta: { duration_ms: 128, cached: false, region: 'us-east' }
       });
+    }
+    if (q.has('inspectarray')) {
+      sendToInspector('sql', 'Orders by status (5 rows)', [
+        { status: 'delivered', n: 21, revenue: 18422.55 },
+        { status: 'paid', n: 17, revenue: 14201.1 },
+        { status: 'shipped', n: 15, revenue: 12980.4 },
+        { status: 'pending', n: 12, revenue: 9004.22 },
+        { status: 'refunded', n: 10, revenue: 7411.98 }
+      ]);
     }
   });
 </script>

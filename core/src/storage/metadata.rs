@@ -142,6 +142,29 @@ CREATE TABLE IF NOT EXISTS app_state (
     key   TEXT PRIMARY KEY,
     value TEXT NOT NULL
 );
+
+-- Saved data visualizations (Inspector "Chart" mode). `data_json` is a
+-- cached snapshot of the last-plotted rows so reopening one is instant;
+-- it's excluded from list_saved_charts (same disk-not-RAM pattern as
+-- query/request history) and fetched separately on demand. When
+-- connection_id + sql_text are both set the chart can be re-run to
+-- refresh that snapshot (the seed for a future scheduled dashboard).
+CREATE TABLE IF NOT EXISTS saved_charts (
+    id             TEXT PRIMARY KEY,
+    name           TEXT NOT NULL,
+    connection_id  TEXT REFERENCES connections(id) ON DELETE SET NULL,
+    saved_query_id TEXT REFERENCES saved_queries(id) ON DELETE SET NULL,
+    sql_text       TEXT,
+    chart_type     TEXT NOT NULL,
+    x_field        TEXT,
+    y_fields_json  TEXT NOT NULL DEFAULT '[]',
+    options_json   TEXT NOT NULL DEFAULT '{}',
+    data_json      TEXT,
+    row_count      INTEGER,
+    last_run_at    INTEGER,
+    sort_order     INTEGER NOT NULL DEFAULT 0,
+    created_at     INTEGER NOT NULL
+);
 "#;
 
 fn now() -> i64 {
@@ -197,6 +220,36 @@ pub struct SavedQueryFolder {
     pub parent_id: Option<String>,
     #[serde(default)]
     pub sort_order: i64,
+}
+
+/// A saved data visualization (Inspector "Chart" mode). `data_json` is
+/// write-only from `list_saved_charts`'s point of view — never returned
+/// by the list, only by `chart_data(id)` — same pattern as query/request
+/// history, so a big cached result set doesn't sit in every list render.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SavedChart {
+    pub id: String,
+    pub name: String,
+    pub connection_id: Option<String>,
+    pub saved_query_id: Option<String>,
+    pub sql_text: Option<String>,
+    pub chart_type: String,
+    pub x_field: Option<String>,
+    #[serde(default)]
+    pub y_fields_json: String,
+    #[serde(default)]
+    pub options_json: String,
+    /// Cached last-plotted rows (JSON array of objects). Write-only: sent
+    /// in on save/refresh, never populated by `list_saved_charts`.
+    #[serde(default)]
+    pub data_json: Option<String>,
+    #[serde(default)]
+    pub has_data: bool,
+    pub row_count: Option<i64>,
+    pub last_run_at: Option<i64>,
+    #[serde(default)]
+    pub sort_order: i64,
+    pub created_at: i64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -850,6 +903,77 @@ impl MetadataStore {
         Ok(())
     }
 
+    // ------------------------------------------------------- saved charts
+
+    pub async fn list_saved_charts(&self) -> Result<Vec<SavedChart>> {
+        let rows = sqlx::query(
+            "SELECT id, name, connection_id, saved_query_id, sql_text, chart_type, x_field,
+                    y_fields_json, options_json, row_count, last_run_at, sort_order, created_at,
+                    (data_json IS NOT NULL) AS has_data
+             FROM saved_charts ORDER BY sort_order, name",
+        )
+        .fetch_all(&self.pool)
+        .await?;
+        Ok(rows.into_iter().map(row_to_chart).collect())
+    }
+
+    /// Fetch just the cached snapshot rows for one chart (never held in
+    /// the list above — pulled on demand, same as history results).
+    pub async fn chart_data(&self, id: &str) -> Result<Option<String>> {
+        let row: Option<(Option<String>,)> =
+            sqlx::query_as("SELECT data_json FROM saved_charts WHERE id = ?")
+                .bind(id)
+                .fetch_optional(&self.pool)
+                .await?;
+        Ok(row.and_then(|(d,)| d))
+    }
+
+    /// Upsert a chart's config. `data_json` (and `row_count`/`last_run_at`)
+    /// are only overwritten when `Some` — `None` leaves the existing
+    /// cached snapshot alone, so renaming a chart doesn't drop its data.
+    pub async fn upsert_saved_chart(&self, c: &SavedChart) -> Result<()> {
+        sqlx::query(
+            "INSERT INTO saved_charts
+                (id, name, connection_id, saved_query_id, sql_text, chart_type, x_field,
+                 y_fields_json, options_json, data_json, row_count, last_run_at, sort_order, created_at)
+             VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+             ON CONFLICT(id) DO UPDATE SET
+                name=excluded.name, connection_id=excluded.connection_id,
+                saved_query_id=excluded.saved_query_id, sql_text=excluded.sql_text,
+                chart_type=excluded.chart_type, x_field=excluded.x_field,
+                y_fields_json=excluded.y_fields_json, options_json=excluded.options_json,
+                data_json=COALESCE(excluded.data_json, saved_charts.data_json),
+                row_count=COALESCE(excluded.row_count, saved_charts.row_count),
+                last_run_at=COALESCE(excluded.last_run_at, saved_charts.last_run_at),
+                sort_order=excluded.sort_order",
+        )
+        .bind(&c.id)
+        .bind(&c.name)
+        .bind(&c.connection_id)
+        .bind(&c.saved_query_id)
+        .bind(&c.sql_text)
+        .bind(&c.chart_type)
+        .bind(&c.x_field)
+        .bind(&c.y_fields_json)
+        .bind(&c.options_json)
+        .bind(&c.data_json)
+        .bind(c.row_count)
+        .bind(c.last_run_at)
+        .bind(c.sort_order)
+        .bind(if c.created_at == 0 { now() } else { c.created_at })
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    pub async fn delete_saved_chart(&self, id: &str) -> Result<()> {
+        sqlx::query("DELETE FROM saved_charts WHERE id = ?")
+            .bind(id)
+            .execute(&self.pool)
+            .await?;
+        Ok(())
+    }
+
     // --------------------------------------------------- request collections
 
     pub async fn list_collections(&self) -> Result<Vec<RequestCollection>> {
@@ -1092,6 +1216,26 @@ fn row_to_schedule(r: sqlx::sqlite::SqliteRow) -> Schedule {
         last_run: r.get("last_run"),
         last_status: r.get("last_status"),
         next_run: r.get("next_run"),
+        created_at: r.get("created_at"),
+    }
+}
+
+fn row_to_chart(r: sqlx::sqlite::SqliteRow) -> SavedChart {
+    SavedChart {
+        id: r.get("id"),
+        name: r.get("name"),
+        connection_id: r.get("connection_id"),
+        saved_query_id: r.get("saved_query_id"),
+        sql_text: r.get("sql_text"),
+        chart_type: r.get("chart_type"),
+        x_field: r.get("x_field"),
+        y_fields_json: r.get("y_fields_json"),
+        options_json: r.get("options_json"),
+        data_json: None,
+        has_data: r.get::<i64, _>("has_data") != 0,
+        row_count: r.get("row_count"),
+        last_run_at: r.get("last_run_at"),
+        sort_order: r.get("sort_order"),
         created_at: r.get("created_at"),
     }
 }

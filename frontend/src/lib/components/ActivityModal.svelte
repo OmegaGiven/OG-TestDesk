@@ -7,14 +7,17 @@
     connections,
     savedRequests,
     savedQueries,
+    savedCharts,
+    reloadSavedCharts,
     loadFromHistory,
+    sendToInspector,
     toast,
     toastError
   } from '../stores.js';
 
   const dispatch = createEventDispatcher();
 
-  let tab = 'history'; // history | schedules
+  let tab = 'history'; // history | schedules | charts
   let histKind = 'sql'; // sql | request
   let sqlHist = [];
   let reqHist = [];
@@ -25,6 +28,7 @@
     const q = new URLSearchParams(location.search);
     const at = q.get('atab');
     if (at === 'schedules') tab = 'schedules';
+    if (at === 'charts') tab = 'charts';
     if (at === 'requests') histKind = 'request';
     if (q.has('newschedule')) {
       tab = 'schedules';
@@ -39,9 +43,34 @@
         api.historyRequestRecent(150),
         api.schedulesList()
       ]);
+      await reloadSavedCharts();
     } catch (e) {
       toastError(e);
     }
+  }
+
+  async function openChart(c) {
+    let rows = [];
+    try {
+      const dataJson = c.has_data ? await api.savedChartData(c.id) : null;
+      rows = dataJson ? JSON.parse(dataJson) : [];
+    } catch (e) {
+      toastError(e);
+    }
+    sendToInspector('chart-reopen', c.name, rows, { existingChart: c });
+    dispatch('close');
+  }
+  async function deleteChart(c) {
+    if (!confirm(`Delete chart "${c.name}"?`)) return;
+    try {
+      await api.savedChartDelete(c.id);
+      await reloadSavedCharts();
+    } catch (e) {
+      toastError(e);
+    }
+  }
+  function fmtRunAt(ts) {
+    return ts ? new Date(ts * 1000).toLocaleString() : 'never';
   }
 
   function connName(id) {
@@ -162,6 +191,9 @@
     <button class:active={tab === 'schedules'} on:click={() => (tab = 'schedules')}>
       Schedules {#if schedules.length}<span class="n">{schedules.length}</span>{/if}
     </button>
+    <button class:active={tab === 'charts'} on:click={() => (tab = 'charts')}>
+      Charts {#if $savedCharts.length}<span class="n">{$savedCharts.length}</span>{/if}
+    </button>
   </div>
 
   {#if tab === 'history'}
@@ -205,7 +237,7 @@
         {#if reqHist.length === 0}<div class="empty">No request history yet.</div>{/if}
       {/if}
     </div>
-  {:else if editing}
+  {:else if tab === 'schedules' && editing}
     <div class="field">
       <label>Name</label>
       <input class="input" bind:value={editing.name} />
@@ -286,7 +318,7 @@
       <button class="btn" on:click={() => (editing = null)}>Cancel</button>
       <button class="btn primary" on:click={saveSchedule}>Save schedule</button>
     </div>
-  {:else}
+  {:else if tab === 'schedules'}
     <div class="subtabs">
       <span class="muted">Runs in the background while the app is open. Results land in History.</span>
       <span style="flex:1" />
@@ -310,6 +342,30 @@
         </div>
       {/each}
       {#if schedules.length === 0}<div class="empty">No schedules.</div>{/if}
+    </div>
+  {:else if tab === 'charts'}
+    <div class="subtabs">
+      <span class="muted">Saved from the Inspector's Chart mode. Click one to reopen it there.</span>
+    </div>
+    <div class="rows">
+      {#each $savedCharts as c (c.id)}
+        <div class="srow">
+          <button class="ch-open" on:click={() => openChart(c)}>
+            <span class="s-name">{c.name}</span>
+            <span class="tag">{c.chart_type}</span>
+            {#if c.row_count != null}<span class="tag">{c.row_count.toLocaleString()} rows</span>{/if}
+          </button>
+          <span class="s-meta">
+            {c.connection_id && c.sql_text ? 'linked to a query' : 'snapshot only'} · last run {fmtRunAt(c.last_run_at)}
+          </span>
+          <button class="icon-btn sm danger" on:click={() => deleteChart(c)}>{ICONS.delete.glyph}</button>
+        </div>
+      {/each}
+      {#if $savedCharts.length === 0}
+        <div class="empty">
+          No saved charts yet. Send a result to the Inspector, switch to Chart mode, and hit Save.
+        </div>
+      {/if}
     </div>
   {/if}
 </Modal>
@@ -456,6 +512,21 @@
   .s-name {
     font-weight: 600;
     font-size: 12px;
+  }
+  .ch-open {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    background: none;
+    border: none;
+    cursor: pointer;
+    padding: 0;
+    color: inherit;
+    font: inherit;
+    text-align: left;
+  }
+  .ch-open:hover .s-name {
+    color: var(--tool-inspector-text);
   }
   .s-expr {
     font-family: var(--font-mono);
