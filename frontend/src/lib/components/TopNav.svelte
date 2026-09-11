@@ -143,7 +143,7 @@
                 <span class="x" on:click={(e) => close(tab.id, e)} role="button" tabindex="-1">{ICONS.closeTab.glyph}</span>
               </button>
             {/each}
-            <button class="add" title="New query" on:click={() => addTab(conn.id)}>+</button>
+            <button class="icon-btn sm" title="New query" on:click={() => addTab(conn.id)}>+</button>
           </div>
         {/if}
       {/each}
@@ -176,7 +176,7 @@
           <span class="x" on:click={(e) => closeReq(rt.id, e)} role="button" tabindex="-1">{ICONS.closeTab.glyph}</span>
         </button>
       {/each}
-      <button class="add" title="New request" on:click={addReqTab}>+</button>
+      <button class="icon-btn sm" title="New request" on:click={addReqTab}>+</button>
     </div>
 
     <div class="divider" />
@@ -348,19 +348,6 @@
   }
   .x:hover {
     opacity: 1;
-  }
-  .add {
-    width: 20px;
-    height: 20px;
-    border-radius: 5px;
-    background: none;
-    border: none;
-    color: var(--text-secondary);
-    cursor: pointer;
-    flex-shrink: 0;
-  }
-  .add:hover {
-    background: var(--surface-3);
   }
   .hint {
     font-size: 11px;

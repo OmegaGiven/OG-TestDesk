@@ -62,7 +62,7 @@
               {#if testing[c.id] === 'ok'}<span class="st ok">{ICONS.connOk.glyph}</span>{/if}
               {#if testing[c.id] === 'err'}<span class="st err">{ICONS.connErr.glyph}</span>{/if}
             </button>
-            <button class="edit" title="Edit" on:click={() => (modal = { existing: c })}>{ICONS.rename.glyph}</button>
+            <button class="icon-btn sm" title="Edit" on:click={() => (modal = { existing: c })}>{ICONS.rename.glyph}</button>
           </div>
         {/each}
         {#if $connections.length === 0}
@@ -166,17 +166,6 @@
   }
   .st.err {
     color: var(--danger);
-  }
-  .edit {
-    background: none;
-    border: none;
-    color: var(--text-muted);
-    cursor: pointer;
-    padding: 6px 9px;
-    font-size: 11px;
-  }
-  .edit:hover {
-    color: var(--text-primary);
   }
   .empty {
     padding: 14px;

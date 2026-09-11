@@ -631,13 +631,23 @@
     padding: 4px 6px;
   }
   .mini {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
     width: 20px;
-    text-align: center;
+    height: 20px;
     background: none;
     border: none;
+    border-radius: var(--radius-sm);
     color: var(--text-muted);
     cursor: pointer;
     font-size: 12px;
+    line-height: 1;
+  }
+  .mini:hover:not(.dim) {
+    background: var(--surface-3);
+    color: var(--text-primary);
   }
   .mini.dim {
     cursor: default;

@@ -281,7 +281,7 @@
           </span>
           <button class="btn ghost sm" on:click={() => runNow(s)}>Run</button>
           <button class="btn ghost sm" on:click={() => editSchedule(s)}>Edit</button>
-          <button class="btn ghost sm danger" on:click={() => delSchedule(s)}>{ICONS.delete.glyph}</button>
+          <button class="icon-btn sm danger" on:click={() => delSchedule(s)}>{ICONS.delete.glyph}</button>
         </div>
       {/each}
       {#if schedules.length === 0}<div class="empty">No schedules.</div>{/if}

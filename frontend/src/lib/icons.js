@@ -24,10 +24,10 @@ export const ICONS = {
   insertName: { glyph: '↵', label: 'Insert name into the editor', where: 'Schema tree' },
   refresh: { glyph: '⟳', label: 'Refresh', where: 'Schema tree, saved queries' },
 
-  newQuery: { glyph: '＋≡', label: 'New query', where: 'Saved queries sidebar' },
-  newFolder: { glyph: '＋⌸', label: 'New folder', where: 'Saved queries sidebar' },
-  newSubfolder: { glyph: '▸＋', label: 'New subfolder', where: 'Saved queries folder row' },
-  newQueryHere: { glyph: '≡＋', label: 'New query in this folder', where: 'Saved queries folder row' },
+  newQuery: { glyph: '+', label: 'New query', where: 'Saved queries sidebar' },
+  newFolder: { glyph: '📁+', label: 'New folder', where: 'Saved queries sidebar' },
+  newSubfolder: { glyph: '📁+', label: 'New subfolder', where: 'Saved queries folder row' },
+  newQueryHere: { glyph: '+', label: 'New query in this folder', where: 'Saved queries folder row' },
   rename: { glyph: '✎', label: 'Rename / edit', where: 'Saved queries, connections' },
   delete: { glyph: '✕', label: 'Delete / remove', where: 'Saved queries, requests, schedules, environments' },
 

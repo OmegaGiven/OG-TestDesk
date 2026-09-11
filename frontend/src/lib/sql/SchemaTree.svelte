@@ -63,7 +63,7 @@
 <div class="tree">
   <div class="tools">
     <input class="input sm" placeholder="Filter tables…" bind:value={filter} />
-    <button class="btn ghost sm" title="Refresh" on:click={() => load(true)}>{ICONS.refresh.glyph}</button>
+    <button class="icon-btn" title="Refresh" on:click={() => load(true)}>{ICONS.refresh.glyph}</button>
   </div>
 
   {#if loading && schemas.length === 0}
@@ -93,7 +93,7 @@
                     {rel.name}
                   </button>
                   <button
-                    class="peek"
+                    class="icon-btn peek"
                     title="Open the full table, paginated"
                     on:click={() => dispatch('open', { schema: schema.name, relation: rel.name })}
                   >{ICONS.insertName.glyph}</button>
@@ -134,11 +134,6 @@
     flex: 1;
     padding: 6px 8px;
     font-size: 11.5px;
-  }
-  .tools :global(.btn) {
-    font-size: 15px;
-    line-height: 1;
-    padding: 4px 9px;
   }
   .scroll {
     overflow: auto;
@@ -194,18 +189,8 @@
   .rel-row .node {
     flex: 1;
   }
-  .peek {
-    background: none;
-    border: none;
-    color: var(--text-muted);
-    cursor: pointer;
-    padding: 5px 9px;
-    font-size: 15px;
-    line-height: 1;
-  }
   .peek:hover {
     color: var(--tool-sql-text);
-    background: var(--surface-3);
   }
   .cols {
     padding: 2px 8px 6px 40px;

@@ -76,6 +76,48 @@
   opacity: 0.5;
   cursor: not-allowed;
 }
+
+/* Uniform square icon-only button — one fixed box, glyph dead-centered,
+   used everywhere a button's entire content is a single icon (no text
+   label beside it: rename, delete, refresh, expand chevrons, new-folder,
+   etc.). Fixes icons that used to be different sizes and off-center
+   because every place that needed one rolled its own padding/font-size. */
+.icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: none;
+  color: var(--text-muted);
+  font-size: 13px;
+  line-height: 1;
+  cursor: pointer;
+}
+.icon-btn:hover {
+  background: var(--surface-3);
+  color: var(--text-primary);
+}
+.icon-btn.danger:hover {
+  color: var(--danger);
+}
+.icon-btn.sm {
+  width: 20px;
+  height: 20px;
+  font-size: 11px;
+}
+.icon-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+.icon-btn:disabled:hover {
+  background: none;
+  color: var(--text-muted);
+}
 .textarea {
   font-family: var(--font-mono);
   resize: vertical;

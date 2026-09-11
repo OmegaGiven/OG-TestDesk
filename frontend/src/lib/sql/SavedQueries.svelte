@@ -212,9 +212,9 @@
 <div class="sq">
   <div class="sq-tools">
     <input class="input sm" placeholder="Filter saved queries…" bind:value={filter} />
-    <button class="btn ghost sm" title="New query" on:click={() => newQuery(null)}>{ICONS.newQuery.glyph}</button>
-    <button class="btn ghost sm" title="New folder" on:click={() => newFolder(null)}>{ICONS.newFolder.glyph}</button>
-    <button class="btn ghost sm" title="Refresh" on:click={reload}>{ICONS.refresh.glyph}</button>
+    <button class="icon-btn" title="New query" on:click={() => newQuery(null)}>{ICONS.newQuery.glyph}</button>
+    <button class="icon-btn" title="New folder" on:click={() => newFolder(null)}>{ICONS.newFolder.glyph}</button>
+    <button class="icon-btn" title="Refresh" on:click={reload}>{ICONS.refresh.glyph}</button>
   </div>
 
   <div
@@ -231,8 +231,8 @@
             <span class="qname">{s.name}</span>
             {#if folderPath(s.folder_id)}<span class="qconn">{folderPath(s.folder_id)}</span>{/if}
           </button>
-          <button class="qact" title="Rename" on:click={() => renameQuery(s)}>{ICONS.rename.glyph}</button>
-          <button class="qact" title="Delete" on:click={() => deleteQuery(s)}>{ICONS.delete.glyph}</button>
+          <button class="icon-btn sm" title="Rename" on:click={() => renameQuery(s)}>{ICONS.rename.glyph}</button>
+          <button class="icon-btn sm danger" title="Delete" on:click={() => deleteQuery(s)}>{ICONS.delete.glyph}</button>
         </div>
       {/each}
       {#if matches.length === 0}<div class="none">No matches.</div>{/if}
@@ -246,12 +246,12 @@
             <span class="qname">{q.name}</span>
             {#if connName(q.connection_id)}<span class="qconn">{connName(q.connection_id)}</span>{/if}
           </button>
-          <button class="qact" title="Rename" on:click={() => renameQuery(q)}>{ICONS.rename.glyph}</button>
-          <button class="qact" title="Delete" on:click={() => deleteQuery(q)}>{ICONS.delete.glyph}</button>
+          <button class="icon-btn sm" title="Rename" on:click={() => renameQuery(q)}>{ICONS.rename.glyph}</button>
+          <button class="icon-btn sm danger" title="Delete" on:click={() => deleteQuery(q)}>{ICONS.delete.glyph}</button>
         </div>
       {/each}
       {#if rootFolders.length === 0 && rootQueries.length === 0}
-        <div class="none">No saved queries. Hit Save in a query tab, or ＋⌸ to make a folder.</div>
+        <div class="none">No saved queries. Hit Save in a query tab, or the folder button to make one.</div>
       {/if}
     {/if}
   </div>
@@ -274,11 +274,6 @@
     flex: 1;
     padding: 6px 8px;
     font-size: 11.5px;
-  }
-  .sq-tools :global(.btn) {
-    font-size: 13px;
-    line-height: 1;
-    padding: 4px 8px;
   }
   .sq-scroll {
     overflow: auto;
@@ -318,19 +313,6 @@
     font-size: 9px;
     color: var(--text-muted);
     flex-shrink: 0;
-  }
-  .qact {
-    background: none;
-    border: none;
-    color: var(--text-muted);
-    cursor: pointer;
-    padding: 5px 6px;
-    font-size: 12px;
-    line-height: 1;
-  }
-  .qact:hover {
-    color: var(--text-primary);
-    background: var(--surface-3);
   }
   .none {
     padding: 10px;

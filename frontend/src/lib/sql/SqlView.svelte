@@ -504,13 +504,28 @@
     border-bottom: 1px solid var(--border);
     background: var(--surface-1);
   }
+  /* Run / Save / connection badge are the first thing you see in this
+     bar — keep them the same fixed height and baseline so they read as
+     one uniform control group instead of odd-sized, oddly-aligned bits. */
+  .toolbar :global(.btn) {
+    height: 26px;
+    display: inline-flex;
+    align-items: center;
+    line-height: 1;
+  }
   .tb-conn {
-    display: flex;
+    height: 26px;
+    display: inline-flex;
     align-items: center;
     gap: 5px;
+    padding: 0 9px;
+    border-radius: var(--radius-sm);
+    border: 1px solid var(--border-strong);
+    background: var(--surface-2);
     font-size: 11px;
     color: var(--text-secondary);
     font-weight: 600;
+    line-height: 1;
   }
   .workarea {
     flex: 1;

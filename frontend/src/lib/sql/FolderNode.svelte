@@ -31,15 +31,21 @@
       on:dragleave={() => ctx.setDragOver(null)}
       on:drop|preventDefault|stopPropagation={() => ctx.drop(folderId)}
     >
-      <button class="chev" on:click={() => ctx.toggle(folderId)}
+      <button class="icon-btn sm chev" on:click={() => ctx.toggle(folderId)}
         >{open ? ICONS.expandOpen.glyph : ICONS.expandClosed.glyph}</button
       >
       <button class="fname" title="Rename" on:click={() => ctx.renameFolder(folder)}>{folder.name}</button>
       <span class="fcount">{subs.length + qs.length}</span>
       <span class="facts">
-        <button title="New subfolder" on:click={() => ctx.newFolder(folderId)}>{ICONS.newSubfolder.glyph}</button>
-        <button title="New query here" on:click={() => ctx.newQuery(folderId)}>{ICONS.newQueryHere.glyph}</button>
-        <button title="Delete folder" on:click={() => ctx.deleteFolder(folder)}>{ICONS.delete.glyph}</button>
+        <button class="icon-btn sm" title="New subfolder" on:click={() => ctx.newFolder(folderId)}
+          >{ICONS.newSubfolder.glyph}</button
+        >
+        <button class="icon-btn sm" title="New query here" on:click={() => ctx.newQuery(folderId)}
+          >{ICONS.newQueryHere.glyph}</button
+        >
+        <button class="icon-btn sm danger" title="Delete folder" on:click={() => ctx.deleteFolder(folder)}
+          >{ICONS.delete.glyph}</button
+        >
       </span>
     </div>
     {#if open}
@@ -57,8 +63,10 @@
             <span class="qname">{q.name}</span>
             {#if ctx.connName(q.connection_id)}<span class="qconn">{ctx.connName(q.connection_id)}</span>{/if}
           </button>
-          <button class="qact" title="Rename" on:click={() => ctx.renameQuery(q)}>{ICONS.rename.glyph}</button>
-          <button class="qact" title="Delete" on:click={() => ctx.deleteQuery(q)}>{ICONS.delete.glyph}</button>
+          <button class="icon-btn sm" title="Rename" on:click={() => ctx.renameQuery(q)}>{ICONS.rename.glyph}</button>
+          <button class="icon-btn sm danger" title="Delete" on:click={() => ctx.deleteQuery(q)}
+            >{ICONS.delete.glyph}</button
+          >
         </div>
       {/each}
     {/if}
@@ -83,15 +91,6 @@
   .frow.over {
     background: color-mix(in srgb, var(--tool-sql-text) 22%, transparent);
     box-shadow: inset 0 0 0 1px var(--tool-sql-text);
-  }
-  .chev {
-    background: none;
-    border: none;
-    cursor: pointer;
-    color: var(--text-muted);
-    width: 12px;
-    font-size: 10px;
-    padding: 0;
   }
   .fname {
     background: none;
@@ -119,17 +118,6 @@
   }
   .frow:hover .facts {
     opacity: 1;
-  }
-  .facts button {
-    background: none;
-    border: none;
-    color: var(--text-muted);
-    cursor: pointer;
-    font-size: 10px;
-    padding: 2px 4px;
-  }
-  .facts button:hover {
-    color: var(--text-primary);
   }
   .qrow {
     display: flex;
@@ -162,21 +150,10 @@
     color: var(--text-muted);
     flex-shrink: 0;
   }
-  .qact {
-    background: none;
-    border: none;
-    color: var(--text-muted);
-    cursor: pointer;
-    padding: 5px 6px;
-    font-size: 12px;
-    line-height: 1;
+  .qrow :global(.icon-btn) {
     opacity: 0;
   }
-  .qrow:hover .qact {
+  .qrow:hover :global(.icon-btn) {
     opacity: 1;
-  }
-  .qact:hover {
-    color: var(--text-primary);
-    background: var(--surface-3);
   }
 </style>
