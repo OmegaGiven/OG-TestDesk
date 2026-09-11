@@ -68,8 +68,6 @@
           <div class="empty">No connections. Add one to start querying.</div>
         {/if}
       </div>
-
-      <footer>Click a connection to open a query tab · ✎ to edit</footer>
     </div>
   </div>
 {/if}
@@ -182,12 +180,6 @@
   .empty {
     padding: 14px;
     font-size: 11px;
-    color: var(--text-muted);
-  }
-  footer {
-    padding: 6px 10px;
-    border-top: 1px solid var(--border);
-    font-size: 10px;
     color: var(--text-muted);
   }
 </style>
