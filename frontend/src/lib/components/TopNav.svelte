@@ -13,13 +13,16 @@
     newRequestTab,
     closeRequestTab,
     persistRequestTab,
-    connMenuOpen
+    connMenuOpen,
+    groupOrder,
+    tabGroupOverride,
+    groupOf,
+    reorderGroups,
+    moveTabToGroup
   } from '../stores.js';
-  import { api } from '../api.js';
   import { ICONS } from '../icons.js';
 
-  $: tabsByConn = (connId) =>
-    $sqlTabs.filter((t) => t.connection_id === connId).sort((a, b) => a.position - b.position);
+  const REQUESTS_KEY = 'requests';
 
   function selectTab(id) {
     activeTool.set('sql');
@@ -51,6 +54,70 @@
   function closeReq(id, e) {
     e.stopPropagation();
     closeRequestTab(id);
+  }
+
+  // ---- group the tabs (SQL + Requests) by connection, honoring any
+  // manual drag-to-regroup override, in the user's saved group order
+  function groupBy(list, kind, overrides) {
+    const map = new Map();
+    for (const tab of list) {
+      const key = groupOf(kind, tab, overrides);
+      if (!map.has(key)) map.set(key, []);
+      map.get(key).push({ kind, tab });
+    }
+    return map;
+  }
+  $: sqlByGroup = groupBy($sqlTabs, 'sql', $tabGroupOverride);
+  $: reqByGroup = groupBy($requestTabs, 'request', $tabGroupOverride);
+  $: allKeys = (() => {
+    const order = [...$groupOrder];
+    const seen = new Set(order);
+    for (const k of [...sqlByGroup.keys(), ...reqByGroup.keys()]) {
+      if (!seen.has(k)) {
+        seen.add(k);
+        order.push(k);
+      }
+    }
+    return order;
+  })();
+  $: renderGroups = allKeys
+    .map((key) => {
+      const items = [...(sqlByGroup.get(key) || []), ...(reqByGroup.get(key) || [])].sort(
+        (a, b) => (a.tab.position ?? 0) - (b.tab.position ?? 0)
+      );
+      if (key === REQUESTS_KEY) {
+        return { key, kind: 'requests', label: 'Requests', items };
+      }
+      const conn = $connections.find((c) => c.id === key);
+      return { key, kind: 'conn', conn, items };
+    })
+    .filter((g) => g.kind === 'requests' || (g.conn && g.items.length));
+
+  // ---- drag & drop: reorder whole groups, or drag a tab into another group
+  let draggedGroup = null;
+  let draggedTab = null; // { kind, tab }
+  let dragOverKey = null;
+
+  function onGroupDragStart(key, e) {
+    draggedGroup = key;
+    draggedTab = null;
+    e.dataTransfer.effectAllowed = 'move';
+  }
+  function onTabDragStart(kind, tab, e) {
+    draggedTab = { kind, tab };
+    draggedGroup = null;
+    e.dataTransfer.effectAllowed = 'move';
+  }
+  function onGroupDragOver(key, e) {
+    e.preventDefault();
+    dragOverKey = key;
+  }
+  function onGroupDrop(key) {
+    if (draggedGroup && draggedGroup !== key) reorderGroups(draggedGroup, key);
+    else if (draggedTab) moveTabToGroup(draggedTab.kind, draggedTab.tab, key);
+    draggedGroup = null;
+    draggedTab = null;
+    dragOverKey = null;
   }
 
   // ---- horizontal scroll without a scrollbar
@@ -96,10 +163,16 @@
   });
 
   // re-check when the tab set changes
-  $: if ($sqlTabs || $requestTabs || $connections) tick().then(refresh);
+  $: if (renderGroups) tick().then(refresh);
 </script>
 
 <nav class="topnav">
+  <button
+    class="icon-btn plus"
+    title="New connection, request, or open Inspector"
+    on:click={() => connMenuOpen.update((v) => !v)}>+</button
+  >
+
   <button
     class="edge left"
     class:show={overflowing}
@@ -110,84 +183,71 @@
   >
 
   <div class="scroller" bind:this={scroller} on:scroll={refresh} on:wheel={onWheel}>
-    <!-- SQL tool: connection groups with tabs -->
-    <div
-      class="tool"
-      class:active={$activeTool === 'sql'}
-      style="--tint: var(--tool-sql-tint); --tint-text: var(--tool-sql-text);"
-    >
-      <button
-        class="tool-label"
-        title="Connections"
-        on:click={() => {
-          activeTool.set('sql');
-          connMenuOpen.update((v) => !v);
-        }}
+    {#each renderGroups as g (g.key)}
+      <div
+        class="tool"
+        class:over={dragOverKey === g.key}
+        style="--c: {g.kind === 'conn' ? g.conn.color || 'var(--conn-slate)' : 'var(--tool-requests-text)'}"
+        on:dragover={(e) => onGroupDragOver(g.key, e)}
+        on:dragleave={() => (dragOverKey = null)}
+        on:drop={() => onGroupDrop(g.key)}
       >
-        SQL <span class="caret">▾</span>
-      </button>
-      {#each $connections as conn (conn.id)}
-        {#if tabsByConn(conn.id).length}
-          <div class="conn" style="--c: {conn.color || 'var(--conn-slate)'}">
-            <button class="conn-label" on:click={() => connMenuOpen.set(true)} title="Switch / manage">
-              {conn.nickname}
-            </button>
-            {#each tabsByConn(conn.id) as tab (tab.id)}
-              <button
-                class="tab"
-                class:active={$activeSqlTabId === tab.id && $activeTool === 'sql'}
-                on:click={() => selectTab(tab.id)}
-                title={tab.title}
-              >
-                {tab.dirty ? '•' : ''}{tab.title}
-                <span class="x" on:click={(e) => close(tab.id, e)} role="button" tabindex="-1">{ICONS.closeTab.glyph}</span>
-              </button>
-            {/each}
-            <button class="icon-btn sm" title="New query" on:click={() => addTab(conn.id)}>+</button>
-          </div>
-        {/if}
-      {/each}
-      {#if $connections.length === 0}
-        <span class="hint">no connections</span>
-      {/if}
-    </div>
-
-    <div class="divider" />
-
-    <!-- Requests tool: request tabs -->
-    <div
-      class="tool"
-      class:active={$activeTool === 'requests'}
-      style="--tint: var(--tool-requests-tint); --tint-text: var(--tool-requests-text);"
-    >
-      <button class="tool-label" on:click={() => activeTool.set('requests')}>Requests</button>
-      {#each $requestTabs as rt (rt.id)}
         <button
-          class="tab"
-          class:active={$activeRequestTabId === rt.id && $activeTool === 'requests'}
-          style="--dot: var(--m-{(rt.method || 'get').toLowerCase()})"
-          on:click={() => selectReqTab(rt.id)}
-          title={rt.title}
+          class="group-label"
+          draggable="true"
+          on:dragstart={(e) => onGroupDragStart(g.key, e)}
+          on:click={() => connMenuOpen.set(true)}
+          title="Drag to reorder · click to switch connection"
         >
-          <span class="rt-method" style="color: var(--m-{(rt.method || 'get').toLowerCase()})">
-            {rt.method}
-          </span>
-          {rt.dirty ? '•' : ''}{rt.title}
-          <span class="x" on:click={(e) => closeReq(rt.id, e)} role="button" tabindex="-1">{ICONS.closeTab.glyph}</span>
+          {g.kind === 'requests' ? 'Requests' : g.label ?? g.conn.nickname}
         </button>
-      {/each}
-      <button class="icon-btn sm" title="New request" on:click={addReqTab}>+</button>
-    </div>
+        {#each g.items as item (item.kind + ':' + item.tab.id)}
+          {#if item.kind === 'sql'}
+            <button
+              class="tab"
+              class:active={$activeSqlTabId === item.tab.id && $activeTool === 'sql'}
+              draggable="true"
+              on:dragstart|stopPropagation={(e) => onTabDragStart('sql', item.tab, e)}
+              on:click={() => selectTab(item.tab.id)}
+              title={item.tab.title}
+            >
+              {item.tab.dirty ? '•' : ''}{item.tab.title}
+              <span class="x" on:click={(e) => close(item.tab.id, e)} role="button" tabindex="-1"
+                >{ICONS.closeTab.glyph}</span
+              >
+            </button>
+          {:else}
+            <button
+              class="tab"
+              class:active={$activeRequestTabId === item.tab.id && $activeTool === 'requests'}
+              draggable="true"
+              on:dragstart|stopPropagation={(e) => onTabDragStart('request', item.tab, e)}
+              on:click={() => selectReqTab(item.tab.id)}
+              title={item.tab.title}
+            >
+              <span class="rt-method" style="color: var(--m-{(item.tab.method || 'get').toLowerCase()})">
+                {item.tab.method}
+              </span>
+              {item.tab.dirty ? '•' : ''}{item.tab.title}
+              <span class="x" on:click={(e) => closeReq(item.tab.id, e)} role="button" tabindex="-1"
+                >{ICONS.closeTab.glyph}</span
+              >
+            </button>
+          {/if}
+        {/each}
+        <button
+          class="icon-btn sm"
+          title={g.kind === 'requests' ? 'New request' : 'New query'}
+          on:click={() => (g.kind === 'requests' ? addReqTab() : addTab(g.key))}>+</button
+        >
+      </div>
+    {/each}
 
     <div class="divider" />
 
-    <div
-      class="tool flat"
-      class:active={$activeTool === 'inspector'}
-      style="--tint: var(--tool-inspector-tint); --tint-text: var(--tool-inspector-text);"
-    >
-      <button class="tool-label" on:click={() => activeTool.set('inspector')}>Inspector</button>
-    </div>
+    <button class="tool flat" class:active={$activeTool === 'inspector'} on:click={() => activeTool.set('inspector')}>
+      <span class="group-label" style="color: var(--tool-inspector-text)">Inspector</span>
+    </button>
   </div>
 
   <button
@@ -209,6 +269,17 @@
     min-width: 0;
     overflow: hidden;
     -webkit-app-region: drag;
+  }
+  .plus {
+    flex-shrink: 0;
+    align-self: center;
+    margin-left: var(--nav-pad, 6px);
+    color: var(--text-secondary);
+    font-weight: 700;
+  }
+  .plus:hover {
+    background: var(--surface-3);
+    color: var(--text-primary);
   }
   .scroller {
     flex: 1;
@@ -273,38 +344,27 @@
   .tool {
     display: flex;
     align-items: center;
-    gap: var(--nav-gap, 5px);
-    background: var(--tint);
-    border-radius: var(--radius);
-    padding: calc(var(--nav-gap, 5px) - 1px);
-    flex-shrink: 0;
-  }
-  .tool.active {
-    box-shadow: 0 0 0 1.5px var(--tint-text) inset;
-  }
-  .caret {
-    font-size: 7px;
-    opacity: 0.6;
-  }
-  .tool-label {
-    font-size: 12px;
-    font-weight: 600;
-    color: var(--tint-text);
-    padding: 4px 8px;
-    background: none;
-    border: none;
-    cursor: pointer;
-  }
-  .conn {
-    display: flex;
-    align-items: center;
     gap: 2px;
+    flex-shrink: 0;
     background: color-mix(in srgb, var(--c, var(--conn-slate)) 22%, var(--surface-2));
     box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--c, var(--conn-slate)) 38%, transparent);
     border-radius: 6px;
     padding: 2px;
+    border: none;
   }
-  .conn-label {
+  .tool.over {
+    box-shadow: inset 0 0 0 2px var(--c, var(--tool-sql-text));
+  }
+  .tool.flat {
+    background: var(--tool-inspector-tint);
+    box-shadow: none;
+    cursor: pointer;
+    padding: 4px 2px;
+  }
+  .tool.flat.active {
+    box-shadow: 0 0 0 1.5px var(--tool-inspector-text) inset;
+  }
+  .group-label {
     font-size: 10.5px;
     font-weight: 700;
     letter-spacing: 0.02em;
@@ -348,10 +408,5 @@
   }
   .x:hover {
     opacity: 1;
-  }
-  .hint {
-    font-size: 11px;
-    color: var(--text-muted);
-    padding: 0 6px;
   }
 </style>

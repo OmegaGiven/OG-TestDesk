@@ -28,7 +28,8 @@
     reloadRequestTabs,
     reloadSavedQueries,
     reloadSavedCharts,
-    sendToInspector
+    sendToInspector,
+    connMenuOpen
   } from '../lib/stores.js';
 
   let settingsOpen = false;
@@ -61,7 +62,7 @@
     //   ?tool=requests|inspector   ?run  (auto-run the active SQL tab)
     const q = new URLSearchParams(location.search);
     if (q.has('theme')) theme.set(q.get('theme'));
-    if (q.has('connmenu')) (await import('../lib/stores.js')).connMenuOpen.set(true);
+    if (q.has('connmenu')) connMenuOpen.set(true);
     if (q.has('colortheme')) appearance.update((a) => ({ ...a, colorTheme: q.get('colortheme') }));
     if (q.has('settings')) settingsOpen = true;
     if (q.has('help')) helpOpen = true;

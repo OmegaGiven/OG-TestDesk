@@ -141,6 +141,69 @@ export async function loadSchemas(conn, force = false) {
 
 export const connMenuOpen = writable(false);
 
+/* ---------------------------------------------------- top-bar tab groups */
+// The top bar shows one colored, draggable group per connection plus a
+// "Requests" group. A tab's group is normally its own connection
+// (SQL tabs) or "requests" (request tabs), but either kind of tab can be
+// dragged into any other group purely for organization — that override,
+// and the left-to-right order of the groups themselves, are cosmetic and
+// saved locally (not synced to the backend).
+const GROUP_ORDER_KEY = 'ogtestdesk.groupOrder';
+const TAB_GROUP_KEY = 'ogtestdesk.tabGroupOverride';
+const REQUESTS_GROUP = 'requests';
+
+function loadJson(key, fallback) {
+  try {
+    const v = JSON.parse(localStorage.getItem(key));
+    return v ?? fallback;
+  } catch {
+    return fallback;
+  }
+}
+function saveJson(key, value) {
+  try {
+    localStorage.setItem(key, JSON.stringify(value));
+  } catch {}
+}
+
+export const groupOrder = writable(loadJson(GROUP_ORDER_KEY, [REQUESTS_GROUP]));
+groupOrder.subscribe((v) => saveJson(GROUP_ORDER_KEY, v));
+
+/** Push a group key to the end of the order if it isn't already tracked. */
+export function ensureGroupOrder(key) {
+  groupOrder.update((order) => (order.includes(key) ? order : [...order, key]));
+}
+
+export function reorderGroups(draggedKey, targetKey) {
+  groupOrder.update((order) => {
+    const next = order.filter((k) => k !== draggedKey);
+    const at = next.indexOf(targetKey);
+    if (at < 0) return order;
+    next.splice(at, 0, draggedKey);
+    return next;
+  });
+}
+
+export const tabGroupOverride = writable(loadJson(TAB_GROUP_KEY, {}));
+tabGroupOverride.subscribe((v) => saveJson(TAB_GROUP_KEY, v));
+
+/** A SQL tab's natural group is its connection; a request tab's is "requests". */
+export function naturalGroup(kind, tab) {
+  return kind === 'sql' ? tab.connection_id : REQUESTS_GROUP;
+}
+export function groupOf(kind, tab, overrides) {
+  return overrides[tab.id] ?? naturalGroup(kind, tab);
+}
+export function moveTabToGroup(kind, tab, groupKey) {
+  tabGroupOverride.update((m) => {
+    const next = { ...m };
+    if (groupKey === naturalGroup(kind, tab)) delete next[tab.id];
+    else next[tab.id] = groupKey;
+    return next;
+  });
+  ensureGroupOrder(groupKey);
+}
+
 /* ----------------------------------------------------------- saved queries */
 
 export const savedQueries = writable([]);
@@ -169,6 +232,7 @@ export async function reloadTabs() {
   try {
     const rows = await api.tabsListAll();
     sqlTabs.set(rows.map((t) => ({ ...t, dirty: false, result: null, error: null, running: false })));
+    for (const t of rows) ensureGroupOrder(t.connection_id);
     const active = rows.find((t) => t.is_active);
     if (active) activeSqlTabId.set(active.id);
     else if (rows[0]) activeSqlTabId.set(rows[0].id);
@@ -178,6 +242,7 @@ export async function reloadTabs() {
 }
 
 export async function newSqlTab(connectionId, sql = '') {
+  ensureGroupOrder(connectionId);
   const tabs = get(sqlTabs).filter((t) => t.connection_id === connectionId);
   const position = tabs.length;
   let tab = {

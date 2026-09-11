@@ -7,6 +7,7 @@
     connMenuOpen,
     activeTool,
     newSqlTab,
+    newRequestTab,
     toast,
     toastError
   } from '../stores.js';
@@ -20,6 +21,20 @@
   }
   function onKey(e) {
     if (e.key === 'Escape' && !modal) close();
+  }
+
+  async function openNewRequest() {
+    activeTool.set('requests');
+    close();
+    try {
+      await newRequestTab();
+    } catch (e) {
+      toastError(e);
+    }
+  }
+  function openInspector() {
+    activeTool.set('inspector');
+    close();
   }
 
   async function open(conn) {
@@ -68,6 +83,17 @@
         {#if $connections.length === 0}
           <div class="empty">No connections. Add one to start querying.</div>
         {/if}
+      </div>
+
+      <div class="other-tools">
+        <button class="tool-row" on:click={openNewRequest}>
+          <span class="tool-dot" style="background:var(--tool-requests-text)" />
+          New request
+        </button>
+        <button class="tool-row" on:click={openInspector}>
+          <span class="tool-dot" style="background:var(--tool-inspector-text)" />
+          Inspector
+        </button>
       </div>
     </div>
   </div>
@@ -171,5 +197,32 @@
     padding: 14px;
     font-size: 11px;
     color: var(--text-muted);
+  }
+  .other-tools {
+    border-top: 1px solid var(--border);
+    padding: 4px 0;
+  }
+  .tool-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    width: 100%;
+    text-align: left;
+    background: none;
+    border: none;
+    cursor: pointer;
+    padding: 7px 10px;
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--text-primary);
+  }
+  .tool-row:hover {
+    background: var(--surface-3);
+  }
+  .tool-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    flex-shrink: 0;
   }
 </style>
