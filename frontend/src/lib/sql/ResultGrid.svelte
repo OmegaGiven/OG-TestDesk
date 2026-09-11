@@ -13,9 +13,27 @@
   let showColFilters = false;
   let headerRowH = 24; // measured, drives the filter-row's sticky offset
 
+  let hiddenCols = new Set(); // column indices hidden from view
+  let colsMenuOpen = false;
+  let lastColKey = '';
+  $: visibleIdx = cols.map((_, i) => i).filter((i) => !hiddenCols.has(i));
+  function toggleCol(i) {
+    const s = new Set(hiddenCols);
+    s.has(i) ? s.delete(i) : s.add(i);
+    hiddenCols = s;
+  }
+  function showAllCols() {
+    hiddenCols = new Set();
+  }
+  function hideAllCols() {
+    // keep at least one column visible
+    hiddenCols = new Set(cols.slice(1).map((_, i) => i + 1));
+  }
+
   if (typeof location !== 'undefined') {
     const q = new URLSearchParams(location.search);
     if (q.has('gridsearch')) search = q.get('gridsearch');
+    if (q.has('gridcolsmenu')) colsMenuOpen = true;
     if (q.has('gridcols')) {
       showColFilters = true;
       q.get('gridcols')
@@ -75,6 +93,11 @@
     scrollTop = 0;
     if (scrollEl) scrollEl.scrollTop = 0;
     // keep sort + filters across paging; clear only when column set changes
+    const colKey = cols.map((c) => c.name).join('');
+    if (colKey !== lastColKey) {
+      lastColKey = colKey;
+      hiddenCols = new Set();
+    }
   }
 
   function cmp(a, b) {
@@ -210,8 +233,35 @@
       class="btn ghost sm"
       class:on={showColFilters}
       title="Per-column filters"
-      on:click={() => (showColFilters = !showColFilters)}>⑂ Columns</button
+      on:click={() => (showColFilters = !showColFilters)}>⑂ Filters</button
     >
+    <span class="cols-menu-wrap">
+      <button
+        class="btn ghost sm"
+        class:on={colsMenuOpen}
+        title="Show / hide columns"
+        on:click={() => (colsMenuOpen = !colsMenuOpen)}
+        >☰ Columns{hiddenCols.size ? ` (${visibleIdx.length}/${cols.length})` : ''}</button
+      >
+      {#if colsMenuOpen}
+        <div class="backdrop" on:click={() => (colsMenuOpen = false)} role="presentation" />
+        <div class="cols-menu">
+          <div class="cols-menu-head">
+            <button class="btn ghost sm" on:click={showAllCols}>All</button>
+            <button class="btn ghost sm" on:click={hideAllCols}>None</button>
+          </div>
+          <div class="cols-menu-list">
+            {#each cols as c, i (i)}
+              <label class="cols-menu-item">
+                <input type="checkbox" checked={!hiddenCols.has(i)} on:change={() => toggleCol(i)} />
+                <span class="cn">{c.name}</span>
+                <span class="ty">{c.type_name}</span>
+              </label>
+            {/each}
+          </div>
+        </div>
+      {/if}
+    </span>
     {#if hasFilter}
       <span class="fcount">{total.toLocaleString()} of {baseRows.length.toLocaleString()}</span>
       <button class="btn ghost sm" on:click={clearFilters}>Clear</button>
@@ -238,11 +288,11 @@
       <thead>
         <tr bind:clientHeight={headerRowH}>
           <th class="rownum">#</th>
-          {#each cols as c, i}
-            <th on:click={() => sortBy(i)} title="{c.type_name} — click to sort">
+          {#each visibleIdx as i (i)}
+            <th on:click={() => sortBy(i)} title="{cols[i].type_name} — click to sort">
               <span class="th-row">
-                <span class="cn">{c.name}</span>
-                <span class="ty">{c.type_name}</span>
+                <span class="cn">{cols[i].name}</span>
+                <span class="ty">{cols[i].type_name}</span>
               </span>
               {#if sortCol === i}<span class="arr">{sortDir === 1 ? '▲' : '▼'}</span>{/if}
             </th>
@@ -251,7 +301,7 @@
         {#if showColFilters}
           <tr class="filter-row" style="--filter-top: {headerRowH}px">
             <th class="rownum"></th>
-            {#each cols as c, i}
+            {#each visibleIdx as i (i)}
               <th>
                 <input
                   class="col-filter"
@@ -266,28 +316,28 @@
       </thead>
       <tbody>
         {#if total === 0}
-          <tr><td colspan={cols.length + 1} class="no-match">No rows match the filter.</td></tr>
+          <tr><td colspan={visibleIdx.length + 1} class="no-match">No rows match the filter.</td></tr>
         {/if}
         {#if padTop}
-          <tr class="spacer"><td colspan={cols.length + 1} style="height:{padTop}px"></td></tr>
+          <tr class="spacer"><td colspan={visibleIdx.length + 1} style="height:{padTop}px"></td></tr>
         {/if}
         {#each visible as row, vi (startIdx + vi)}
           <tr>
             <td class="rownum">{startIdx + vi + 1}</td>
-            {#each row as v, c}
+            {#each visibleIdx as c (c)}
               <td
-                class={cls(v)}
+                class={cls(row[c])}
                 class:sel={selected && selected[0] === startIdx + vi && selected[1] === c}
                 on:click={() => pick(startIdx + vi, c)}
-                title={display(v)}
+                title={display(row[c])}
               >
-                {display(v)}
+                {display(row[c])}
               </td>
             {/each}
           </tr>
         {/each}
         {#if padBottom}
-          <tr class="spacer"><td colspan={cols.length + 1} style="height:{padBottom}px"></td></tr>
+          <tr class="spacer"><td colspan={visibleIdx.length + 1} style="height:{padBottom}px"></td></tr>
         {/if}
       </tbody>
     </table>
@@ -321,6 +371,63 @@
   .btn.ghost.sm.on {
     background: var(--tool-sql-tint);
     color: var(--tool-sql-text);
+  }
+  .cols-menu-wrap {
+    position: relative;
+  }
+  .cols-menu-wrap .backdrop {
+    position: fixed;
+    inset: 0;
+    z-index: 40;
+  }
+  .cols-menu {
+    position: absolute;
+    top: calc(100% + 4px);
+    left: 0;
+    z-index: 41;
+    width: 220px;
+    max-height: 320px;
+    display: flex;
+    flex-direction: column;
+    background: var(--surface-1);
+    border: 1px solid var(--border-strong);
+    border-radius: var(--radius-sm);
+    box-shadow: var(--shadow-pop);
+    overflow: hidden;
+  }
+  .cols-menu-head {
+    display: flex;
+    gap: 4px;
+    padding: 6px;
+    border-bottom: 1px solid var(--border);
+  }
+  .cols-menu-list {
+    overflow: auto;
+    padding: 4px 0;
+  }
+  .cols-menu-item {
+    display: flex;
+    align-items: baseline;
+    gap: 6px;
+    padding: 5px 10px;
+    font-size: 12px;
+    color: var(--text-primary);
+    cursor: pointer;
+  }
+  .cols-menu-item:hover {
+    background: var(--surface-3);
+  }
+  .cols-menu-item .cn {
+    flex: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .cols-menu-item .ty {
+    font-size: 9px;
+    color: var(--text-muted);
+    text-transform: lowercase;
+    flex-shrink: 0;
   }
   .fcount {
     font-size: 10.5px;
