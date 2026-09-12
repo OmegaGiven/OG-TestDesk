@@ -9,6 +9,8 @@
     newSqlTab,
     newRequestTab,
     inspectorOpen,
+    moveTabToGroup,
+    INSPECTOR_TAB_ID,
     toast,
     toastError
   } from '../stores.js';
@@ -35,6 +37,7 @@
   }
   function openInspector() {
     inspectorOpen.set(true);
+    moveTabToGroup('inspector', { id: INSPECTOR_TAB_ID }, null);
     activeTool.set('inspector');
     close();
   }
