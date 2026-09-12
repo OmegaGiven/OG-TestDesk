@@ -101,6 +101,36 @@
     }
   }
 
+  // ---- edit mode for loaded data (Raw view) — lets you tweak a result
+  // or response in place; the edit updates every mode (Tree/Table/
+  // Summary/Chart all read the same payload), not just this view.
+  let editingRaw = false;
+  let rawEditText = '';
+  let editError = '';
+  function startRawEdit() {
+    rawEditText = rawPretty;
+    editError = '';
+    editingRaw = true;
+  }
+  function cancelRawEdit() {
+    editingRaw = false;
+    editError = '';
+  }
+  function applyRawEdit() {
+    try {
+      const parsed = JSON.parse(rawEditText);
+      inspectorPayload.update((p) => (p ? { ...p, json: parsed } : p));
+      editingRaw = false;
+      editError = '';
+      toast('Edit applied', 'success', 1500);
+    } catch (e) {
+      editError = 'Invalid JSON: ' + e.message;
+    }
+  }
+  // leaving Raw mode, or a new payload arriving, discards an in-progress edit
+  $: if (mode !== 'raw' && editingRaw) cancelRawEdit();
+  $: if (payload?.at && editingRaw) cancelRawEdit();
+
   function expandChange() {
     bump++;
     expandSet = expandSet;
@@ -345,9 +375,24 @@
         <div class="raw-view">
           <div class="raw-view-tools">
             <button class="btn ghost sm" on:click={() => copy(rawPretty)} disabled={!rawPretty}>{ICONS.copy.glyph} Copy</button>
+            {#if !rawMode}
+              {#if editingRaw}
+                <button class="btn primary sm" on:click={applyRawEdit}>Apply</button>
+                <button class="btn ghost sm" on:click={cancelRawEdit}>Cancel</button>
+                {#if editError}<span class="raw-err inline">{editError}</span>{/if}
+              {:else}
+                <button class="btn ghost sm" on:click={startRawEdit} disabled={!rawPretty}
+                  >{ICONS.editCells.glyph} Edit</button
+                >
+              {/if}
+            {/if}
             <span class="mc">{rawPretty.length.toLocaleString()} chars</span>
           </div>
-          <pre class="raw-pretty">{rawPretty}</pre>
+          {#if editingRaw}
+            <textarea class="raw" bind:value={rawEditText} spellcheck="false"></textarea>
+          {:else}
+            <pre class="raw-pretty">{rawPretty}</pre>
+          {/if}
         </div>
       {:else if mode === 'chart'}
         {#if tableRows}
@@ -490,6 +535,9 @@
     font-size: 11px;
     font-family: var(--font-mono);
   }
+  .raw-err.inline {
+    padding: 0;
+  }
   .raw-tools {
     display: flex;
     align-items: center;
@@ -522,6 +570,12 @@
     font-size: 12px;
     color: var(--text-primary);
     white-space: pre;
+  }
+  .raw-view .raw {
+    flex: 1;
+    height: auto;
+    border-bottom: none;
+    resize: none;
   }
   .empty {
     padding: 30px;
