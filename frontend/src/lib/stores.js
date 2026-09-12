@@ -365,7 +365,12 @@ export async function closeSqlTab(id) {
   try {
     await api.tabDelete(id);
   } catch (e) {
+    // Don't drop it from the UI if the backend didn't actually delete it —
+    // otherwise it silently reappears the next time anything refetches
+    // tabs from the backend (e.g. the window regaining focus), which
+    // looks like the close never "took" at all.
     toastError(e);
+    return;
   }
   const tabs = get(sqlTabs).filter((t) => t.id !== id);
   sqlTabs.set(tabs);
@@ -518,7 +523,12 @@ export async function closeRequestTab(id) {
   try {
     await api.requestTabDelete(id);
   } catch (e) {
+    // Same reasoning as closeSqlTab: if the backend delete failed, keep
+    // it in the UI too, or it silently comes back on the next refetch
+    // (e.g. the window regaining focus) looking like the close undid
+    // itself.
     toastError(e);
+    return;
   }
   const tabs = get(requestTabs).filter((t) => t.id !== id);
   requestTabs.set(tabs);

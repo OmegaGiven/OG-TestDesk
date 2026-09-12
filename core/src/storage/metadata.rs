@@ -1,8 +1,10 @@
 use crate::drivers::{ConnConfig, DbKind};
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
-use sqlx::sqlite::SqlitePoolOptions;
+use sqlx::sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePoolOptions};
 use sqlx::{Row, SqlitePool};
+use std::str::FromStr;
+use std::time::Duration;
 
 /// Wraps the app's own local SQLite DB (connections, tabs, history,
 /// saved queries/requests). Separate from any DB the user connects to.
@@ -366,11 +368,22 @@ pub struct Environment {
 impl MetadataStore {
     pub async fn open(path: &str) -> Result<Self> {
         let url = format!("sqlite://{path}?mode=rwc");
-        let pool = SqlitePoolOptions::new()
-            .max_connections(5)
-            .connect(&url)
-            .await?;
-        sqlx::query("PRAGMA foreign_keys = ON").execute(&pool).await?;
+        // WAL + a busy timeout, applied to every connection the pool
+        // opens (not just a one-off PRAGMA on whichever connection ran
+        // first) — the default rollback-journal mode serializes writers
+        // and errors out immediately as "database is locked" under any
+        // real concurrency, which this app has plenty of: rapid tab
+        // closes, debounced autosaves, the scheduler, and MCP calls can
+        // all hit this same file at once. WAL lets readers and a writer
+        // overlap, and the busy timeout makes a genuinely-contended
+        // write wait a few seconds and retry instead of failing outright
+        // — a failed tab-close silently leaving the row behind (which
+        // then reappears on the next full refetch) was exactly this.
+        let opts = SqliteConnectOptions::from_str(&url)?
+            .journal_mode(SqliteJournalMode::Wal)
+            .busy_timeout(Duration::from_secs(5))
+            .foreign_keys(true);
+        let pool = SqlitePoolOptions::new().max_connections(5).connect_with(opts).await?;
         sqlx::query(SCHEMA).execute(&pool).await?;
         // Additive migrations for databases created before a column existed.
         for stmt in [
