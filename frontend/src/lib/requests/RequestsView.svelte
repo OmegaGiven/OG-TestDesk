@@ -610,11 +610,21 @@
   <aside class="sidebar" style="width:{sidebarW}px">
     <div class="sec-head">
       <span>Collections</span>
-      <div>
-        <button class="btn ghost sm" title="Import Postman collection / environment" on:click={() => fileInput.click()}>{ICONS.importPostman.glyph}</button>
-        <button class="btn ghost sm" title="Export everything as a Postman collection" on:click={exportPostman}>{ICONS.exportPostman.glyph}</button>
-        <button class="btn ghost sm" on:click={newCollection}>+ Folder</button>
-        <button class="btn ghost sm" on:click={() => newRequestTab()}>+ Req</button>
+      <div class="sec-actions">
+        <button
+          class="icon-btn sm"
+          title={ICONS.importPostman.label}
+          on:click={() => fileInput.click()}>{ICONS.importPostman.glyph}</button
+        >
+        <button class="icon-btn sm" title={ICONS.exportPostman.label} on:click={exportPostman}
+          >{ICONS.exportPostman.glyph}</button
+        >
+        <button class="icon-btn sm" title="New folder" on:click={newCollection}
+          >{@html ICONS.newFolder.svg}</button
+        >
+        <button class="icon-btn sm" title="New request" on:click={() => newRequestTab()}
+          >{ICONS.newQuery.glyph}</button
+        >
       </div>
     </div>
     <input
@@ -875,12 +885,25 @@
     display: flex;
     justify-content: space-between;
     align-items: center;
+    flex-wrap: nowrap;
+    gap: 6px;
     padding: 8px;
     font-size: 11px;
     font-weight: 700;
     text-transform: uppercase;
     color: var(--text-secondary);
     border-bottom: 1px solid var(--border);
+  }
+  .sec-head > span {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .sec-actions {
+    display: flex;
+    align-items: center;
+    gap: 2px;
+    flex-shrink: 0;
   }
   .scroll {
     flex: 1;
