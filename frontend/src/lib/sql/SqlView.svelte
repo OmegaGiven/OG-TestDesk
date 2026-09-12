@@ -387,8 +387,8 @@
         <button class="btn primary sm" on:click={() => run()} disabled={tab.running}>
           {tab.running ? 'Running…' : '▶ Run'}
         </button>
-        <button class="btn sm" on:click={saveQuery}>Save</button>
-        <button class="icon-btn" title={ICONS.saveFile.label} on:click={saveToFile}
+        <button class="btn" on:click={saveQuery}>Save</button>
+        <button class="icon-btn big-glyph" title={ICONS.saveFile.label} on:click={saveToFile}
           >{ICONS.saveFile.glyph}</button
         >
         <span class="tb-conn">
@@ -614,6 +614,11 @@
     display: inline-flex;
     align-items: center;
     line-height: 1;
+  }
+  /* the save-to-file glyph reads as a tiny mark at the standard
+     icon-btn size — size it up without growing the 26px button box. */
+  .toolbar :global(.big-glyph) {
+    font-size: 16px;
   }
   .tb-conn {
     height: 26px;
