@@ -6,7 +6,7 @@
   import ResultGrid from './ResultGrid.svelte';
   import SchemaTree from './SchemaTree.svelte';
   import SavedQueries from './SavedQueries.svelte';
-  import ConnectionModal from './ConnectionModal.svelte';
+  import ConnPicker from './ConnPicker.svelte';
   import { api } from '../api.js';
   import { downloadText } from '../export.js';
   import {
@@ -117,7 +117,6 @@
     }
     persistSqlTab(t.id, true);
   }
-  let modal = null; // null | {existing}
   let splitPct = 55;
   let dragging = false;
 
@@ -502,15 +501,10 @@
     {/if}
     {#if !tab}
       <div class="empty">
-        {#if conns.length === 0}
-          <p>Create a connection to start querying.</p>
-          <button class="btn primary" on:click={() => (modal = { existing: null })}>New connection</button>
-        {:else}
-          <p>Open a query tab from a connection in the sidebar.</p>
-          <button class="btn primary" on:click={() => newSqlTab(sidebarConnId || conns[0].id)}>
-            New query
-          </button>
-        {/if}
+        <div class="empty-picker">
+          <p class="empty-hint">No tabs open — pick something to start.</p>
+          <ConnPicker />
+        </div>
       </div>
     {:else}
       <div class="toolbar">
@@ -621,21 +615,6 @@
     {/if}
   </section>
 </div>
-{/if}
-
-{#if modal}
-  <ConnectionModal
-    existing={modal.existing}
-    on:close={() => (modal = null)}
-    on:saved={(e) => {
-      sidebarConnId = e.detail.id;
-      modal = null;
-    }}
-    on:deleted={() => {
-      sidebarConnId = null;
-      modal = null;
-    }}
-  />
 {/if}
 
 <style>
@@ -813,11 +792,27 @@
   .empty {
     flex: 1;
     display: flex;
-    flex-direction: column;
     align-items: center;
     justify-content: center;
-    gap: 12px;
+    overflow: hidden;
+  }
+  .empty-picker {
+    width: 360px;
+    max-height: 80%;
+    display: flex;
+    flex-direction: column;
+    background: var(--surface-1);
+    border: 1px solid var(--border-strong);
+    border-radius: var(--radius);
+    box-shadow: var(--shadow-pop);
+    overflow: hidden;
+  }
+  .empty-hint {
+    margin: 0;
+    padding: 12px 14px 0;
+    font-size: 12px;
     color: var(--text-muted);
+    text-align: center;
   }
   .toolbar {
     display: flex;
