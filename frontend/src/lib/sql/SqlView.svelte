@@ -23,8 +23,73 @@
     historyLoad,
     appearance,
     savedQueries,
-    reloadSavedQueries
+    reloadSavedQueries,
+    splitTabId,
+    closeSplit,
+    draggingSqlTab
   } from '../stores.js';
+
+  // When this instance is one half of a split (rendered via
+  // <svelte:self tabId={...}> below), it shows that specific tab
+  // instead of whatever's globally active. The top-level instance
+  // (no tabId prop) is what +page.svelte mounts. `side` only matters
+  // for a split sub-pane, so a tab dropped on it knows whether to
+  // become the left (primary) or right tab.
+  export let tabId = null;
+  export let side = null; // null | 'left' | 'right'
+
+  // ---- split-screen host (top-level instance only): render two
+  // <svelte:self> side by side, resizable, when a split is active.
+  let hSplitPct = 50;
+  let hDragging = false;
+  let hostEl;
+  function startHDrag() {
+    hDragging = true;
+  }
+  function onHMove(e) {
+    if (!hDragging || !hostEl) return;
+    const rect = hostEl.getBoundingClientRect();
+    hSplitPct = Math.min(80, Math.max(20, ((e.clientX - rect.left) / rect.width) * 100));
+  }
+  function endHDrag() {
+    hDragging = false;
+  }
+
+  // ---- drop a dragged SQL tab onto this pane to open/replace a split
+  let dropSide = null; // 'left' | 'right' | null
+  function onPaneDragOver(e) {
+    if (!$draggingSqlTab) return;
+    e.preventDefault();
+    if (tabId) {
+      dropSide = side;
+      return;
+    }
+    const rect = e.currentTarget.getBoundingClientRect();
+    dropSide = (e.clientX - rect.left) / rect.width < 0.5 ? 'left' : 'right';
+  }
+  function onPaneDragLeave() {
+    dropSide = null;
+  }
+  function onPaneDrop(e) {
+    e.preventDefault();
+    const dragged = $draggingSqlTab;
+    const chosen = dropSide;
+    dropSide = null;
+    draggingSqlTab.set(null);
+    if (!dragged) return;
+    if (tabId) {
+      if (side === 'left') activeSqlTabId.set(dragged.id);
+      else if (side === 'right') splitTabId.set(dragged.id);
+      return;
+    }
+    if (dragged.id === tab?.id) return;
+    if (chosen === 'left') {
+      if (tab) splitTabId.set(tab.id);
+      activeSqlTabId.set(dragged.id);
+    } else {
+      splitTabId.set(dragged.id);
+    }
+  }
 
   let sqOpen =
     typeof location === 'undefined' || !new URLSearchParams(location.search).has('savedqueriesclosed');
@@ -86,7 +151,7 @@
   }
 
   $: conns = $connections;
-  $: tab = $activeSqlTab;
+  $: tab = tabId ? $sqlTabs.find((t) => t.id === tabId) : $activeSqlTab;
   $: tabConn = tab ? conns.find((c) => c.id === tab.connection_id) : null;
   // schema tree + fallbacks follow the active tab's connection
   $: sidebarConn = tabConn || conns[0];
@@ -190,7 +255,7 @@
 
   // page < 0 → full result (no pagination wrapper, capped by max rows)
   async function run(page = 0) {
-    const t = get(activeSqlTab);
+    const t = tab;
     if (!t || t.running) return;
     const conn = get(connections).find((c) => c.id === t.connection_id);
     if (!conn) return;
@@ -235,7 +300,7 @@
   // / filtering client-side) keeps pulling more of the table in.
   let appendFlag = false;
   async function loadMore() {
-    const t = get(activeSqlTab);
+    const t = tab;
     const r = t?.result;
     if (!t || !r || !r.has_more || t.running || !t.execSql) return;
     const conn = get(connections).find((c) => c.id === t.connection_id);
@@ -318,13 +383,14 @@
     });
   }
 
-  // splitter drag
+  // splitter drag (editor vs. result pane, vertical)
+  let workareaEl;
   function startDrag() {
     dragging = true;
   }
   function onMove(e) {
     if (!dragging) return;
-    const host = document.querySelector('.workarea');
+    const host = workareaEl;
     if (!host) return;
     const rect = host.getBoundingClientRect();
     splitPct = Math.min(85, Math.max(15, ((e.clientY - rect.top) / rect.height) * 100));
@@ -338,38 +404,72 @@
   on:mousemove={(e) => {
     onMove(e);
     onSidebarMove(e);
+    onHMove(e);
   }}
   on:mouseup={() => {
     endDrag();
     endSidebarDrag();
+    endHDrag();
   }}
 />
 
+{#if !tabId && $splitTabId}
+  <div class="split-host" bind:this={hostEl}>
+    <div class="split-pane" style="width:{hSplitPct}%">
+      <svelte:self tabId={$activeSqlTabId} side="left" />
+    </div>
+    <div class="split-resizer" on:mousedown={startHDrag} role="separator" tabindex="-1">
+      <button class="split-close" title="Close split" on:click|stopPropagation={closeSplit}
+        >{ICONS.closeTab.glyph}</button
+      >
+    </div>
+    <div class="split-pane" style="width:{100 - hSplitPct}%">
+      <svelte:self tabId={$splitTabId} side="right" />
+    </div>
+  </div>
+{:else}
 <div class="sql">
-  <aside class="sidebar" style="width:{sidebarW}px">
-    <div class="sq-section" class:open={sqOpen}>
-      <button class="sec-head sq-toggle" on:click={() => (sqOpen = !sqOpen)}>
-        <span class="chev">{sqOpen ? ICONS.expandOpen.glyph : ICONS.expandClosed.glyph}</span>
-        <span>Saved queries</span>
-        <span class="sq-badge">{$savedQueries.length}</span>
-      </button>
-      {#if sqOpen}
-        <div class="sq-body">
-          <SavedQueries on:open={openSavedQuery} />
+  {#if !tabId}
+    <aside class="sidebar" style="width:{sidebarW}px">
+      <div class="sq-section" class:open={sqOpen}>
+        <button class="sec-head sq-toggle" on:click={() => (sqOpen = !sqOpen)}>
+          <span class="chev">{sqOpen ? ICONS.expandOpen.glyph : ICONS.expandClosed.glyph}</span>
+          <span>Saved queries</span>
+          <span class="sq-badge">{$savedQueries.length}</span>
+        </button>
+        {#if sqOpen}
+          <div class="sq-body">
+            <SavedQueries on:open={openSavedQuery} />
+          </div>
+        {/if}
+      </div>
+
+      {#if sidebarConn}
+        <div class="schema-host">
+          <SchemaTree conn={sidebarConn} on:open={openRelation} />
         </div>
       {/if}
-    </div>
+    </aside>
 
-    {#if sidebarConn}
-      <div class="schema-host">
-        <SchemaTree conn={sidebarConn} on:open={openRelation} />
+    <div class="sidebar-resizer" on:mousedown={startSidebarDrag} role="separator" tabindex="-1"></div>
+  {/if}
+
+  <section
+    class="main"
+    on:dragover={onPaneDragOver}
+    on:dragleave={onPaneDragLeave}
+    on:drop={onPaneDrop}
+  >
+    {#if $draggingSqlTab && $draggingSqlTab.id !== tab?.id && (tabId || !$splitTabId)}
+      <div class="drop-overlay">
+        {#if !tabId}
+          <div class="dz dz-left" class:hot={dropSide === 'left'}>Split left</div>
+          <div class="dz dz-right" class:hot={dropSide === 'right'}>Split right</div>
+        {:else}
+          <div class="dz dz-full" class:hot={dropSide === side}>Replace this pane</div>
+        {/if}
       </div>
     {/if}
-  </aside>
-
-  <div class="sidebar-resizer" on:mousedown={startSidebarDrag} role="separator" tabindex="-1"></div>
-
-  <section class="main">
     {#if !tab}
       <div class="empty">
         {#if conns.length === 0}
@@ -393,6 +493,9 @@
         >
         <span class="tb-conn" style="--c: {tabConn?.color || 'var(--conn-slate)'}">
           {tabConn?.nickname}
+        </span>
+        <span class="tb-conn tb-tab" style="--c: {tabConn?.color || 'var(--conn-slate)'}" title={tab.title}>
+          {tab.dirty ? '•' : ''}{tab.title}
         </span>
         {#if dbTime}
           <span
@@ -444,7 +547,7 @@
         </div>
       {/if}
 
-      <div class="workarea">
+      <div class="workarea" bind:this={workareaEl}>
         <div class="pane editor-pane" style="height:{splitPct}%">
           <CodeEditor
             value={tab.sql_text}
@@ -488,6 +591,7 @@
     {/if}
   </section>
 </div>
+{/if}
 
 {#if modal}
   <ConnectionModal
@@ -577,10 +681,79 @@
     overflow: hidden;
   }
   .main {
+    position: relative;
     flex: 1;
     display: flex;
     flex-direction: column;
     overflow: hidden;
+  }
+  .split-host {
+    display: flex;
+    height: 100%;
+    overflow: hidden;
+  }
+  .split-pane {
+    height: 100%;
+    min-width: 0;
+    overflow: hidden;
+  }
+  .split-resizer {
+    position: relative;
+    width: 5px;
+    flex-shrink: 0;
+    cursor: col-resize;
+    background: var(--border);
+  }
+  .split-resizer:hover {
+    background: var(--tool-sql-text);
+  }
+  .split-close {
+    position: absolute;
+    top: 6px;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 18px;
+    height: 18px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 50%;
+    border: 1px solid var(--border-strong);
+    background: var(--surface-1);
+    color: var(--text-secondary);
+    font-size: 11px;
+    line-height: 1;
+    cursor: pointer;
+    z-index: 10;
+  }
+  .split-close:hover {
+    background: var(--surface-3);
+    color: var(--text-primary);
+  }
+  .drop-overlay {
+    position: absolute;
+    inset: 0;
+    z-index: 40;
+    display: flex;
+    background: color-mix(in srgb, var(--surface-0) 55%, transparent);
+  }
+  .dz {
+    flex: 1;
+    margin: 8px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border: 2px dashed var(--border-strong);
+    border-radius: var(--radius);
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--text-muted);
+    pointer-events: none;
+  }
+  .dz.hot {
+    border-color: var(--tool-sql-text);
+    background: var(--tool-sql-tint);
+    color: var(--tool-sql-text);
   }
   .empty {
     flex: 1;
@@ -626,6 +799,12 @@
     line-height: 26px;
     color: color-mix(in srgb, var(--c, var(--text-secondary)) 65%, var(--text-primary));
     font-weight: 600;
+  }
+  .tb-tab {
+    max-width: 180px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
   .tb-tz {
     height: 26px;

@@ -141,6 +141,25 @@ export async function loadSchemas(conn, force = false) {
 
 export const connMenuOpen = writable(false);
 
+/* --------------------------------------------------- SQL split editor */
+// The SQL view can show a second query tab side by side with the active
+// one. `splitTabId` is that second tab's id, or null when there's no
+// split — the primary/left pane is always just $activeSqlTabId. Not
+// persisted; a reload starts back at a single pane.
+export const splitTabId = writable(null);
+
+export function openSplit(tabId) {
+  splitTabId.set(tabId);
+}
+export function closeSplit() {
+  splitTabId.set(null);
+}
+
+/** Set (dragstart) / cleared (dragend or drop) by the top bar while a SQL
+ * tab is being dragged, purely so the SQL editor can show a drop-zone
+ * highlight for "drop here to split left/right" while the drag is live. */
+export const draggingSqlTab = writable(null);
+
 /** Whether the shared Inspector "tab" is currently open on the top bar.
  * Closed like any other tab; reopened via the + menu's Inspector row. */
 const INSPECTOR_OPEN_KEY = 'ogtestdesk.inspectorOpen';
@@ -352,6 +371,9 @@ export async function closeSqlTab(id) {
   sqlTabs.set(tabs);
   if (get(activeSqlTabId) === id) {
     activeSqlTabId.set(tabs[tabs.length - 1]?.id || null);
+  }
+  if (get(splitTabId) === id) {
+    splitTabId.set(null);
   }
 }
 

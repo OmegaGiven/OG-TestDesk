@@ -23,7 +23,9 @@
     ensureTabOrder,
     reorderTab,
     tabOrderIndex,
-    INSPECTOR_TAB_ID
+    INSPECTOR_TAB_ID,
+    openSplit,
+    draggingSqlTab
   } from '../stores.js';
   import { ICONS } from '../icons.js';
 
@@ -147,6 +149,10 @@
     try {
       e.dataTransfer.setData('text/plain', `${kind}:${tab.id}`);
     } catch {}
+    if (kind === 'sql') draggingSqlTab.set(tab);
+  }
+  function onDragEnd() {
+    draggingSqlTab.set(null);
   }
   function onGroupDragOver(key, e) {
     e.preventDefault();
@@ -158,6 +164,7 @@
     draggedGroup = null;
     draggedTab = null;
     dragOverKey = null;
+    draggingSqlTab.set(null);
   }
   function onTabDragOver(kind, tab, e) {
     if (!draggedTab) return;
@@ -175,6 +182,22 @@
     draggedTab = null;
     dragOverKey = null;
     dragOverTab = null;
+    draggingSqlTab.set(null);
+  }
+
+  // ---- right-click a SQL tab: "Split screen"
+  let ctxMenu = null; // { x, y, tab }
+  function onTabContextMenu(kind, tab, e) {
+    if (kind !== 'sql') return;
+    e.preventDefault();
+    ctxMenu = { x: e.clientX, y: e.clientY, tab };
+  }
+  function splitFromCtxMenu() {
+    if (ctxMenu) openSplit(ctxMenu.tab.id);
+    ctxMenu = null;
+  }
+  function onWindowKey(e) {
+    if (e.key === 'Escape') ctxMenu = null;
   }
 
   // ---- horizontal scroll without a scrollbar
@@ -223,6 +246,8 @@
   $: if (renderGroups) tick().then(refresh);
 </script>
 
+<svelte:window on:keydown={onWindowKey} />
+
 <nav class="topnav">
   <button
     class="icon-btn plus"
@@ -266,10 +291,12 @@
               class:drag-over={dragOverTab === tabKey('sql', item.tab)}
               draggable="true"
               on:dragstart|stopPropagation={(e) => onTabDragStart('sql', item.tab, e)}
+              on:dragend={onDragEnd}
               on:dragover={(e) => onTabDragOver('sql', item.tab, e)}
               on:dragleave={() => (dragOverTab = null)}
               on:drop|stopPropagation={(e) => onTabDrop('sql', item.tab, g.key, e)}
               on:click={() => selectTab(item.tab.id)}
+              on:contextmenu={(e) => onTabContextMenu('sql', item.tab, e)}
               title={item.tab.title}
             >
               {item.tab.dirty ? '•' : ''}{item.tab.title}
@@ -376,6 +403,14 @@
     on:click={() => nudge(1)}>›</button
   >
 </nav>
+
+{#if ctxMenu}
+  <div class="ctx-backdrop" on:mousedown={() => (ctxMenu = null)} role="presentation">
+    <div class="ctx-menu" style="left:{ctxMenu.x}px; top:{ctxMenu.y}px">
+      <button on:click={splitFromCtxMenu}>Split screen</button>
+    </div>
+  </div>
+{/if}
 
 <style>
   .topnav {
@@ -527,5 +562,34 @@
   }
   .x:hover {
     opacity: 1;
+  }
+  .ctx-backdrop {
+    position: fixed;
+    inset: 0;
+    z-index: 900;
+  }
+  .ctx-menu {
+    position: fixed;
+    min-width: 140px;
+    background: var(--surface-1);
+    border: 1px solid var(--border-strong);
+    border-radius: var(--radius-sm);
+    box-shadow: var(--shadow-pop);
+    padding: 4px;
+  }
+  .ctx-menu button {
+    display: block;
+    width: 100%;
+    text-align: left;
+    background: none;
+    border: none;
+    cursor: pointer;
+    padding: 6px 8px;
+    font-size: 12px;
+    color: var(--text-primary);
+    border-radius: var(--radius-sm);
+  }
+  .ctx-menu button:hover {
+    background: var(--surface-3);
   }
 </style>
