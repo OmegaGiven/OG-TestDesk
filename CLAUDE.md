@@ -63,8 +63,20 @@ if you see them anywhere — they're not the direction.
 The app can host a local MCP server so on-device AI tools use its stored
 connections/requests **without seeing secrets** — the server executes
 queries and requests itself. HTTP+SSE transport (`GET /sse`, `POST
-/message`), bound to `127.0.0.1:<port>` (default 7788), bearer-token
-gated (token in `?token=` or `Authorization`). Config + per-connection
+/message`), bound to `127.0.0.1:<port>` (default 7788). Two auth paths
+accepted side by side on every request: the static config token
+(`?token=` or `Authorization: Bearer`, shown in Settings — what
+`claude mcp add` uses) OR a minimal OAuth 2.0 layer (metadata discovery
+at `/.well-known/oauth-authorization-server` + `oauth-protected-resource`,
+dynamic client registration at `/register`, authorization-code + PKCE at
+`/authorize` + `/token`) for clients that require OAuth for a remote
+connector — ChatGPT's connector framework, notably. Since this is a
+single-user local app, "authorize" is a plain approve/deny page, no
+login. OAuth state (registered clients, codes, tokens) is in-memory
+only — resets on restart, which MCP OAuth clients handle transparently
+by redoing discovery. A 401 carries a `WWW-Authenticate:
+resource_metadata=...` header so OAuth-aware clients auto-discover the
+flow. Config + per-connection
 ACLs live in `app_state` (`mcp_config`, `mcp_connections`); auto-starts on
 launch if left enabled. Tools: `list_connections`, `list_schemas`,
 `list_columns`, `run_query` (+ `list_saved_requests`, `run_saved_request`,
