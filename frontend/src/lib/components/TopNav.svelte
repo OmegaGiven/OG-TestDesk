@@ -9,7 +9,6 @@
     persistSqlTab,
     requestTabs,
     activeRequestTabId,
-    newRequestTab,
     closeRequestTab,
     persistRequestTab,
     connMenuOpen,
@@ -39,12 +38,6 @@
     activeTool.set('requests');
     activeRequestTabId.set(id);
     persistRequestTab(id, true);
-  }
-  async function addReqTab() {
-    activeTool.set('requests');
-    try {
-      await newRequestTab();
-    } catch (e) {}
   }
   function closeReq(id, e) {
     e.stopPropagation();
@@ -302,8 +295,6 @@
         >
       </button>
     {/if}
-
-    <button class="icon-btn sm loose-add" title="New request" on:click={addReqTab}>+</button>
   </div>
 
   <button
@@ -456,9 +447,6 @@
     border-radius: 3px;
     box-shadow: inset 0 0 0 1px currentColor;
     display: inline-block;
-  }
-  .loose-add {
-    flex-shrink: 0;
   }
   .x {
     font-size: 12px;
