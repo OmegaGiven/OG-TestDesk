@@ -451,37 +451,39 @@
   </div>
 {:else}
 <div class="sql" bind:this={rootEl}>
-  <aside class="sidebar" class:collapsed={sidebarCollapsed} style="width:{sidebarCollapsed ? 0 : sidebarW}px">
-    <div class="sq-section" class:open={sqOpen}>
-      <button class="sec-head sq-toggle" on:click={() => (sqOpen = !sqOpen)}>
-        <span class="chev">{sqOpen ? ICONS.expandOpen.glyph : ICONS.expandClosed.glyph}</span>
-        <span>Saved queries</span>
-        <span class="sq-badge">{$savedQueries.length}</span>
-      </button>
-      {#if sqOpen}
-        <div class="sq-body">
-          <SavedQueries on:open={openSavedQuery} />
+  {#if tab}
+    <aside class="sidebar" class:collapsed={sidebarCollapsed} style="width:{sidebarCollapsed ? 0 : sidebarW}px">
+      <div class="sq-section" class:open={sqOpen}>
+        <button class="sec-head sq-toggle" on:click={() => (sqOpen = !sqOpen)}>
+          <span class="chev">{sqOpen ? ICONS.expandOpen.glyph : ICONS.expandClosed.glyph}</span>
+          <span>Saved queries</span>
+          <span class="sq-badge">{$savedQueries.length}</span>
+        </button>
+        {#if sqOpen}
+          <div class="sq-body">
+            <SavedQueries on:open={openSavedQuery} />
+          </div>
+        {/if}
+      </div>
+
+      {#if sidebarConn}
+        <div class="schema-host">
+          <SchemaTree conn={sidebarConn} on:open={openRelation} />
         </div>
       {/if}
+    </aside>
+
+    <div
+      class="sidebar-resizer"
+      class:collapsed={sidebarCollapsed}
+      on:mousedown={startSidebarDrag}
+      title="Drag to resize · click to {sidebarCollapsed ? 'expand' : 'collapse'}"
+      role="separator"
+      tabindex="-1"
+    >
+      <span class="resizer-chev">{sidebarCollapsed ? '›' : '‹'}</span>
     </div>
-
-    {#if sidebarConn}
-      <div class="schema-host">
-        <SchemaTree conn={sidebarConn} on:open={openRelation} />
-      </div>
-    {/if}
-  </aside>
-
-  <div
-    class="sidebar-resizer"
-    class:collapsed={sidebarCollapsed}
-    on:mousedown={startSidebarDrag}
-    title="Drag to resize · click to {sidebarCollapsed ? 'expand' : 'collapse'}"
-    role="separator"
-    tabindex="-1"
-  >
-    <span class="resizer-chev">{sidebarCollapsed ? '›' : '‹'}</span>
-  </div>
+  {/if}
 
   <section
     class="main"

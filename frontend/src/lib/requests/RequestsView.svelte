@@ -2,6 +2,7 @@
   import { onMount, tick } from 'svelte';
   import CodeEditor from '../components/CodeEditor.svelte';
   import EnvModal from './EnvModal.svelte';
+  import ConnPicker from '../sql/ConnPicker.svelte';
   import { api } from '../api.js';
   import { parsePostman, toPostmanCollection } from './postman.js';
   import { ICONS } from '../icons.js';
@@ -695,6 +696,14 @@
   <div class="sidebar-resizer" on:mousedown={startSidebarDrag} role="separator" tabindex="-1"></div>
 
   <section class="main">
+    {#if $requestTabs.length === 0}
+      <div class="empty">
+        <div class="empty-picker">
+          <p class="empty-hint">No tabs open — pick something to start.</p>
+          <ConnPicker />
+        </div>
+      </div>
+    {:else}
     <div class="urlbar">
       <select class="method" bind:value={draft.method} style="color:{methodColor}">
         {#each METHODS as m}<option value={m}>{m}</option>{/each}
@@ -861,6 +870,7 @@
         {/if}
       </div>
     </div>
+    {/if}
   </section>
 </div>
 
@@ -1028,6 +1038,31 @@
     display: flex;
     flex-direction: column;
     overflow: hidden;
+  }
+  .empty {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    overflow: hidden;
+  }
+  .empty-picker {
+    width: 360px;
+    max-height: 80%;
+    display: flex;
+    flex-direction: column;
+    background: var(--surface-1);
+    border: 1px solid var(--border-strong);
+    border-radius: var(--radius);
+    box-shadow: var(--shadow-pop);
+    overflow: hidden;
+  }
+  .empty-hint {
+    margin: 0;
+    padding: 12px 14px 0;
+    font-size: 12px;
+    color: var(--text-muted);
+    text-align: center;
   }
   .urlbar {
     display: flex;
