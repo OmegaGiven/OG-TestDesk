@@ -612,17 +612,17 @@
       <span>Collections</span>
       <div class="sec-actions">
         <button
-          class="icon-btn sm big-glyph"
+          class="icon-btn big-glyph"
           title={ICONS.importPostman.label}
           on:click={() => fileInput.click()}>{ICONS.importPostman.glyph}</button
         >
-        <button class="icon-btn sm big-glyph" title={ICONS.exportPostman.label} on:click={exportPostman}
+        <button class="icon-btn big-glyph" title={ICONS.exportPostman.label} on:click={exportPostman}
           >{ICONS.exportPostman.glyph}</button
         >
-        <button class="icon-btn sm" title="New folder" on:click={newCollection}
+        <button class="icon-btn" title="New folder" on:click={newCollection}
           >{@html ICONS.newFolder.svg}</button
         >
-        <button class="icon-btn sm" title="New request" on:click={() => newRequestTab()}
+        <button class="icon-btn" title="New request" on:click={() => newRequestTab()}
           >{ICONS.newQuery.glyph}</button
         >
       </div>
@@ -908,7 +908,14 @@
   /* import/export glyphs (⇩ ⇧) read as tiny arrows at the standard
      icon-btn size — size them up without growing the button box. */
   .sec-actions :global(.big-glyph) {
-    font-size: 16px;
+    font-size: 18px;
+  }
+  /* the new-folder icon is an inline SVG with its own fixed w/h — scale
+     it up to match the bigger buttons here without touching the size
+     used everywhere else this icon appears. */
+  .sec-actions :global(.icon-btn svg) {
+    width: 16px;
+    height: 16px;
   }
   .scroll {
     flex: 1;
