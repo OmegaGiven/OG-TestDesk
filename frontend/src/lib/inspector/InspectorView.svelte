@@ -14,6 +14,36 @@
   let rawMode = false;
   let rawText = '';
 
+  // ---- "Selected node" detail panel: draggable/resizable width, same
+  // pattern as the SQL view's sidebar resizer
+  const DETAIL_W_KEY = 'ogtestdesk.inspector.detailW';
+  function loadDetailW() {
+    try {
+      const n = Number(localStorage.getItem(DETAIL_W_KEY));
+      return n >= 220 && n <= 640 ? n : 320;
+    } catch {
+      return 320;
+    }
+  }
+  let detailW = loadDetailW();
+  let draggingDetail = false;
+  let bodyEl;
+  function startDetailDrag() {
+    draggingDetail = true;
+  }
+  function onDetailMove(e) {
+    if (!draggingDetail || !bodyEl) return;
+    const rect = bodyEl.getBoundingClientRect();
+    detailW = Math.min(640, Math.max(220, rect.right - e.clientX));
+  }
+  function endDetailDrag() {
+    if (!draggingDetail) return;
+    draggingDetail = false;
+    try {
+      localStorage.setItem(DETAIL_W_KEY, String(Math.round(detailW)));
+    } catch {}
+  }
+
   if (typeof location !== 'undefined') {
     const q = new URLSearchParams(location.search);
     const raw = q.get('inspectraw');
@@ -203,6 +233,11 @@
   }
 </script>
 
+<svelte:window
+  on:mousemove={onDetailMove}
+  on:mouseup={endDetailDrag}
+/>
+
 <div class="inspector">
   <div class="toolbar">
     <div class="modes">
@@ -231,7 +266,7 @@
     </button>
   </div>
 
-  <div class="body">
+  <div class="body" bind:this={bodyEl}>
     <div class="content">
       {#if rawMode}
         <div class="raw-tools">
@@ -330,7 +365,9 @@
       {/if}
     </div>
 
-    <aside class="detail">
+    <div class="detail-resizer" on:mousedown={startDetailDrag} role="separator" tabindex="-1"></div>
+
+    <aside class="detail" style="width:{detailW}px">
       {#if selected}
         <div class="d-head">Selected node</div>
         <div class="d-field"><span>Path</span><code>{selected.path}</code></div>
@@ -415,9 +452,19 @@
   }
   .content {
     flex: 1;
+    min-width: 0;
     overflow: hidden;
     display: flex;
     flex-direction: column;
+  }
+  .detail-resizer {
+    width: 5px;
+    flex-shrink: 0;
+    cursor: col-resize;
+    background: var(--border);
+  }
+  .detail-resizer:hover {
+    background: var(--tool-inspector-text);
   }
   .tree-scroll,
   .table-scroll {
@@ -558,7 +605,6 @@
   .detail {
     width: 320px;
     flex-shrink: 0;
-    border-left: 1px solid var(--border);
     background: var(--surface-1);
     overflow: auto;
     padding: 10px;
