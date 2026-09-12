@@ -13,6 +13,22 @@ const SERVICE: &str = "OGTestDesk";
 /// [`SecretsStore::init_fallback`].
 static FALLBACK_DIR: OnceLock<PathBuf> = OnceLock::new();
 
+/// Set the first time a keychain call fails for a reason other than
+/// "no such entry" — from then on we stop trying the keychain at all for
+/// the rest of this run. Some Linux Secret Service setups are lopsided:
+/// writes to the default collection succeed silently, but a *read*
+/// needs the collection unlocked and there's no prompt agent running to
+/// unlock it (a bare/minimal desktop with no `gnome-keyring`/`kwallet`
+/// prompter), so every read fails while writes keep quietly "working" —
+/// which otherwise means every single connection produces its own
+/// keychain error, repeatedly, for the whole session. Once we've seen
+/// real evidence the keychain can't be trusted, commit to the file
+/// fallback for both reads and writes so things are at least
+/// consistent — a password set after that point is reliably readable
+/// again, instead of writes and reads silently fighting over two
+/// different backends.
+static KEYCHAIN_BROKEN: OnceLock<()> = OnceLock::new();
+
 /// Which backend a secret operation actually used.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
 #[serde(rename_all = "kebab-case")]
@@ -48,15 +64,24 @@ impl SecretsStore {
     }
 
     pub fn set(connection_id: &str, secret: &str) -> Result<()> {
+        if KEYCHAIN_BROKEN.get().is_some() {
+            return Self::file_set(connection_id, secret);
+        }
         match Self::keychain_set(connection_id, secret) {
             Ok(()) => Ok(()),
-            Err(e) => Self::file_set(connection_id, secret).with_context(|| {
-                format!("OS keychain unavailable ({e}); encrypted-file fallback also failed")
-            }),
+            Err(e) => {
+                let _ = KEYCHAIN_BROKEN.set(());
+                Self::file_set(connection_id, secret).with_context(|| {
+                    format!("OS keychain unavailable ({e}); encrypted-file fallback also failed")
+                })
+            }
         }
     }
 
     pub fn get(connection_id: &str) -> Result<Option<String>> {
+        if KEYCHAIN_BROKEN.get().is_some() {
+            return Self::file_get(connection_id);
+        }
         match Self::keychain_get(connection_id) {
             Ok(pw) => Ok(Some(pw)),
             Err(keyring::Error::NoEntry) => Self::file_get(connection_id),
@@ -66,20 +91,27 @@ impl SecretsStore {
                 // regains focus, e.g. after a screen lock, is a common
                 // one on Linux) is NOT the same thing as "this connection
                 // has no password". Retry once — most of these self-heal
-                // immediately — before falling back.
+                // immediately — before giving up on the keychain for the
+                // rest of this run.
                 if let Ok(pw) = Self::keychain_get(connection_id) {
                     return Ok(Some(pw));
                 }
+                let _ = KEYCHAIN_BROKEN.set(());
                 match Self::file_get(connection_id) {
                     // The file fallback only ever has an entry if `set()`
                     // wrote there because the keychain was unavailable at
                     // save time. If it's empty too, this connection's
-                    // password genuinely lives in the keychain and we
-                    // just can't reach it right now — say so, rather than
-                    // silently returning None and letting the caller open
-                    // a passwordless connection that fails downstream
-                    // with a confusing "password authentication failed".
-                    Ok(None) => Err(e).context("OS keychain unavailable and no local fallback secret found"),
+                    // password was saved to the keychain while it still
+                    // worked and is now stuck there — say so plainly
+                    // rather than silently returning None and letting the
+                    // caller open a passwordless connection that fails
+                    // downstream with a confusing "password authentication
+                    // failed". Re-entering the password (Edit connection)
+                    // writes it to the file store instead from now on.
+                    Ok(None) => Err(e).context(
+                        "OS keychain unavailable and no local fallback secret found — \
+                         re-enter this connection's password (Edit connection) to fix it",
+                    ),
                     other => other,
                 }
             }
@@ -91,10 +123,17 @@ impl SecretsStore {
     }
 
     pub fn delete(connection_id: &str) -> Result<()> {
-        if let Ok(entry) = Entry::new(SERVICE, connection_id) {
-            match entry.delete_credential() {
-                Ok(()) | Err(keyring::Error::NoEntry) => {}
-                Err(e) => return Err(e).context("deleting secret from keychain"),
+        // Best-effort: always also try the file store regardless of
+        // whether the keychain attempt worked, so a connection deleted
+        // (or having its password cleared) while the keychain is
+        // unreachable doesn't leave a stale file-fallback copy behind.
+        if KEYCHAIN_BROKEN.get().is_none() {
+            if let Ok(entry) = Entry::new(SERVICE, connection_id) {
+                if let Err(e) = entry.delete_credential() {
+                    if !matches!(e, keyring::Error::NoEntry) {
+                        let _ = KEYCHAIN_BROKEN.set(());
+                    }
+                }
             }
         }
         Self::file_delete(connection_id)
