@@ -612,11 +612,11 @@
       <span>Collections</span>
       <div class="sec-actions">
         <button
-          class="icon-btn sm"
+          class="icon-btn sm big-glyph"
           title={ICONS.importPostman.label}
           on:click={() => fileInput.click()}>{ICONS.importPostman.glyph}</button
         >
-        <button class="icon-btn sm" title={ICONS.exportPostman.label} on:click={exportPostman}
+        <button class="icon-btn sm big-glyph" title={ICONS.exportPostman.label} on:click={exportPostman}
           >{ICONS.exportPostman.glyph}</button
         >
         <button class="icon-btn sm" title="New folder" on:click={newCollection}
@@ -904,6 +904,11 @@
     align-items: center;
     gap: 2px;
     flex-shrink: 0;
+  }
+  /* import/export glyphs (⇩ ⇧) read as tiny arrows at the standard
+     icon-btn size — size them up without growing the button box. */
+  .sec-actions :global(.big-glyph) {
+    font-size: 16px;
   }
   .scroll {
     flex: 1;
