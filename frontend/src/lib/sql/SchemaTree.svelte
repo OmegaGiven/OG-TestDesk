@@ -13,6 +13,10 @@
   let openSchemas = new Set();
   let openRels = new Set(); // key `${schema}.${rel}`
   let cols = {}; // key -> Column[]
+  let lastLoadConn = null; // guard `load()` by id, not object identity —
+  // `conn` gets a brand-new object every time the connections list is
+  // refetched (e.g. on window focus), which would otherwise re-run this
+  // on every focus even though nothing about the connection changed
 
   // "Tables" vs "Functions" tab
   let browseTab = 'tables';
@@ -69,7 +73,10 @@
   if (typeof location !== 'undefined' && new URLSearchParams(location.search).get('browsetab') === 'functions') {
     browseTab = 'functions';
   }
-  $: if (conn) load();
+  $: if (conn && conn.id !== lastLoadConn) {
+    lastLoadConn = conn.id;
+    load();
+  }
   $: if (conn && devFkMenu && !fkMenuOpen) openFks();
   $: if (conn && conn.id !== lastFkConn) {
     fks = null;

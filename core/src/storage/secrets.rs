@@ -57,11 +57,37 @@ impl SecretsStore {
     }
 
     pub fn get(connection_id: &str) -> Result<Option<String>> {
-        match Entry::new(SERVICE, connection_id).and_then(|e| e.get_password()) {
+        match Self::keychain_get(connection_id) {
             Ok(pw) => Ok(Some(pw)),
             Err(keyring::Error::NoEntry) => Self::file_get(connection_id),
-            Err(_) => Self::file_get(connection_id),
+            Err(e) => {
+                // A transient keychain error (the Secret Service session
+                // hasn't fully come back yet right after the window
+                // regains focus, e.g. after a screen lock, is a common
+                // one on Linux) is NOT the same thing as "this connection
+                // has no password". Retry once — most of these self-heal
+                // immediately — before falling back.
+                if let Ok(pw) = Self::keychain_get(connection_id) {
+                    return Ok(Some(pw));
+                }
+                match Self::file_get(connection_id) {
+                    // The file fallback only ever has an entry if `set()`
+                    // wrote there because the keychain was unavailable at
+                    // save time. If it's empty too, this connection's
+                    // password genuinely lives in the keychain and we
+                    // just can't reach it right now — say so, rather than
+                    // silently returning None and letting the caller open
+                    // a passwordless connection that fails downstream
+                    // with a confusing "password authentication failed".
+                    Ok(None) => Err(e).context("OS keychain unavailable and no local fallback secret found"),
+                    other => other,
+                }
+            }
         }
+    }
+
+    fn keychain_get(connection_id: &str) -> std::result::Result<String, keyring::Error> {
+        Entry::new(SERVICE, connection_id).and_then(|e| e.get_password())
     }
 
     pub fn delete(connection_id: &str) -> Result<()> {
