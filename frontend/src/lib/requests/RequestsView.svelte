@@ -64,6 +64,17 @@
   $: if ($activeRequestTab && $activeRequestTab.id !== loadedTabId) {
     hydrateDraft($activeRequestTab);
   }
+  // The tab we're tracking got closed out from under us (loadedTabId
+  // isn't reset by closing — only by hydrating a different tab). A
+  // pending debounced flush (below) would otherwise still fire later
+  // and re-upsert this tab's row via persistRequestTab, resurrecting it
+  // — most visibly right after a window focus/reload race repopulates
+  // $requestTabs with the not-yet-deleted row just before this stale
+  // flush lands. Cancel it and stop tracking the dead id.
+  $: if (loadedTabId && !$requestTabs.some((t) => t.id === loadedTabId)) {
+    clearTimeout(flushTimer);
+    loadedTabId = null;
+  }
 
   let hydrating = false;
   function hydrateDraft(t) {
