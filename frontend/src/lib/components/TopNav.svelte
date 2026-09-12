@@ -136,11 +136,17 @@
     draggedGroup = key;
     draggedTab = null;
     e.dataTransfer.effectAllowed = 'move';
+    try {
+      e.dataTransfer.setData('text/plain', `group:${key}`);
+    } catch {}
   }
   function onTabDragStart(kind, tab, e) {
     draggedTab = { kind, tab };
     draggedGroup = null;
     e.dataTransfer.effectAllowed = 'move';
+    try {
+      e.dataTransfer.setData('text/plain', `${kind}:${tab.id}`);
+    } catch {}
   }
   function onGroupDragOver(key, e) {
     e.preventDefault();
