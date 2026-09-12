@@ -391,8 +391,7 @@
         <button class="icon-btn big-glyph" title={ICONS.saveFile.label} on:click={saveToFile}
           >{ICONS.saveFile.glyph}</button
         >
-        <span class="tb-conn">
-          <span class="dot" style="background:{tabConn?.color || 'var(--conn-slate)'}" />
+        <span class="tb-conn" style="--c: {tabConn?.color || 'var(--conn-slate)'}">
           {tabConn?.nickname}
         </span>
         {#if dbTime}
@@ -573,12 +572,6 @@
     overflow: hidden;
     border-top: 1px solid var(--border);
   }
-  .dot {
-    width: 8px;
-    height: 8px;
-    border-radius: 50%;
-    flex-shrink: 0;
-  }
   .schema-host {
     flex: 1;
     overflow: hidden;
@@ -625,18 +618,14 @@
     box-sizing: border-box;
     display: inline-flex;
     align-items: center;
-    gap: 5px;
     padding: 0 9px;
     border-radius: var(--radius-sm);
-    border: 1px solid var(--border-strong);
-    background: var(--surface-2);
+    background: color-mix(in srgb, var(--c, var(--conn-slate)) 22%, var(--surface-2));
+    box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--c, var(--conn-slate)) 38%, transparent);
     font-size: 11px;
     line-height: 26px;
-    color: var(--text-secondary);
+    color: color-mix(in srgb, var(--c, var(--text-secondary)) 65%, var(--text-primary));
     font-weight: 600;
-  }
-  .tb-conn .dot {
-    align-self: center;
   }
   .tb-tz {
     height: 26px;
