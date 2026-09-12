@@ -382,6 +382,15 @@
     const connId =
       $connections.find((c) => c.id === s.connection_id)?.id || sidebarConnId || $connections[0]?.id;
     if (!connId) return;
+    // already open? focus that tab instead of opening a duplicate
+    const existing = get(sqlTabs).find(
+      (t) => t.connection_id === connId && t.title === s.name
+    );
+    if (existing) {
+      activeSqlTabId.set(existing.id);
+      persistSqlTab(existing.id, true);
+      return;
+    }
     const t = await newSqlTab(connId, s.sql_text);
     touchSqlTab(t.id, { title: s.name, dirty: false });
     persistSqlTab(t.id, true);
