@@ -20,6 +20,7 @@ use tauri::{Manager, State};
 struct AppState {
     metadata: Arc<MetadataStore>,
     mcp: Arc<AsyncMutex<Option<McpHandle>>>,
+    exports_dir: std::path::PathBuf,
 }
 
 async fn load_mcp_config(meta: &MetadataStore) -> McpConfig {
@@ -628,7 +629,9 @@ async fn start_mcp(state: &State<'_, AppState>) -> R<()> {
     if guard.is_some() {
         return Ok(());
     }
-    let handle = mcp::start(state.metadata.clone(), cfg).await.map_err(err)?;
+    let handle = mcp::start(state.metadata.clone(), cfg, state.exports_dir.clone())
+        .await
+        .map_err(err)?;
     *guard = Some(handle);
     Ok(())
 }
@@ -710,13 +713,14 @@ async fn main() {
         .await
         .expect("open metadata store");
     let metadata = Arc::new(metadata);
+    let exports_dir = app_data_dir.join("exports");
 
     // Auto-start the MCP server if it was left enabled.
     let mcp_slot: Arc<AsyncMutex<Option<McpHandle>>> = Arc::new(AsyncMutex::new(None));
     {
         let cfg = load_mcp_config(&metadata).await;
         if cfg.enabled {
-            match mcp::start(metadata.clone(), cfg).await {
+            match mcp::start(metadata.clone(), cfg, exports_dir.clone()).await {
                 Ok(h) => *mcp_slot.lock().await = Some(h),
                 Err(e) => eprintln!("[mcp] failed to auto-start: {e}"),
             }
@@ -734,6 +738,7 @@ async fn main() {
     let managed = AppState {
         metadata: metadata.clone(),
         mcp: mcp_slot,
+        exports_dir,
     };
 
     tauri::Builder::default()

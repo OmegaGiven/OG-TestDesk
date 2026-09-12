@@ -68,9 +68,18 @@ gated (token in `?token=` or `Authorization`). Config + per-connection
 ACLs live in `app_state` (`mcp_config`, `mcp_connections`); auto-starts on
 launch if left enabled. Tools: `list_connections`, `list_schemas`,
 `list_columns`, `run_query` (+ `list_saved_requests`, `run_saved_request`,
-`send_request` when `allow_http`). Safety: a connection is invisible until
+`send_request` when `allow_http`; + `open_sql_tab`, `save_query`,
+`save_sql_file`, `save_request` when `allow_populate`; + `add_connection`
+when `allow_manage_connections`). Safety: a connection is invisible until
 explicitly exposed; exposed = read-only unless per-connection **and**
-server-wide write flags are both on. UI: gear icon → Settings modal
+server-wide write flags are both on. The `allow_populate` tools never
+execute anything (SQL/HTTP) — they only write into a tab, a saved
+item, or a file under a fixed exports dir, for the human to read/run
+themselves. `add_connection` writes a real credential to the OS
+keychain but never auto-exposes the connection to MCP. Frontend has no
+push channel from Rust, so `+page.svelte` refetches everything on
+window focus to pick up anything these tools wrote while the app
+wasn't in front. UI: gear icon → Settings modal
 (`components/SettingsModal.svelte`).
 
 ## What's left

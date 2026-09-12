@@ -368,6 +368,22 @@
             <input type="checkbox" bind:checked={cfg.allow_http} />
             <span>Expose HTTP request tools (<code>send_request</code>, <code>run_saved_request</code>)</span>
           </label>
+          <label class="toggle">
+            <input type="checkbox" bind:checked={cfg.allow_populate} />
+            <span>
+              Let AI put content in front of you — <code>open_sql_tab</code>, <code>save_query</code>,
+              <code>save_sql_file</code>, <code>save_request</code>. Nothing is executed; it only
+              writes into tabs/saved items/files for you to review and run yourself.
+            </span>
+          </label>
+          <label class="toggle">
+            <input type="checkbox" bind:checked={cfg.allow_manage_connections} />
+            <span>
+              Let AI create new DB connections (<code>add_connection</code>) — writes a real
+              credential to your OS keychain. New connections are never auto-exposed to MCP; you
+              still turn that on per-connection in the Access tab.
+            </span>
+          </label>
 
           <button class="btn primary" on:click={apply} disabled={busy} style="margin-top:8px">
             {busy ? 'Applying…' : 'Apply & restart'}

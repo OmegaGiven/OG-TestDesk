@@ -47,8 +47,14 @@
     }
   }
 
-  onMount(async () => {
-    applyAppearance($appearance);
+  // Re-pull everything from the backend metadata store — used on launch
+  // and again whenever the window regains focus, since the MCP server's
+  // "populate" tools (open_sql_tab, save_query, save_request,
+  // add_connection) write there from outside the UI's own action flow;
+  // there's no push channel from the Rust side, so a focus-triggered
+  // refetch is how a tab/query/connection an AI just added actually
+  // shows up without the user having to manually reload.
+  async function reloadEverything() {
     await reloadConnections();
     await Promise.all([
       reloadTabs(),
@@ -57,6 +63,12 @@
       reloadSavedQueries(),
       reloadSavedCharts()
     ]);
+  }
+
+  onMount(async () => {
+    applyAppearance($appearance);
+    await reloadEverything();
+    window.addEventListener('focus', reloadEverything);
 
     // Dev/demo helpers via query string (no effect in normal use):
     //   ?tool=requests|inspector   ?run  (auto-run the active SQL tab)
