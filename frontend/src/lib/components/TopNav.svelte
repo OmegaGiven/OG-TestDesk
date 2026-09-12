@@ -18,6 +18,11 @@
     groupOf,
     reorderGroups,
     moveTabToGroup,
+    tabOrder,
+    tabKey,
+    ensureTabOrder,
+    reorderTab,
+    tabOrderIndex,
     INSPECTOR_TAB_ID
   } from '../stores.js';
   import { ICONS } from '../icons.js';
@@ -88,22 +93,44 @@
         ...(sqlByGroup.get(key) || []),
         ...(reqByGroup.get(key) || []),
         ...(inspByGroup.get(key) || [])
-      ].sort((a, b) => (a.tab.position ?? 0) - (b.tab.position ?? 0));
+      ].sort(byTabOrder($tabOrder));
       const conn = $connections.find((c) => c.id === key);
       return { key, kind: 'conn', conn, items };
     })
     .filter((g) => g.items.length && g.conn);
 
-  // ---- standalone (ungrouped) request tabs + the Inspector pill
-  $: looseRequestTabs = $requestTabs.filter(
-    (tab) => groupOf('request', tab, $tabGroupOverride) == null
-  );
-  $: looseInspector = $inspectorOpen && groupOf('inspector', inspectorTab, $tabGroupOverride) == null;
+  // ---- standalone (ungrouped) request tabs + the Inspector pill, in one
+  // freely-reorderable row
+  $: looseItems = [
+    ...$requestTabs
+      .filter((tab) => groupOf('request', tab, $tabGroupOverride) == null)
+      .map((tab) => ({ kind: 'request', tab })),
+    ...($inspectorOpen && groupOf('inspector', inspectorTab, $tabGroupOverride) == null
+      ? [{ kind: 'inspector', tab: inspectorTab }]
+      : [])
+  ].sort(byTabOrder($tabOrder));
 
-  // ---- drag & drop: reorder whole groups, or drag a tab into another group
+  function byTabOrder(order) {
+    return (a, b) => {
+      const d = tabOrderIndex(order, a.kind, a.tab) - tabOrderIndex(order, b.kind, b.tab);
+      return d !== 0 ? d : (a.tab.position ?? 0) - (b.tab.position ?? 0);
+    };
+  }
+
+  // keep every visible tab tracked in the flat drag-order list
+  $: {
+    for (const t of $sqlTabs) ensureTabOrder('sql', t);
+    for (const t of $requestTabs) ensureTabOrder('request', t);
+    if ($inspectorOpen) ensureTabOrder('inspector', inspectorTab);
+  }
+
+  // ---- drag & drop: reorder whole groups, drag a tab into a group, or
+  // drag a tab onto another tab to reorder it left/right (and, if the
+  // target lives in a group, join that group too)
   let draggedGroup = null;
   let draggedTab = null; // { kind, tab }
   let dragOverKey = null;
+  let dragOverTab = null; // kind+':'+id
 
   function onGroupDragStart(key, e) {
     draggedGroup = key;
@@ -125,6 +152,23 @@
     draggedGroup = null;
     draggedTab = null;
     dragOverKey = null;
+  }
+  function onTabDragOver(kind, tab, e) {
+    if (!draggedTab) return;
+    e.preventDefault();
+    e.stopPropagation();
+    dragOverTab = tabKey(kind, tab);
+  }
+  function onTabDrop(kind, tab, groupKey, e) {
+    e.stopPropagation();
+    if (draggedTab) {
+      moveTabToGroup(draggedTab.kind, draggedTab.tab, groupKey ?? null);
+      reorderTab(draggedTab.kind, draggedTab.tab, kind, tab);
+    }
+    draggedGroup = null;
+    draggedTab = null;
+    dragOverKey = null;
+    dragOverTab = null;
   }
 
   // ---- horizontal scroll without a scrollbar
@@ -213,8 +257,12 @@
             <button
               class="tab"
               class:active={$activeSqlTabId === item.tab.id && $activeTool === 'sql'}
+              class:drag-over={dragOverTab === tabKey('sql', item.tab)}
               draggable="true"
               on:dragstart|stopPropagation={(e) => onTabDragStart('sql', item.tab, e)}
+              on:dragover={(e) => onTabDragOver('sql', item.tab, e)}
+              on:dragleave={() => (dragOverTab = null)}
+              on:drop|stopPropagation={(e) => onTabDrop('sql', item.tab, g.key, e)}
               on:click={() => selectTab(item.tab.id)}
               title={item.tab.title}
             >
@@ -227,8 +275,12 @@
             <button
               class="tab"
               class:active={$activeRequestTabId === item.tab.id && $activeTool === 'requests'}
+              class:drag-over={dragOverTab === tabKey('request', item.tab)}
               draggable="true"
               on:dragstart|stopPropagation={(e) => onTabDragStart('request', item.tab, e)}
+              on:dragover={(e) => onTabDragOver('request', item.tab, e)}
+              on:dragleave={() => (dragOverTab = null)}
+              on:drop|stopPropagation={(e) => onTabDrop('request', item.tab, g.key, e)}
               on:click={() => selectReqTab(item.tab.id)}
               title={item.tab.title}
             >
@@ -244,8 +296,12 @@
             <button
               class="tab"
               class:active={$activeTool === 'inspector'}
+              class:drag-over={dragOverTab === tabKey('inspector', item.tab)}
               draggable="true"
               on:dragstart|stopPropagation={(e) => onTabDragStart('inspector', item.tab, e)}
+              on:dragover={(e) => onTabDragOver('inspector', item.tab, e)}
+              on:dragleave={() => (dragOverTab = null)}
+              on:drop|stopPropagation={(e) => onTabDrop('inspector', item.tab, g.key, e)}
               on:click={selectInspector}
               title="Inspector"
             >
@@ -260,41 +316,49 @@
       </div>
     {/each}
 
-    {#each looseRequestTabs as tab (tab.id)}
-      <button
-        class="tab loose"
-        class:active={$activeRequestTabId === tab.id && $activeTool === 'requests'}
-        draggable="true"
-        on:dragstart={(e) => onTabDragStart('request', tab, e)}
-        on:click={() => selectReqTab(tab.id)}
-        title={tab.title}
-      >
-        <span class="rt-method" style="color: var(--m-{(tab.method || 'get').toLowerCase()})">
-          {tab.method}
-        </span>
-        {tab.dirty ? '•' : ''}{tab.title}
-        <span class="x" on:click={(e) => closeReq(tab.id, e)} role="button" tabindex="-1"
-          >{ICONS.closeTab.glyph}</span
+    {#each looseItems as item (item.kind + ':' + item.tab.id)}
+      {#if item.kind === 'request'}
+        <button
+          class="tab loose"
+          class:active={$activeRequestTabId === item.tab.id && $activeTool === 'requests'}
+          class:drag-over={dragOverTab === tabKey('request', item.tab)}
+          draggable="true"
+          on:dragstart={(e) => onTabDragStart('request', item.tab, e)}
+          on:dragover={(e) => onTabDragOver('request', item.tab, e)}
+          on:dragleave={() => (dragOverTab = null)}
+          on:drop={(e) => onTabDrop('request', item.tab, null, e)}
+          on:click={() => selectReqTab(item.tab.id)}
+          title={item.tab.title}
         >
-      </button>
+          <span class="rt-method" style="color: var(--m-{(item.tab.method || 'get').toLowerCase()})">
+            {item.tab.method}
+          </span>
+          {item.tab.dirty ? '•' : ''}{item.tab.title}
+          <span class="x" on:click={(e) => closeReq(item.tab.id, e)} role="button" tabindex="-1"
+            >{ICONS.closeTab.glyph}</span
+          >
+        </button>
+      {:else}
+        <button
+          class="tab loose"
+          class:active={$activeTool === 'inspector'}
+          class:drag-over={dragOverTab === tabKey('inspector', item.tab)}
+          draggable="true"
+          on:dragstart={(e) => onTabDragStart('inspector', item.tab, e)}
+          on:dragover={(e) => onTabDragOver('inspector', item.tab, e)}
+          on:dragleave={() => (dragOverTab = null)}
+          on:drop={(e) => onTabDrop('inspector', item.tab, null, e)}
+          on:click={selectInspector}
+          title="Inspector"
+        >
+          <span class="insp-icon" style="color: var(--tool-inspector-text)">I</span>
+          Inspector
+          <span class="x" on:click={closeInspector} role="button" tabindex="-1"
+            >{ICONS.closeTab.glyph}</span
+          >
+        </button>
+      {/if}
     {/each}
-
-    {#if looseInspector}
-      <button
-        class="tab loose"
-        class:active={$activeTool === 'inspector'}
-        draggable="true"
-        on:dragstart={(e) => onTabDragStart('inspector', inspectorTab, e)}
-        on:click={selectInspector}
-        title="Inspector"
-      >
-        <span class="insp-icon" style="color: var(--tool-inspector-text)">I</span>
-        Inspector
-        <span class="x" on:click={closeInspector} role="button" tabindex="-1"
-          >{ICONS.closeTab.glyph}</span
-        >
-      </button>
-    {/if}
   </div>
 
   <button
@@ -428,6 +492,9 @@
     color: var(--text-primary);
     font-weight: 600;
     box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--c, var(--text-secondary)) 40%, transparent);
+  }
+  .tab.drag-over {
+    box-shadow: inset 2px 0 0 0 var(--c, var(--text-primary));
   }
   .rt-method {
     font-size: 9px;

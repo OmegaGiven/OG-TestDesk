@@ -217,7 +217,45 @@ export function moveTabToGroup(kind, tab, groupKey) {
     else next[tab.id] = groupKey;
     return next;
   });
-  ensureGroupOrder(groupKey);
+  if (groupKey != null) ensureGroupOrder(groupKey);
+}
+
+/* ------------------------------------------------------- tab left-right order */
+// Independent of grouping: a flat drag-to-reorder position for every SQL
+// tab, request tab, and the Inspector, whether it's sitting loose or
+// inside a connection group. Cosmetic/local only, like the group order.
+const TAB_ORDER_KEY = 'ogtestdesk.tabOrder';
+
+export const tabOrder = writable(loadJson(TAB_ORDER_KEY, []));
+tabOrder.subscribe((v) => saveJson(TAB_ORDER_KEY, v));
+
+export function tabKey(kind, tab) {
+  return `${kind}:${tab.id}`;
+}
+
+/** Push a tab's key to the end of the order if it isn't already tracked. */
+export function ensureTabOrder(kind, tab) {
+  const key = tabKey(kind, tab);
+  tabOrder.update((order) => (order.includes(key) ? order : [...order, key]));
+}
+
+/** Drag `draggedTab` to sit just before `targetTab` in the flat order. */
+export function reorderTab(draggedKind, draggedTab, targetKind, targetTab) {
+  const draggedKey = tabKey(draggedKind, draggedTab);
+  const targetKey = tabKey(targetKind, targetTab);
+  if (draggedKey === targetKey) return;
+  tabOrder.update((order) => {
+    const next = order.filter((k) => k !== draggedKey);
+    let at = next.indexOf(targetKey);
+    if (at < 0) at = next.length;
+    next.splice(at, 0, draggedKey);
+    return next;
+  });
+}
+
+export function tabOrderIndex(order, kind, tab) {
+  const i = order.indexOf(tabKey(kind, tab));
+  return i < 0 ? Infinity : i;
 }
 
 /* ----------------------------------------------------------- saved queries */
