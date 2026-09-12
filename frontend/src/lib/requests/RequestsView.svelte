@@ -25,6 +25,14 @@
 
   const METHODS = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'HEAD', 'OPTIONS'];
 
+  // collapsed collections in the sidebar — session-only, so collapsing a
+  // big collection leaves room to see the others below it
+  let collapsedCols = new Set();
+  function toggleCol(id) {
+    collapsedCols.has(id) ? collapsedCols.delete(id) : collapsedCols.add(id);
+    collapsedCols = collapsedCols;
+  }
+
   let draft = blank();
   let tab = 'params'; // params | headers | body
   let response = null;
@@ -636,19 +644,30 @@
     />
     <div class="scroll">
       {#each grouped.collections as col (col.id)}
-        <div class="col-head">
-          <span>{col.name}</span>
-          <button class="btn ghost sm danger" on:click={() => delCollection(col)}>{ICONS.delete.glyph}</button>
-        </div>
-        {#each col.items as s (s.id)}
-          <div class="req-item" class:active={draft.id === s.id}>
-            <button class="ri-main" on:click={() => loadSaved(s)}>
-              <span class="mm" style="color:var(--m-{s.method.toLowerCase()})">{s.method}</span>
-              <span class="rn">{s.name}</span>
-            </button>
-            <button class="del" on:click={() => delSaved(s)}>{ICONS.delete.glyph}</button>
-          </div>
-        {/each}
+        {@const isOpen = !collapsedCols.has(col.id)}
+        <button class="col-head" on:click={() => toggleCol(col.id)}>
+          <span class="chev">{isOpen ? ICONS.expandOpen.glyph : ICONS.expandClosed.glyph}</span>
+          <span class="col-name">{col.name}</span>
+          <span class="col-cnt">{col.items.length}</span>
+          <span
+            class="del"
+            title="Delete collection"
+            on:click|stopPropagation={() => delCollection(col)}
+            role="button"
+            tabindex="-1">{ICONS.delete.glyph}</span
+          >
+        </button>
+        {#if isOpen}
+          {#each col.items as s (s.id)}
+            <div class="req-item" class:active={draft.id === s.id}>
+              <button class="ri-main" on:click={() => loadSaved(s)}>
+                <span class="mm" style="color:var(--m-{s.method.toLowerCase()})">{s.method}</span>
+                <span class="rn">{s.name}</span>
+              </button>
+              <button class="del" on:click={() => delSaved(s)}>{ICONS.delete.glyph}</button>
+            </div>
+          {/each}
+        {/if}
       {/each}
       {#if grouped.loose.length}
         <div class="col-head"><span>Ungrouped</span></div>
@@ -923,14 +942,39 @@
     padding: 4px 0;
   }
   .col-head {
+    width: 100%;
     display: flex;
-    justify-content: space-between;
     align-items: center;
-    padding: 6px 8px 2px;
+    gap: 5px;
+    padding: 6px 8px;
+    margin-top: 2px;
+    background: none;
+    border: none;
+    cursor: pointer;
     font-size: 10px;
     font-weight: 700;
     text-transform: uppercase;
     color: var(--text-muted);
+  }
+  .col-head:hover {
+    background: var(--surface-3);
+  }
+  .col-head .chev {
+    font-size: 9px;
+    width: 10px;
+    text-align: center;
+    flex-shrink: 0;
+  }
+  .col-head .col-name {
+    flex: 1;
+    text-align: left;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .col-head .col-cnt {
+    font-weight: 400;
+    flex-shrink: 0;
   }
   .req-item {
     display: flex;
