@@ -5,7 +5,6 @@
     sqlTabs,
     activeSqlTabId,
     activeTool,
-    newSqlTab,
     closeSqlTab,
     persistSqlTab,
     requestTabs,
@@ -14,6 +13,7 @@
     closeRequestTab,
     persistRequestTab,
     connMenuOpen,
+    inspectorOpen,
     groupOrder,
     tabGroupOverride,
     groupOf,
@@ -29,12 +29,6 @@
     activeTool.set('sql');
     activeSqlTabId.set(id);
     persistSqlTab(id, true);
-  }
-  async function addTab(connId) {
-    activeTool.set('sql');
-    try {
-      await newSqlTab(connId);
-    } catch (e) {}
   }
   function close(id, e) {
     e.stopPropagation();
@@ -60,6 +54,11 @@
   function selectInspector() {
     activeTool.set('inspector');
   }
+  function closeInspector(e) {
+    e.stopPropagation();
+    inspectorOpen.set(false);
+    if ($activeTool === 'inspector') activeTool.set('sql');
+  }
 
   // ---- group tabs by connection, honoring any manual drag-to-regroup
   // override, in the user's saved group order. Only SQL tabs, request
@@ -78,7 +77,7 @@
   }
   $: sqlByGroup = groupBy($sqlTabs, 'sql', $tabGroupOverride);
   $: reqByGroup = groupBy($requestTabs, 'request', $tabGroupOverride);
-  $: inspByGroup = groupBy([inspectorTab], 'inspector', $tabGroupOverride);
+  $: inspByGroup = groupBy($inspectorOpen ? [inspectorTab] : [], 'inspector', $tabGroupOverride);
   $: allKeys = (() => {
     const order = [...$groupOrder];
     const seen = new Set(order);
@@ -106,7 +105,7 @@
   $: looseRequestTabs = $requestTabs.filter(
     (tab) => groupOf('request', tab, $tabGroupOverride) == null
   );
-  $: looseInspector = groupOf('inspector', inspectorTab, $tabGroupOverride) == null;
+  $: looseInspector = $inspectorOpen && groupOf('inspector', inspectorTab, $tabGroupOverride) == null;
 
   // ---- drag & drop: reorder whole groups, or drag a tab into another group
   let draggedGroup = null;
@@ -259,10 +258,12 @@
             >
               <span class="insp-icon" style="color: var(--tool-inspector-text)">I</span>
               Inspector
+              <span class="x" on:click={closeInspector} role="button" tabindex="-1"
+                >{ICONS.closeTab.glyph}</span
+              >
             </button>
           {/if}
         {/each}
-        <button class="icon-btn sm" title="New query" on:click={() => addTab(g.key)}>+</button>
       </div>
     {/each}
 
@@ -296,6 +297,9 @@
       >
         <span class="insp-icon" style="color: var(--tool-inspector-text)">I</span>
         Inspector
+        <span class="x" on:click={closeInspector} role="button" tabindex="-1"
+          >{ICONS.closeTab.glyph}</span
+        >
       </button>
     {/if}
 

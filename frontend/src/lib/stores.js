@@ -141,6 +141,18 @@ export async function loadSchemas(conn, force = false) {
 
 export const connMenuOpen = writable(false);
 
+/** Whether the shared Inspector "tab" is currently open on the top bar.
+ * Closed like any other tab; reopened via the + menu's Inspector row. */
+const INSPECTOR_OPEN_KEY = 'ogtestdesk.inspectorOpen';
+export const inspectorOpen = writable(
+  JSON.parse(localStorage.getItem(INSPECTOR_OPEN_KEY) ?? 'false')
+);
+inspectorOpen.subscribe((v) => {
+  try {
+    localStorage.setItem(INSPECTOR_OPEN_KEY, JSON.stringify(v));
+  } catch {}
+});
+
 /* ---------------------------------------------------- top-bar tab groups */
 // The top bar shows one colored, draggable group per DB connection.
 // Request tabs and the single Inspector "tab" have no group of their

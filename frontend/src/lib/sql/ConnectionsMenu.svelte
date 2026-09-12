@@ -8,6 +8,7 @@
     activeTool,
     newSqlTab,
     newRequestTab,
+    inspectorOpen,
     toast,
     toastError
   } from '../stores.js';
@@ -33,6 +34,7 @@
     }
   }
   function openInspector() {
+    inspectorOpen.set(true);
     activeTool.set('inspector');
     close();
   }
