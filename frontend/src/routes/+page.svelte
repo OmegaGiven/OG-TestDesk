@@ -65,8 +65,22 @@
     ]);
   }
 
+  // Genuinely frontend-only failures (an uncaught exception, a rejected
+  // promise nothing awaited) — not the backend `Result::Err`s that
+  // already land in the error log via every command's `err()` helper.
+  // Without this, these just vanish into the devtools console the user
+  // never opens.
+  function onWindowError(e) {
+    api.logClientError('window', e.message || String(e.error || e)).catch(() => {});
+  }
+  function onUnhandledRejection(e) {
+    api.logClientError('promise', String(e.reason?.message || e.reason || e)).catch(() => {});
+  }
+
   onMount(async () => {
     applyAppearance($appearance);
+    window.addEventListener('error', onWindowError);
+    window.addEventListener('unhandledrejection', onUnhandledRejection);
     await reloadEverything();
     window.addEventListener('focus', reloadEverything);
 

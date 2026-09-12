@@ -12,6 +12,7 @@ pub use drivers::{
     ServerInfo, SqlFunction,
 };
 pub use requests::{apply_environment, HttpRequest, HttpResponse};
+pub use storage::errorlog::{clear_error_log, init_error_log, record_error, recent_errors, ErrorLogEntry};
 pub use storage::metadata::{
     Environment, HistoryEntry, MetadataStore, QueryTab, RequestCollection, RequestHistoryEntry,
     RequestTab, SavedChart, SavedQuery, SavedQueryFolder, SavedRequest, Schedule,

@@ -1,6 +1,39 @@
 <script>
   import Modal from './Modal.svelte';
   import { ICONS } from '../icons.js';
+  import { open as openExternal } from '@tauri-apps/plugin-shell';
+  import { api } from '../api.js';
+
+  const ISSUE_REPO = 'OmegaGiven/OG-TestDesk';
+
+  async function reportIssue() {
+    let logTail = '';
+    try {
+      const errors = await api.errorLogList(5);
+      if (errors?.length) {
+        logTail =
+          '\n\n<details><summary>Last few logged errors</summary>\n\n```\n' +
+          errors
+            .map((e) => `[${new Date(e.ts * 1000).toISOString()}] ${e.source}: ${e.message}`)
+            .join('\n') +
+          '\n```\n</details>';
+      }
+    } catch {}
+    const platform =
+      typeof navigator !== 'undefined' ? navigator.platform || navigator.userAgent : 'unknown';
+    const body =
+      `**What happened**\n\n\n**What you expected**\n\n\n**Steps to reproduce**\n\n\n` +
+      `---\nPlatform: ${platform}${logTail}`;
+    const url =
+      `https://github.com/${ISSUE_REPO}/issues/new?` +
+      `title=${encodeURIComponent('')}&body=${encodeURIComponent(body)}`;
+    try {
+      await openExternal(url);
+    } catch {
+      // last resort if the shell plugin isn't available for some reason
+      window.open(url, '_blank');
+    }
+  }
 
   // Each section: plain text `body` lines (rendered as <p>), `code` blocks,
   // and `steps` (ordered). Searchable over title + keywords + all text.
@@ -180,6 +213,7 @@
           <li class="none">No matches.</li>
         {/if}
       </ul>
+      <button class="report-issue" on:click={reportIssue}>Report an issue on GitHub ↗</button>
     </aside>
 
     <article class="content">
@@ -255,6 +289,14 @@
   }
   .nav button:hover {
     background: var(--surface-3);
+  }
+  .nav button.report-issue {
+    margin-top: auto;
+    padding-top: 10px;
+    border-top: 1px solid var(--border);
+    border-radius: 0;
+    color: var(--text-muted);
+    font-size: 11px;
   }
   .nav button.active {
     background: var(--tool-sql-tint);

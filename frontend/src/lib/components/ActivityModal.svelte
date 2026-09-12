@@ -17,18 +17,20 @@
 
   const dispatch = createEventDispatcher();
 
-  let tab = 'history'; // history | schedules | charts
+  let tab = 'history'; // history | schedules | charts | errors
   let histKind = 'sql'; // sql | request
   let sqlHist = [];
   let reqHist = [];
   let schedules = [];
   let editing = null;
+  let errors = [];
 
   onMount(() => {
     const q = new URLSearchParams(location.search);
     const at = q.get('atab');
     if (at === 'schedules') tab = 'schedules';
     if (at === 'charts') tab = 'charts';
+    if (at === 'errors') tab = 'errors';
     if (at === 'requests') histKind = 'request';
     if (q.has('newschedule')) {
       tab = 'schedules';
@@ -38,15 +40,34 @@
   });
   async function reload() {
     try {
-      [sqlHist, reqHist, schedules] = await Promise.all([
+      [sqlHist, reqHist, schedules, errors] = await Promise.all([
         api.historyRecent(150),
         api.historyRequestRecent(150),
-        api.schedulesList()
+        api.schedulesList(),
+        api.errorLogList(150)
       ]);
       await reloadSavedCharts();
     } catch (e) {
       toastError(e);
     }
+  }
+
+  async function clearErrors() {
+    try {
+      await api.errorLogClear();
+      errors = [];
+    } catch (e) {
+      toastError(e);
+    }
+  }
+  function copyErrorLog() {
+    const text = errors
+      .map((e) => `[${new Date(e.ts * 1000).toISOString()}] ${e.source}: ${e.message}`)
+      .join('\n');
+    navigator.clipboard?.writeText(text).then(
+      () => toast('Error log copied', 'success', 1500),
+      () => toastError('Copy blocked')
+    );
   }
 
   async function openChart(c) {
@@ -193,6 +214,9 @@
     </button>
     <button class:active={tab === 'charts'} on:click={() => (tab = 'charts')}>
       Charts {#if $savedCharts.length}<span class="n">{$savedCharts.length}</span>{/if}
+    </button>
+    <button class:active={tab === 'errors'} on:click={() => (tab = 'errors')}>
+      Errors {#if errors.length}<span class="n">{errors.length}</span>{/if}
     </button>
   </div>
 
@@ -367,6 +391,25 @@
         </div>
       {/if}
     </div>
+  {:else if tab === 'errors'}
+    <div class="subtabs">
+      <span class="muted">
+        Backend, MCP, and reported frontend errors — nothing sensitive is ever logged here.
+      </span>
+      <span style="flex:1" />
+      <button class="btn ghost sm" on:click={copyErrorLog} disabled={!errors.length}>Copy</button>
+      <button class="btn ghost sm danger" on:click={clearErrors} disabled={!errors.length}>Clear</button>
+    </div>
+    <div class="rows">
+      {#each [...errors].reverse() as e (e.ts + e.source + e.message)}
+        <div class="row err-row">
+          <span class="when">{ago(e.ts)}</span>
+          <span class="tag" title={e.source}>{e.source}</span>
+          <code class="sql err-msg">{e.message}</code>
+        </div>
+      {/each}
+      {#if errors.length === 0}<div class="empty">No errors logged. Good sign.</div>{/if}
+    </div>
   {/if}
 </Modal>
 
@@ -473,6 +516,20 @@
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+  }
+  .err-row {
+    cursor: default;
+    align-items: flex-start;
+  }
+  .err-row .tag {
+    max-width: 170px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .err-msg {
+    white-space: pre-wrap;
+    word-break: break-word;
   }
   .right {
     flex-shrink: 0;

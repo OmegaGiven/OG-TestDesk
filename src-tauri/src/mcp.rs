@@ -629,10 +629,13 @@ async fn dispatch(ctx: &AppCtx, method: &str, params: Value) -> Result<Value> {
             let args = params.get("arguments").cloned().unwrap_or(json!({}));
             match call_tool(ctx, name, args).await {
                 Ok(text) => Ok(json!({ "content": [{ "type": "text", "text": text }] })),
-                Err(e) => Ok(json!({
-                    "content": [{ "type": "text", "text": format!("Error: {e}") }],
-                    "isError": true
-                })),
+                Err(e) => {
+                    og_testdesk_core::record_error(&format!("mcp:{name}"), &e.to_string());
+                    Ok(json!({
+                        "content": [{ "type": "text", "text": format!("Error: {e}") }],
+                        "isError": true
+                    }))
+                }
             }
         }
         other => Err(anyhow::anyhow!("unknown method: {other}")),
@@ -641,6 +644,13 @@ async fn dispatch(ctx: &AppCtx, method: &str, params: Value) -> Result<Value> {
 
 fn tool_defs(cfg: &McpConfig) -> Vec<Value> {
     let mut tools = vec![
+        json!({
+            "name": "get_error_log",
+            "description": "Read the app's recent error log (backend, MCP tool calls, and reported frontend errors) — for diagnosing something that just went wrong. Never contains passwords.",
+            "inputSchema": { "type": "object", "properties": {
+                "limit": { "type": "integer", "description": "max entries, newest last (default 50)" }
+            } }
+        }),
         json!({
             "name": "list_connections",
             "description": "List the database connections exposed to MCP (id, name, engine, host). Never returns passwords.",
@@ -800,6 +810,11 @@ async fn call_tool(ctx: &AppCtx, name: &str, args: Value) -> Result<String> {
     let s = |k: &str| args.get(k).and_then(|v| v.as_str()).map(str::to_string);
 
     match name {
+        "get_error_log" => {
+            let limit = args.get("limit").and_then(|v| v.as_u64()).unwrap_or(50) as usize;
+            let entries = og_testdesk_core::recent_errors(Some(limit));
+            Ok(serde_json::to_string_pretty(&entries)?)
+        }
         "list_connections" => {
             let conns = ctx.metadata.list_connections().await?;
             let mut out = vec![];

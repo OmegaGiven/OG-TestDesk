@@ -45,8 +45,16 @@ async fn save_mcp_config(meta: &MetadataStore, cfg: &McpConfig) -> Result<(), St
 
 type R<T> = Result<T, String>;
 
+/// Every command's `.map_err(err)` funnels through here, so this is the
+/// one choke point that puts backend errors into the error log without
+/// having to touch every call site individually. `#[track_caller]` gets
+/// us the call site (file:line) for free as the log's `source`.
+#[track_caller]
 fn err<E: std::fmt::Display>(e: E) -> String {
-    e.to_string()
+    let msg = e.to_string();
+    let loc = std::panic::Location::caller();
+    og_testdesk_core::record_error(&format!("{}:{}", loc.file(), loc.line()), &msg);
+    msg
 }
 
 fn new_id() -> String {
@@ -697,6 +705,28 @@ async fn state_set(state: State<'_, AppState>, key: String, value: String) -> R<
     state.metadata.set_state(&key, &value).await.map_err(err)
 }
 
+// ---------------------------------------------------------------- error log
+
+#[tauri::command]
+async fn error_log_list(limit: Option<usize>) -> R<Vec<og_testdesk_core::ErrorLogEntry>> {
+    Ok(og_testdesk_core::recent_errors(limit))
+}
+
+#[tauri::command]
+async fn error_log_clear() -> R<()> {
+    og_testdesk_core::clear_error_log();
+    Ok(())
+}
+
+/// So a frontend-only failure (a fetch that never reaches a Rust command,
+/// a JS exception) lands in the same log as backend errors, instead of
+/// only ever showing up as a toast the user has to remember and retype.
+#[tauri::command]
+async fn log_client_error(source: String, message: String) -> R<()> {
+    og_testdesk_core::record_error(&format!("frontend:{source}"), &message);
+    Ok(())
+}
+
 // ---------------------------------------------------------------------- main
 
 #[tokio::main]
@@ -706,6 +736,7 @@ async fn main() {
         .join("OGTestDesk");
     std::fs::create_dir_all(&app_data_dir).expect("create app data dir");
     SecretsStore::init_fallback(app_data_dir.clone());
+    og_testdesk_core::init_error_log(app_data_dir.clone());
     let db_path = std::env::var("OGTESTDESK_DB_PATH")
         .unwrap_or_else(|_| app_data_dir.join("og_testdesk.db").to_string_lossy().into());
 
@@ -742,6 +773,7 @@ async fn main() {
     };
 
     tauri::Builder::default()
+        .plugin(tauri_plugin_shell::init())
         .setup(move |app| {
             app.manage(managed);
             // macOS keeps its overlaid traffic lights (tauri.conf titleBarStyle).
@@ -804,6 +836,9 @@ async fn main() {
             request_send,
             state_get,
             state_set,
+            error_log_list,
+            error_log_clear,
+            log_client_error,
             mcp_config_get,
             mcp_config_set,
             mcp_status,

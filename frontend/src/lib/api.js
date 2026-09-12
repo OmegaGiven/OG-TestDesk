@@ -84,6 +84,9 @@ export const api = {
   // app state
   stateGet: (key) => call('state_get', { key }),
   stateSet: (key, value) => call('state_set', { key, value }),
+  errorLogList: (limit) => call('error_log_list', { limit }),
+  errorLogClear: () => call('error_log_clear'),
+  logClientError: (source, message) => call('log_client_error', { source, message }),
 
   // request globals (plain variables, applied under the active environment)
   globalsGet: () => call('state_get', { key: 'request_globals' }),
