@@ -401,7 +401,7 @@
       <button class="btn ghost sm danger" on:click={clearErrors} disabled={!errors.length}>Clear</button>
     </div>
     <div class="rows">
-      {#each [...errors].reverse() as e (e.ts + e.source + e.message)}
+      {#each [...errors].reverse() as e, i (i)}
         <div class="row err-row">
           <span class="when">{ago(e.ts)}</span>
           <span class="tag" title={e.source}>{e.source}</span>
