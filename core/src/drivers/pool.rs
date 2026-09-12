@@ -12,6 +12,17 @@ use sqlx::mysql::{MySqlPool, MySqlPoolOptions};
 use sqlx::postgres::{PgPool, PgPoolOptions};
 use sqlx::sqlite::{SqlitePool, SqlitePoolOptions};
 
+// A single query run can hold two connections at once (the row stream
+// and its concurrent COUNT(*), see drivers/exec.rs), and the app fires
+// several independent things against the same connection at a time —
+// the schema tree lazily loading columns, the DB-clock badge, a
+// connection test probe, and (with split-screen SQL panes) two of all
+// of the above on the same connection simultaneously. 5 was too tight
+// for a single-user desktop app and caused "pool timed out" errors
+// under completely normal use, not just heavy load.
+const MAX_CONNECTIONS: u32 = 20;
+const ACQUIRE_TIMEOUT_SECS: u64 = 30;
+
 macro_rules! cache {
     ($name:ident, $pool:ty, $opts:ty) => {
         pub async fn $name(url: &str) -> Result<$pool> {
@@ -21,8 +32,8 @@ macro_rules! cache {
                 return Ok(p);
             }
             let pool = <$opts>::new()
-                .max_connections(5)
-                .acquire_timeout(Duration::from_secs(15))
+                .max_connections(MAX_CONNECTIONS)
+                .acquire_timeout(Duration::from_secs(ACQUIRE_TIMEOUT_SECS))
                 .connect(url)
                 .await?;
             cache
@@ -45,8 +56,8 @@ pub async fn sqlite_pool(path: &str) -> Result<SqlitePool> {
     }
     let url = format!("sqlite://{path}?mode=rwc");
     let pool = SqlitePoolOptions::new()
-        .max_connections(5)
-        .acquire_timeout(Duration::from_secs(15))
+        .max_connections(MAX_CONNECTIONS)
+        .acquire_timeout(Duration::from_secs(ACQUIRE_TIMEOUT_SECS))
         .connect(&url)
         .await?;
     cache.lock().unwrap().insert(path.to_string(), pool.clone());
