@@ -131,20 +131,34 @@
     }
   }
   let sidebarW = loadSidebarW();
+  let rootEl;
+  // A split sub-pane starts with its sidebar (saved queries/schema tree)
+  // collapsed, since it's the thing that made a narrow split pane feel
+  // cramped — one click on the resizer (or dragging it) brings it back.
+  let sidebarCollapsed = !!tabId;
   let draggingSidebar = false;
-  function startSidebarDrag() {
+  let sidebarDragStartX = 0;
+  let sidebarDragMoved = false;
+  function startSidebarDrag(e) {
     draggingSidebar = true;
+    sidebarDragStartX = e.clientX;
+    sidebarDragMoved = false;
   }
   function onSidebarMove(e) {
-    if (!draggingSidebar) return;
-    const host = document.querySelector('.sql');
-    if (!host) return;
-    const rect = host.getBoundingClientRect();
+    if (!draggingSidebar || !rootEl) return;
+    if (Math.abs(e.clientX - sidebarDragStartX) > 3) sidebarDragMoved = true;
+    if (sidebarCollapsed) return;
+    const rect = rootEl.getBoundingClientRect();
     sidebarW = Math.min(480, Math.max(180, e.clientX - rect.left));
   }
   function endSidebarDrag() {
     if (!draggingSidebar) return;
     draggingSidebar = false;
+    if (!sidebarDragMoved) {
+      // a plain click (no drag) on the resizer toggles collapse instead
+      sidebarCollapsed = !sidebarCollapsed;
+      return;
+    }
     try {
       localStorage.setItem(SIDEBAR_W_KEY, String(Math.round(sidebarW)));
     } catch {}
@@ -428,31 +442,38 @@
     </div>
   </div>
 {:else}
-<div class="sql">
-  {#if !tabId}
-    <aside class="sidebar" style="width:{sidebarW}px">
-      <div class="sq-section" class:open={sqOpen}>
-        <button class="sec-head sq-toggle" on:click={() => (sqOpen = !sqOpen)}>
-          <span class="chev">{sqOpen ? ICONS.expandOpen.glyph : ICONS.expandClosed.glyph}</span>
-          <span>Saved queries</span>
-          <span class="sq-badge">{$savedQueries.length}</span>
-        </button>
-        {#if sqOpen}
-          <div class="sq-body">
-            <SavedQueries on:open={openSavedQuery} />
-          </div>
-        {/if}
-      </div>
-
-      {#if sidebarConn}
-        <div class="schema-host">
-          <SchemaTree conn={sidebarConn} on:open={openRelation} />
+<div class="sql" bind:this={rootEl}>
+  <aside class="sidebar" class:collapsed={sidebarCollapsed} style="width:{sidebarCollapsed ? 0 : sidebarW}px">
+    <div class="sq-section" class:open={sqOpen}>
+      <button class="sec-head sq-toggle" on:click={() => (sqOpen = !sqOpen)}>
+        <span class="chev">{sqOpen ? ICONS.expandOpen.glyph : ICONS.expandClosed.glyph}</span>
+        <span>Saved queries</span>
+        <span class="sq-badge">{$savedQueries.length}</span>
+      </button>
+      {#if sqOpen}
+        <div class="sq-body">
+          <SavedQueries on:open={openSavedQuery} />
         </div>
       {/if}
-    </aside>
+    </div>
 
-    <div class="sidebar-resizer" on:mousedown={startSidebarDrag} role="separator" tabindex="-1"></div>
-  {/if}
+    {#if sidebarConn}
+      <div class="schema-host">
+        <SchemaTree conn={sidebarConn} on:open={openRelation} />
+      </div>
+    {/if}
+  </aside>
+
+  <div
+    class="sidebar-resizer"
+    class:collapsed={sidebarCollapsed}
+    on:mousedown={startSidebarDrag}
+    title="Drag to resize · click to {sidebarCollapsed ? 'expand' : 'collapse'}"
+    role="separator"
+    tabindex="-1"
+  >
+    <span class="resizer-chev">{sidebarCollapsed ? '›' : '‹'}</span>
+  </div>
 
   <section
     class="main"
@@ -620,15 +641,40 @@
     display: flex;
     flex-direction: column;
     overflow: hidden;
+    transition: width 0.14s ease;
   }
   .sidebar-resizer {
+    position: relative;
     width: 5px;
     flex-shrink: 0;
     cursor: col-resize;
     background: var(--border);
+    display: flex;
+    align-items: center;
+    justify-content: center;
   }
   .sidebar-resizer:hover {
     background: var(--tool-sql-text);
+  }
+  .resizer-chev {
+    width: 14px;
+    height: 22px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 3px;
+    background: var(--surface-2);
+    border: 1px solid var(--border-strong);
+    color: var(--text-muted);
+    font-size: 10px;
+    line-height: 1;
+    pointer-events: none;
+    opacity: 0;
+    transition: opacity 0.1s ease;
+  }
+  .sidebar-resizer:hover .resizer-chev,
+  .sidebar-resizer.collapsed .resizer-chev {
+    opacity: 1;
   }
   .sec-head {
     display: flex;
