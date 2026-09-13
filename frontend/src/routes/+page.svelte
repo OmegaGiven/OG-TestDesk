@@ -6,6 +6,7 @@
   import { api } from '../lib/api.js';
   import TopNav from '../lib/components/TopNav.svelte';
   import Toasts from '../lib/components/Toasts.svelte';
+  import DialogHost from '../lib/components/DialogHost.svelte';
   import SettingsModal from '../lib/components/SettingsModal.svelte';
   import HelpModal from '../lib/components/HelpModal.svelte';
   import ActivityModal from '../lib/components/ActivityModal.svelte';
@@ -225,6 +226,7 @@
 <ConnectionsMenu />
 
 <Toasts />
+<DialogHost />
 
 <style>
   .app {

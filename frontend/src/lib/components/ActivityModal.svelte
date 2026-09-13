@@ -13,7 +13,8 @@
     sendToInspector,
     toast,
     toastError,
-    debugSnapshot
+    debugSnapshot,
+    confirmDialog
   } from '../stores.js';
 
   const dispatch = createEventDispatcher();
@@ -91,7 +92,7 @@
     dispatch('close');
   }
   async function deleteChart(c) {
-    if (!confirm(`Delete chart "${c.name}"?`)) return;
+    if (!(await confirmDialog(`Delete chart "${c.name}"?`, { danger: true }))) return;
     try {
       await api.savedChartDelete(c.id);
       await reloadSavedCharts();
@@ -180,7 +181,7 @@
     }
   }
   async function delSchedule(s) {
-    if (!confirm(`Delete schedule "${s.name}"?`)) return;
+    if (!(await confirmDialog(`Delete schedule "${s.name}"?`, { danger: true }))) return;
     try {
       await api.scheduleDelete(s.id);
       await reload();

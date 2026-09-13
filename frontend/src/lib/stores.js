@@ -542,6 +542,25 @@ export async function closeRequestTab(id) {
 // `resolved` is the on-demand-fetched result/response JSON string, or null.
 export const historyLoad = writable(null); // { kind, entry, resolved, at }
 
+/* ------------------------------------------------------------ dialogs */
+// Themed replacements for window.confirm()/prompt() — those work, but a
+// plain OS dialog box popping up over an otherwise fully-themed app is
+// jarring. One request store + one always-mounted <DialogHost/> (in
+// +page.svelte) renders whichever's pending; call sites just `await`
+// these exactly like the browser built-ins they replace.
+export const dialogRequest = writable(null); // { type, message, defaultValue, danger, resolve } | null
+
+export function confirmDialog(message, { danger = false } = {}) {
+  return new Promise((resolve) => {
+    dialogRequest.set({ type: 'confirm', message, danger, resolve });
+  });
+}
+export function promptDialog(message, defaultValue = '') {
+  return new Promise((resolve) => {
+    dialogRequest.set({ type: 'prompt', message, defaultValue, resolve });
+  });
+}
+
 export function loadFromHistory(kind, entry, resolved = null) {
   historyLoad.set({ kind, entry, resolved, at: Date.now() });
   activeTool.set(kind === 'sql' ? 'sql' : 'requests');

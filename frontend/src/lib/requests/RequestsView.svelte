@@ -21,7 +21,9 @@
     activeRequestTabId,
     newRequestTab,
     touchRequestTab,
-    persistRequestTab
+    persistRequestTab,
+    promptDialog,
+    confirmDialog
   } from '../stores.js';
 
   const METHODS = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'HEAD', 'OPTIONS'];
@@ -366,7 +368,7 @@
 
   async function save() {
     const headers = headersObject();
-    const name = draft.id ? draft.name : prompt('Request name:', draft.name);
+    const name = draft.id ? draft.name : await promptDialog('Request name:', draft.name);
     if (!name) return;
     try {
       const saved = await api.savedRequestSave({
@@ -390,7 +392,7 @@
   }
 
   async function delSaved(s) {
-    if (!confirm(`Delete "${s.name}"?`)) return;
+    if (!(await confirmDialog(`Delete "${s.name}"?`, { danger: true }))) return;
     try {
       await api.savedRequestDelete(s.id);
       await reloadRequests();
@@ -401,7 +403,7 @@
   }
 
   async function newCollection() {
-    const name = prompt('Collection name:');
+    const name = await promptDialog('Collection name:');
     if (!name) return;
     try {
       await api.collectionSave({ id: '', name, parent_id: null });
@@ -411,7 +413,7 @@
     }
   }
   async function delCollection(c) {
-    if (!confirm(`Delete collection "${c.name}" and its requests?`)) return;
+    if (!(await confirmDialog(`Delete collection "${c.name}" and its requests?`, { danger: true }))) return;
     try {
       await api.collectionDelete(c.id);
       await reloadRequests();

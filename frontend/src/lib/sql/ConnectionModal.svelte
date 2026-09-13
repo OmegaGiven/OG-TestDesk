@@ -1,7 +1,7 @@
 <script>
   import Modal from '../components/Modal.svelte';
   import { api } from '../api.js';
-  import { reloadConnections, toast, toastError } from '../stores.js';
+  import { reloadConnections, toast, toastError, confirmDialog } from '../stores.js';
   import { createEventDispatcher } from 'svelte';
 
   export let existing = null;
@@ -95,7 +95,7 @@
 
   async function remove() {
     if (!existing) return;
-    if (!confirm(`Delete connection "${existing.nickname}"?`)) return;
+    if (!(await confirmDialog(`Delete connection "${existing.nickname}"?`, { danger: true }))) return;
     try {
       await api.connectionDelete(existing.id);
       await reloadConnections();

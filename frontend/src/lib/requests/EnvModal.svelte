@@ -10,7 +10,8 @@
     saveGlobals,
     reloadRequests,
     toast,
-    toastError
+    toastError,
+    confirmDialog
   } from '../stores.js';
 
   const GLOBALS_KEY = '__globals__';
@@ -102,7 +103,7 @@
     }
   }
   async function remove(env) {
-    if (!confirm(`Delete environment "${env.name}"?`)) return;
+    if (!(await confirmDialog(`Delete environment "${env.name}"?`, { danger: true }))) return;
     try {
       await api.environmentDelete(env.id);
       if (expandedId === env.id) expandedId = null;

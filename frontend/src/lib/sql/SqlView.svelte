@@ -26,7 +26,8 @@
     reloadSavedQueries,
     splitTabId,
     closeSplit,
-    draggingSqlTab
+    draggingSqlTab,
+    promptDialog
   } from '../stores.js';
 
   // When this instance is one half of a split (rendered via
@@ -345,7 +346,7 @@
 
   async function saveQuery() {
     if (!tab) return;
-    const raw = prompt('Save query as:', tab.title);
+    const raw = await promptDialog('Save query as:', tab.title);
     if (!raw || !raw.trim()) return;
     const name = raw.trim();
     // update in place if a query with the same name/connection exists

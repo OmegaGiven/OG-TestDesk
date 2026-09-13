@@ -10,7 +10,9 @@
     connections,
     reloadSavedQueries,
     toast,
-    toastError
+    toastError,
+    promptDialog,
+    confirmDialog
   } from '../stores.js';
 
   const dispatch = createEventDispatcher();
@@ -79,7 +81,7 @@
 
   // -- folder ops
   async function newFolder(parentId) {
-    const name = prompt(parentId ? 'New subfolder name:' : 'New folder name:');
+    const name = await promptDialog(parentId ? 'New subfolder name:' : 'New folder name:');
     if (!name || !name.trim()) return;
     try {
       await api.savedQueryFolderSave({ id: '', name: name.trim(), parent_id: parentId || null, sort_order: 0 });
@@ -90,7 +92,7 @@
     }
   }
   async function renameFolder(f) {
-    const name = prompt('Rename folder:', f.name);
+    const name = await promptDialog('Rename folder:', f.name);
     if (!name || !name.trim() || name.trim() === f.name) return;
     try {
       await api.savedQueryFolderSave({ ...f, name: name.trim() });
@@ -100,7 +102,11 @@
     }
   }
   async function deleteFolder(f) {
-    if (!confirm(`Delete folder "${f.name}"? Subfolders are removed; queries inside move to the top level.`))
+    if (
+      !(await confirmDialog(`Delete folder "${f.name}"? Subfolders are removed; queries inside move to the top level.`, {
+        danger: true
+      }))
+    )
       return;
     try {
       await api.savedQueryFolderDelete(f.id);
@@ -112,7 +118,7 @@
 
   // -- query ops
   async function newQuery(folderId) {
-    const name = prompt('New query name:');
+    const name = await promptDialog('New query name:');
     if (!name || !name.trim()) return;
     try {
       const saved = await api.savedQuerySave({
@@ -134,7 +140,7 @@
     dispatch('open', q);
   }
   async function renameQuery(q) {
-    const name = prompt('Rename query:', q.name);
+    const name = await promptDialog('Rename query:', q.name);
     if (!name || !name.trim() || name.trim() === q.name) return;
     try {
       await api.savedQuerySave({ ...q, name: name.trim() });
@@ -144,7 +150,7 @@
     }
   }
   async function deleteQuery(q) {
-    if (!confirm(`Delete saved query "${q.name}"?`)) return;
+    if (!(await confirmDialog(`Delete saved query "${q.name}"?`, { danger: true }))) return;
     try {
       await api.savedQueryDelete(q.id);
       await reload();

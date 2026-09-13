@@ -3,7 +3,7 @@
   import { get } from 'svelte/store';
   import { Chart, registerables } from 'chart.js';
   import { api } from '../api.js';
-  import { connections, toast, toastError, reloadSavedCharts } from '../stores.js';
+  import { connections, toast, toastError, reloadSavedCharts, promptDialog } from '../stores.js';
 
   Chart.register(...registerables);
 
@@ -101,7 +101,7 @@
   async function save() {
     let n = name.trim();
     if (!n) {
-      n = prompt('Chart name:', 'New chart');
+      n = await promptDialog('Chart name:', 'New chart');
       if (!n) return;
       n = n.trim();
       if (!n) return;
