@@ -183,20 +183,101 @@
 
   function onSelect(e) {
     selected = e.detail;
+    editingNode = false;
   }
+
+  // ---- resolve the selected node's value FRESH from `root` by path,
+  // every time, instead of trusting the {value} snapshot JsonNode
+  // captured at click time. That snapshot goes stale the moment `root`
+  // changes under it (an edit applied elsewhere, a new page of results,
+  // a re-run) — the detail panel would keep showing the old value for
+  // whatever was selected even though the tree itself re-rendered
+  // correctly, which is exactly the "selected value doesn't populate
+  // right" symptom. Resolving by path self-heals that.
+  function parsePath(path) {
+    const segs = [];
+    const re = /\.([^.[\]]+)|\[(\d+)\]/g;
+    let m;
+    while ((m = re.exec(path))) segs.push(m[1] !== undefined ? m[1] : Number(m[2]));
+    return segs;
+  }
+  function getAtPath(obj, path) {
+    let cur = obj;
+    for (const seg of parsePath(path)) {
+      if (cur == null) return undefined;
+      cur = cur[seg];
+    }
+    return cur;
+  }
+  /** Returns a new root with the value at `path` replaced — clones only
+   * along the path, the rest of the structure is shared. */
+  function setAtPath(obj, path, next) {
+    const segs = parsePath(path);
+    if (segs.length === 0) return next;
+    const root2 = Array.isArray(obj) ? [...obj] : { ...obj };
+    let cur = root2;
+    for (let i = 0; i < segs.length - 1; i++) {
+      const seg = segs[i];
+      const child = cur[seg];
+      const clone = Array.isArray(child) ? [...child] : { ...(child ?? {}) };
+      cur[seg] = clone;
+      cur = clone;
+    }
+    cur[segs[segs.length - 1]] = next;
+    return root2;
+  }
+
+  $: selectedValue = selected ? getAtPath(root, selected.path) : undefined;
+  $: selectedExists = selected ? selectedValue !== undefined || selected.path === '$' : false;
+  $: selectedType = selected
+    ? selectedValue === null
+      ? 'null'
+      : Array.isArray(selectedValue)
+        ? 'array'
+        : typeof selectedValue
+    : null;
 
   function subtreePretty() {
     if (!selected) return '';
     try {
-      return JSON.stringify(selected.value, null, 2);
+      return JSON.stringify(selectedValue, null, 2);
     } catch {
-      return String(selected.value);
+      return String(selectedValue);
     }
   }
   function sizeOf(v) {
     if (v === null || typeof v !== 'object') return String(v ?? '').length + ' chars';
     return Array.isArray(v) ? `${v.length} items` : `${Object.keys(v).length} keys`;
   }
+
+  // ---- edit the selected node's value in place
+  let editingNode = false;
+  let nodeEditText = '';
+  let nodeEditError = '';
+  function startNodeEdit() {
+    nodeEditText = subtreePretty();
+    nodeEditError = '';
+    editingNode = true;
+  }
+  function cancelNodeEdit() {
+    editingNode = false;
+    nodeEditError = '';
+  }
+  function applyNodeEdit() {
+    try {
+      const parsed = JSON.parse(nodeEditText);
+      const nextRoot = setAtPath(root, selected.path, parsed);
+      inspectorPayload.update((p) => (p ? { ...p, json: nextRoot } : p));
+      editingNode = false;
+      nodeEditError = '';
+      toast('Edit applied', 'success', 1500);
+    } catch (e) {
+      nodeEditError = 'Invalid JSON: ' + e.message;
+    }
+  }
+  // a whole new payload arriving discards an in-progress node edit
+  // (selecting a different node already does, via onSelect above)
+  $: if (payload?.at && editingNode) cancelNodeEdit();
   async function copy(text) {
     try {
       await navigator.clipboard.writeText(text);
@@ -415,15 +496,31 @@
     <aside class="detail" style="width:{detailW}px">
       {#if selected}
         <div class="d-head">Selected node</div>
-        <div class="d-field"><span>Path</span><code>{selected.path}</code></div>
-        <div class="d-field"><span>Type</span><code>{selected.type}</code></div>
-        <div class="d-field"><span>Size</span><code>{sizeOf(selected.value)}</code></div>
-        <pre class="d-json">{subtreePretty()}</pre>
-        <div class="d-actions">
-          <button class="btn sm" on:click={() => copy(selected.path)}>Copy path</button>
-          <button class="btn sm" on:click={() => copy(String(selected.value))}>Copy value</button>
-          <button class="btn sm" on:click={() => copy(subtreePretty())}>Copy pretty</button>
-        </div>
+        {#if !selectedExists}
+          <div class="empty small">
+            This node no longer exists in the loaded data (it may have been edited or replaced).
+          </div>
+        {:else}
+          <div class="d-field"><span>Path</span><code>{selected.path}</code></div>
+          <div class="d-field"><span>Type</span><code>{selectedType}</code></div>
+          <div class="d-field"><span>Size</span><code>{sizeOf(selectedValue)}</code></div>
+          {#if editingNode}
+            <textarea class="d-json-edit" bind:value={nodeEditText} spellcheck="false"></textarea>
+            {#if nodeEditError}<div class="raw-err inline">{nodeEditError}</div>{/if}
+            <div class="d-actions">
+              <button class="btn primary sm" on:click={applyNodeEdit}>Apply</button>
+              <button class="btn sm" on:click={cancelNodeEdit}>Cancel</button>
+            </div>
+          {:else}
+            <pre class="d-json">{subtreePretty()}</pre>
+            <div class="d-actions">
+              <button class="btn sm" on:click={startNodeEdit}>{ICONS.editCells.glyph} Edit</button>
+              <button class="btn sm" on:click={() => copy(selected.path)}>Copy path</button>
+              <button class="btn sm" on:click={() => copy(String(selectedValue))}>Copy value</button>
+              <button class="btn sm" on:click={() => copy(subtreePretty())}>Copy pretty</button>
+            </div>
+          {/if}
+        {/if}
       {:else}
         <div class="empty small">Select a node to inspect it.</div>
       {/if}
@@ -702,5 +799,18 @@
     display: flex;
     gap: 6px;
     flex-wrap: wrap;
+  }
+  .d-json-edit {
+    margin: 8px 0;
+    padding: 8px;
+    width: 100%;
+    min-height: 160px;
+    background: var(--surface-2);
+    border: 1px solid var(--border-strong);
+    border-radius: var(--radius-sm);
+    font-family: var(--font-mono);
+    font-size: 11px;
+    color: var(--text-primary);
+    resize: vertical;
   }
 </style>
