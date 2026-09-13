@@ -2,7 +2,7 @@
 name = "og_testdesk_desktop"
 version.workspace = true
 edition.workspace = true
-license.workspace = true
+license-file = "../LICENSE"
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }

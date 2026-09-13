@@ -1,30 +1,41 @@
 # Next steps
 
-MVP is built (see the status table in `../CLAUDE.md`). Remaining polish
-and stretch items, roughly in priority order.
+MVP is built and has grown well past MVP — see `../CLAUDE.md` for the
+current feature set (MCP server w/ OAuth, on-disk history, saved-query
+folders, themes, split-screen SQL, error log, app-state debugger,
+etc.). This file tracks what's still rough or missing before a wider
+release, roughly in priority order.
 
-## Near-term polish
+## Before a beta release
 
-- [ ] Result grid virtualization — currently renders every row into the
-      DOM. Fine to ~10k rows; add windowing (e.g. manual slice on scroll)
-      for large result sets.
-- [ ] Connection reorder UI — backend `connections_reorder` exists, no
-      drag handle in the sidebar yet.
-- [ ] Saved-query browser — `saved_query_save` is wired (toolbar "Save"),
-      but there's no panel to list / open / delete saved queries.
-- [ ] Query history panel — `history_recent` command exists and every run
-      is recorded; surface it (sidebar tab or ⌘R palette).
-- [ ] Move `prompt()` / `confirm()` calls to real modals (they work but
-      look non-native).
-- [ ] Request "Params" tab: decode/encode edge cases (array params,
-      existing fragments).
+- [ ] Replace `prompt()`/`confirm()` with real modals. Still used in ~7
+      files (SavedQueries, ConnectionModal, SqlView, EnvModal,
+      RequestsView, ActivityModal, ChartView) for renames/deletes/new-
+      name prompts — functionally fine, but a plain OS dialog box
+      popping up in an otherwise fully-themed app is the single most
+      visible rough edge left. Needs a small reusable PromptModal /
+      ConfirmModal component, then a mechanical pass over each call site.
+- [ ] Result grid virtualization — still renders every row into the
+      DOM. Fine to ~10k rows; windowing matters for larger sets.
+- [ ] `docs/design-decisions.md` — reread and update against what
+      actually shipped; some early decisions (e.g. the old tool-group
+      top-bar design) have since been superseded.
+- [ ] `.github/workflows/release.yml` — cross-platform (mac/Windows/
+      Linux) `tauri-action` build + code signing / notarization is not
+      set up yet. `ci.yml` (check/test/build) exists; release
+      packaging does not.
+- [ ] `cargo fmt` / `cargo clippy` are wired into CI as informational
+      only (`continue-on-error`) since the codebase isn't currently
+      clean under either — decide whether to actually run
+      `cargo fmt --all` once and make it a real gate, or leave it loose.
 
 ## Drivers
 
-- [ ] `NUMERIC`/`DECIMAL` precision: currently parsed to JS number when it
-      round-trips, else kept as string. Consider always-string for money.
-- [ ] Postgres arrays / composite types fall back to `<TYPE>` — decode the
-      common ones (`_int4`, `_text`, `_uuid`).
+- [ ] `NUMERIC`/`DECIMAL` precision: currently parsed to JS number when
+      it round-trips, else kept as string. Consider always-string for
+      money.
+- [ ] Postgres arrays / composite types fall back to `<TYPE>` — decode
+      the common ones (`_int4`, `_text`, `_uuid`).
 - [ ] Connection pool eviction on connection edit/delete (pool cache in
       `core/src/drivers/pool.rs` keys on the conn string, so a changed
       password makes a new pool but the old one lingers until process
@@ -34,9 +45,7 @@ and stretch items, roughly in priority order.
 ## Requests
 
 - [ ] Response body: syntax highlight for XML/HTML, image preview.
-- [ ] Cookie jar / auth helpers (Bearer, Basic, API key) as a dedicated
-      tab instead of manual headers.
-- [ ] Import from `curl` / Postman collection JSON.
+- [ ] Import from `curl` (Postman collection import already exists).
 - [ ] Per-request environment override + variable autocomplete.
 
 ## Inspector
@@ -45,11 +54,14 @@ and stretch items, roughly in priority order.
 - [ ] Tree virtualization for very large payloads.
 - [ ] "Diff two payloads" mode.
 
-## Cross-cutting
+## MCP
 
-- [ ] `cargo tauri build` bundle: generate `icon.icns` + proper
-      multi-size `icon.ico` (the `magick` one-liner in the build notes),
-      set up updater endpoint or drop `tauri-plugin-updater`.
-- [ ] Persist last active tool + window size via `app_state`.
-- [ ] Tests: `core::drivers` against disposable Docker DBs; `stmt_returns_rows`
-      unit tests.
+- [ ] `tower-http`'s `cors` feature is a declared dependency but never
+      actually wired into the axum router — either use it (if a
+      browser-based MCP client ever needs to hit `127.0.0.1` directly
+      from page JS, CORS will block it without explicit headers) or
+      drop the unused feature/dependency.
+- [ ] `release.yml`/distribution note: the OAuth flow's "Approve
+      access?" page has no branding beyond plain text — fine
+      functionally, worth a pass once the app has real visual identity
+      to reuse there.

@@ -69,3 +69,15 @@ cargo tauri build
 | Top nav   | Color-coded tool → connection → tab, live from app state. |
 
 Post-MVP polish is tracked in `docs/next-steps.md`.
+
+## License
+
+Free for personal and noncommercial use under the [PolyForm
+Noncommercial License 1.0.0](LICENSE) — that covers individual use,
+hobby/research/learning, and use by nonprofits/educational/government
+institutions. Any use by or for a business requires a separate
+commercial license; open an issue or reach out to arrange one. (This
+makes the source available and free to read, use personally, and
+modify — it isn't "open source" in the OSI sense, since that
+definition doesn't allow field-of-use restrictions like the
+commercial-use carve-out here.)

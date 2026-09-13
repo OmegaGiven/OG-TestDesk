@@ -2,7 +2,6 @@
 /target/
 core/target/
 src-tauri/target/
-Cargo.lock
 
 # Node / SvelteKit
 frontend/node_modules/
