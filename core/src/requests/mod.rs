@@ -80,11 +80,38 @@ pub struct HttpResponse {
     pub status: u16,
     pub status_text: String,
     pub headers: Vec<(String, String)>,
+    /// UTF-8 text normally; base64-encoded raw bytes when `is_binary` —
+    /// decoding an image/PDF/etc. response as UTF-8 text (the previous
+    /// behavior, unconditionally) silently mangled it.
     pub body: String,
     pub content_type: Option<String>,
     pub is_json: bool,
+    #[serde(default)]
+    pub is_binary: bool,
     pub duration_ms: u64,
     pub size_bytes: usize,
+}
+
+/// Content-types treated as text and decoded as UTF-8 (lossily, so a
+/// wrong/missing charset doesn't turn into a hard error) rather than
+/// base64-encoded. Deliberately a denylist-shaped allowlist: `text/*`
+/// plus the handful of `application/*` types that are actually text in
+/// practice (JSON, XML, JS, form-urlencoded) — anything else (images,
+/// PDF, zip, protobuf, ...) is treated as binary.
+fn is_text_content_type(ct: &str) -> bool {
+    let ct = ct.split(';').next().unwrap_or("").trim().to_ascii_lowercase();
+    ct.starts_with("text/")
+        || ct.ends_with("+json")
+        || ct.ends_with("+xml")
+        || matches!(
+            ct.as_str(),
+            "application/json"
+                | "application/xml"
+                | "application/javascript"
+                | "application/ecmascript"
+                | "application/x-www-form-urlencoded"
+                | "application/graphql"
+        )
 }
 
 /// Substitutes `{{var}}` tokens in url/headers/body against an
@@ -227,14 +254,20 @@ pub async fn send(req: &HttpRequest) -> Result<HttpResponse> {
         .iter()
         .find(|(k, _)| k.eq_ignore_ascii_case("content-type"))
         .map(|(_, v)| v.clone());
-    let body = resp.text().await?;
+    let raw = resp.bytes().await?;
     let duration_ms = start.elapsed().as_millis() as u64;
-    let size_bytes = body.len();
+    let size_bytes = raw.len();
+    let is_binary = !content_type.as_deref().map(is_text_content_type).unwrap_or(true);
+    let body = if is_binary {
+        base64::engine::general_purpose::STANDARD.encode(&raw)
+    } else {
+        String::from_utf8_lossy(&raw).into_owned()
+    };
     let looks_json = content_type
         .as_deref()
         .map(|c| c.contains("json"))
         .unwrap_or(false);
-    let is_json = looks_json && serde_json::from_str::<serde_json::Value>(body.trim()).is_ok();
+    let is_json = !is_binary && looks_json && serde_json::from_str::<serde_json::Value>(body.trim()).is_ok();
 
     Ok(HttpResponse {
         status: status.as_u16(),
@@ -243,6 +276,7 @@ pub async fn send(req: &HttpRequest) -> Result<HttpResponse> {
         body,
         content_type,
         is_json,
+        is_binary,
         duration_ms,
         size_bytes,
     })
@@ -251,6 +285,19 @@ pub async fn send(req: &HttpRequest) -> Result<HttpResponse> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn is_text_content_type_classifies_common_types() {
+        assert!(is_text_content_type("text/html; charset=utf-8"));
+        assert!(is_text_content_type("application/json"));
+        assert!(is_text_content_type("application/vnd.api+json"));
+        assert!(is_text_content_type("application/xml"));
+        assert!(is_text_content_type("application/javascript"));
+        assert!(!is_text_content_type("image/png"));
+        assert!(!is_text_content_type("application/pdf"));
+        assert!(!is_text_content_type("application/octet-stream"));
+        assert!(!is_text_content_type("application/zip"));
+    }
 
     fn req(url: &str, headers: &[(&str, &str)], body: Option<&str>) -> HttpRequest {
         HttpRequest {

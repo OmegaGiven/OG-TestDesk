@@ -963,6 +963,18 @@
     toast(ok ? `${CODE_GENERATORS[codeLang].label} snippet copied` : 'Copy blocked', ok ? 'success' : 'error', 1800);
   }
 
+  // Response visualizer: html renders in a script-less sandboxed iframe
+  // (a response body is untrusted content — no allow-scripts, no
+  // allow-same-origin, so it can't touch the app), images/PDF render
+  // straight from the base64 body via a data: URI.
+  $: previewKind = (() => {
+    const ct = (response?.content_type || '').split(';')[0].trim().toLowerCase();
+    if (ct === 'text/html') return 'html';
+    if (ct.startsWith('image/')) return 'image';
+    if (ct === 'application/pdf') return 'pdf';
+    return null;
+  })();
+
   function statusClass(s) {
     if (s >= 200 && s < 300) return 'ok';
     if (s >= 300 && s < 400) return 'redir';
@@ -1450,15 +1462,35 @@
                   </span>
                 </button>
               {/if}
+              {#if previewKind}
+                <button class:active={respTab === 'preview'} on:click={() => (respTab = 'preview')}>Preview</button>
+              {/if}
             </div>
           </div>
           {#if respTab === 'body'}
             <div class="resp-body">
-              <CodeEditor
-                value={response.is_json ? tryPretty(response.body) : response.body}
-                language={response.is_json ? 'json' : 'text'}
-                readonly
-              />
+              {#if response.is_binary}
+                <div class="empty">
+                  Binary response ({response.content_type || 'unknown type'}, {fmtSize(response.size_bytes)}).
+                  {#if previewKind}See the Preview tab, or {/if}Use Save to write it to a file.
+                </div>
+              {:else}
+                <CodeEditor
+                  value={response.is_json ? tryPretty(response.body) : response.body}
+                  language={response.is_json ? 'json' : 'text'}
+                  readonly
+                />
+              {/if}
+            </div>
+          {:else if respTab === 'preview'}
+            <div class="resp-preview">
+              {#if previewKind === 'html'}
+                <iframe title="Response preview" class="preview-frame" sandbox="" srcdoc={response.body}></iframe>
+              {:else if previewKind === 'image'}
+                <img class="preview-image" alt="Response preview" src={`data:${response.content_type};base64,${response.body}`} />
+              {:else if previewKind === 'pdf'}
+                <embed class="preview-frame" type="application/pdf" src={`data:application/pdf;base64,${response.body}`} />
+              {/if}
             </div>
           {:else if respTab === 'tests'}
             <div class="resp-tests">
@@ -1996,6 +2028,25 @@
     padding: 8px;
     font-family: var(--font-mono);
     font-size: 11px;
+  }
+  .resp-preview {
+    height: 100%;
+    overflow: auto;
+    display: flex;
+    align-items: flex-start;
+    justify-content: center;
+    background: var(--surface-2);
+  }
+  .preview-frame {
+    width: 100%;
+    height: 100%;
+    border: none;
+    background: #fff;
+  }
+  .preview-image {
+    max-width: 100%;
+    max-height: 100%;
+    margin: 12px auto;
   }
   .h-row {
     display: flex;
