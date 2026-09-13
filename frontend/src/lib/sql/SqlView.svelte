@@ -9,6 +9,8 @@
   import ConnPicker from './ConnPicker.svelte';
   import { api } from '../api.js';
   import { format as formatSqlText } from 'sql-formatter';
+  import { quote, literal, defaultSchema } from '../sqlIdent.js';
+  import CsvImportModal from './CsvImportModal.svelte';
   import { downloadText } from '../export.js';
   import {
     connections,
@@ -40,6 +42,7 @@
   // become the left (primary) or right tab.
   export let tabId = null;
   export let side = null; // null | 'left' | 'right'
+  let showCsvImport = false;
 
   // ---- split-screen host (top-level instance only): render two
   // <svelte:self> side by side, resizable, when a split is active.
@@ -242,27 +245,6 @@
     return sql.replace(VAR_RE, (m, name) => (name in vals && vals[name] !== '' ? vals[name] : m));
   }
   $: missingVars = tab ? vars.filter((v) => !((varValues[tab.id] || {})[v] ?? '')) : [];
-
-  function quote(conn, ident) {
-    if (conn.kind === 'mysql') return '`' + ident.replace(/`/g, '``') + '`';
-    return '"' + ident.replace(/"/g, '""') + '"';
-  }
-
-  function literal(conn, val) {
-    if (val === null || val === undefined) return 'NULL';
-    if (typeof val === 'number') return String(val);
-    if (typeof val === 'boolean') {
-      return conn.kind === 'mysql' ? (val ? '1' : '0') : val ? 'TRUE' : 'FALSE';
-    }
-    const s = (typeof val === 'object' ? JSON.stringify(val) : String(val)).replace(/'/g, "''");
-    return `'${s}'`;
-  }
-
-  function defaultSchema(conn) {
-    if (conn.kind === 'sqlite') return 'main';
-    if (conn.kind === 'mysql') return conn.database || '';
-    return 'public';
-  }
 
   // Recognizes exactly the `openRelation()`-style statement (`SELECT *
   // FROM [schema.]table [WHERE|ORDER BY|LIMIT ...]`) that real row
@@ -828,6 +810,11 @@
         </button>
         <button class="btn" on:click={saveQuery}>Save</button>
         <button class="btn ghost sm" title="Format SQL (⇧⌥F)" on:click={formatSql}>Format</button>
+        {#if tabConn && !tabConn.read_only}
+          <button class="btn ghost sm" title="Import a CSV file into this connection" on:click={() => (showCsvImport = true)}>
+            Import CSV
+          </button>
+        {/if}
         <button class="icon-btn big-glyph" title={ICONS.saveFile.label} on:click={saveToFile}
           >{ICONS.saveFile.glyph}</button
         >
@@ -950,6 +937,16 @@
       </div>
     {/if}
   </section>
+  {#if showCsvImport && tabConn}
+    <CsvImportModal
+      conn={tabConn}
+      on:close={() => (showCsvImport = false)}
+      on:imported={() => {
+        showCsvImport = false;
+        toast('Refresh the schema panel (↻) to see the new/updated table', 'success', 4000);
+      }}
+    />
+  {/if}
 </div>
 {/if}
 
