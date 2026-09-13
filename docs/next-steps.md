@@ -8,13 +8,6 @@ release, roughly in priority order.
 
 ## Before a beta release
 
-- [ ] Replace `prompt()`/`confirm()` with real modals. Still used in ~7
-      files (SavedQueries, ConnectionModal, SqlView, EnvModal,
-      RequestsView, ActivityModal, ChartView) for renames/deletes/new-
-      name prompts — functionally fine, but a plain OS dialog box
-      popping up in an otherwise fully-themed app is the single most
-      visible rough edge left. Needs a small reusable PromptModal /
-      ConfirmModal component, then a mechanical pass over each call site.
 - [ ] Result grid virtualization — still renders every row into the
       DOM. Fine to ~10k rows; windowing matters for larger sets.
 - [ ] `docs/design-decisions.md` — reread and update against what

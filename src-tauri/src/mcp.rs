@@ -918,8 +918,17 @@ async fn call_tool(ctx: &AppCtx, name: &str, args: Value) -> Result<String> {
                 ));
             }
             let pw = SecretsStore::get(&conn.id)?;
+            // Always hard-capped, independent of the human's UI row-limit
+            // preference (which can be set to "unlimited (risky)") — an
+            // AI-driven call here is unattended, so it must never be able
+            // to make the app try to decode a multi-million-row result.
             let result = drivers::driver_for(conn.kind)
-                .run_query(&conn, pw.as_deref(), &sql, og_testdesk_core::QueryOpts::full())
+                .run_query(
+                    &conn,
+                    pw.as_deref(),
+                    &sql,
+                    og_testdesk_core::QueryOpts::full_capped(10_000),
+                )
                 .await?;
             Ok(serde_json::to_string_pretty(&result)?)
         }

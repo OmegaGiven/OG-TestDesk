@@ -132,6 +132,14 @@ pub struct QueryOpts {
     pub offset: usize,
     /// Also try to compute the total row count (time-boxed).
     pub count: bool,
+    /// Overrides the global `max_rows()` streaming cap for this call only,
+    /// ignoring the human's UI row-limit preference entirely (including its
+    /// "unlimited" setting). Used by callers that run SQL unattended — MCP
+    /// tool calls and the scheduler — where nobody is watching to notice a
+    /// multi-million-row `SELECT *` and cancel it, unlike the human-driven
+    /// query editor, which respects whatever risk the human chose for
+    /// their own foreground query.
+    pub row_cap_override: Option<usize>,
 }
 
 impl QueryOpts {
@@ -141,6 +149,7 @@ impl QueryOpts {
             limit: None,
             offset: 0,
             count: false,
+            row_cap_override: None,
         }
     }
     pub fn page(page: usize, size: usize, count: bool) -> Self {
@@ -148,6 +157,19 @@ impl QueryOpts {
             limit: Some(size),
             offset: page.saturating_mul(size),
             count,
+            row_cap_override: None,
+        }
+    }
+    /// Like `full()`, but never subject to the human's UI row-limit
+    /// preference — always capped at `n` regardless of the persisted
+    /// `max_rows()` setting (even if that's 0/"unlimited"). For unattended
+    /// callers (MCP, scheduler) that promise their own hard ceiling.
+    pub fn full_capped(n: usize) -> Self {
+        Self {
+            limit: None,
+            offset: 0,
+            count: false,
+            row_cap_override: Some(n),
         }
     }
 }
@@ -347,6 +369,22 @@ mod tests {
         ] {
             assert!(stmt_returns_rows(sql), "expected {sql:?} to return rows");
         }
+    }
+
+    #[test]
+    fn full_capped_ignores_unlimited_max_rows_setting() {
+        // Regression test: MCP/scheduler must stay hard-capped even when a
+        // human has set the UI's global row limit to 0 ("unlimited
+        // (risky)") for their own interactive queries — see max_rows()'s
+        // 0-means-unlimited escape hatch above. A 5M-row `SELECT *` run
+        // unattended through this path once froze the whole app because
+        // full() alone just inherits that global setting.
+        let original = max_rows();
+        set_max_rows(0);
+        let opts = QueryOpts::full_capped(10_000);
+        assert_eq!(opts.row_cap_override, Some(10_000));
+        assert_eq!(max_rows(), usize::MAX); // confirms the risky global is in effect
+        set_max_rows(original);
     }
 
     #[test]

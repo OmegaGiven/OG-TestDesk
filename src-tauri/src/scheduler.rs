@@ -109,8 +109,15 @@ pub async fn run_one(metadata: &MetadataStore, s: &Schedule) -> String {
                 return "connection missing".into();
             };
             let pw = SecretsStore::get(&conn.id).ok().flatten();
+            // Hard-capped regardless of the human's UI row-limit preference —
+            // nobody is watching a scheduled run to notice and cancel it.
             let res = drivers::driver_for(conn.kind)
-                .run_query(&conn, pw.as_deref(), sql, og_testdesk_core::QueryOpts::full())
+                .run_query(
+                    &conn,
+                    pw.as_deref(),
+                    sql,
+                    og_testdesk_core::QueryOpts::full_capped(10_000),
+                )
                 .await;
             let entry = match &res {
                 Ok(r) => HistoryEntry {

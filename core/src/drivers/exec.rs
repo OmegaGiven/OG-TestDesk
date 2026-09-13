@@ -47,7 +47,7 @@ macro_rules! run_query_body {
 
         // --- page fetch (streamed, hard-capped) ---
         let page_fut = async {
-            let cap = max_rows();
+            let cap = opts.row_cap_override.unwrap_or_else(max_rows);
             let mut stream = sqlx::query(&exec_sql).fetch(&pool);
             let mut columns: Vec<QueryColumn> = Vec::new();
             let mut data: Vec<Vec<serde_json::Value>> = Vec::new();
