@@ -538,7 +538,8 @@ async fn request_send(
         }
     }
 
-    let result = http_requests::send(&request).await;
+    let net = load_network_settings(&state.metadata).await;
+    let result = http_requests::send_with(&request, &net).await;
     let entry = og_testdesk_core::RequestHistoryEntry {
         id: new_id(),
         saved_request_id,
@@ -741,6 +742,36 @@ async fn error_log_list(limit: Option<usize>) -> R<Vec<og_testdesk_core::ErrorLo
 async fn error_log_clear() -> R<()> {
     og_testdesk_core::clear_error_log();
     Ok(())
+}
+
+// --------------------------------------------------------- network settings
+
+pub(crate) async fn load_network_settings(metadata: &MetadataStore) -> og_testdesk_core::requests::NetworkSettings {
+    metadata
+        .get_state("network_settings")
+        .await
+        .ok()
+        .flatten()
+        .and_then(|s| serde_json::from_str(&s).ok())
+        .unwrap_or_default()
+}
+
+#[tauri::command]
+async fn network_settings_get(state: State<'_, AppState>) -> R<og_testdesk_core::requests::NetworkSettings> {
+    Ok(load_network_settings(&state.metadata).await)
+}
+
+#[tauri::command]
+async fn network_settings_set(
+    state: State<'_, AppState>,
+    settings: og_testdesk_core::requests::NetworkSettings,
+) -> R<()> {
+    let json = serde_json::to_string(&settings).map_err(err)?;
+    state
+        .metadata
+        .set_state("network_settings", &json)
+        .await
+        .map_err(err)
 }
 
 // -------------------------------------------------------------- cookie jar
@@ -1014,6 +1045,8 @@ async fn main() {
             cookies_list,
             cookies_clear,
             cookie_delete,
+            network_settings_get,
+            network_settings_set,
             log_client_error,
             debug_state_set,
             debug_state_get,

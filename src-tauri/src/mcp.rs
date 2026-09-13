@@ -961,7 +961,8 @@ async fn call_tool(ctx: &AppCtx, name: &str, args: Value) -> Result<String> {
                 timeout_secs: Some(60),
             };
             apply_vars(&ctx.metadata, &mut http).await;
-            let resp = http_requests::send(&http).await?;
+            let net = crate::load_network_settings(&ctx.metadata).await;
+            let resp = http_requests::send_with(&http, &net).await?;
             Ok(serde_json::to_string_pretty(&resp)?)
         }
         "send_request" if ctx.cfg.allow_http => {
@@ -978,7 +979,8 @@ async fn call_tool(ctx: &AppCtx, name: &str, args: Value) -> Result<String> {
                 timeout_secs: Some(60),
             };
             apply_vars(&ctx.metadata, &mut http).await;
-            let resp = http_requests::send(&http).await?;
+            let net = crate::load_network_settings(&ctx.metadata).await;
+            let resp = http_requests::send_with(&http, &net).await?;
             Ok(serde_json::to_string_pretty(&resp)?)
         }
         "open_sql_tab" if ctx.cfg.allow_populate => {

@@ -3,6 +3,7 @@
   import CodeEditor from '../components/CodeEditor.svelte';
   import EnvModal from './EnvModal.svelte';
   import CookieManagerModal from './CookieManagerModal.svelte';
+  import NetworkSettingsModal from './NetworkSettingsModal.svelte';
   import ConnPicker from '../sql/ConnPicker.svelte';
   import { api } from '../api.js';
   import { parsePostman, toPostmanCollection } from './postman.js';
@@ -51,6 +52,7 @@
   let respTab = 'body'; // body | headers
   let envModal = false;
   let cookieModal = false;
+  let networkModal = false;
   let splitPct = 50;
   let dragging = false;
 
@@ -1118,6 +1120,9 @@
       <button class="btn ghost sm" title="Cookies collected from responses, replayed automatically" on:click={() => (cookieModal = true)}>
         🍪 Cookies
       </button>
+      <button class="btn ghost sm" title="Proxy, custom CA, client certificates" on:click={() => (networkModal = true)}>
+        Network
+      </button>
     </div>
   </aside>
 
@@ -1524,6 +1529,9 @@
 {/if}
 {#if cookieModal}
   <CookieManagerModal on:close={() => (cookieModal = false)} />
+{/if}
+{#if networkModal}
+  <NetworkSettingsModal on:close={() => (networkModal = false)} />
 {/if}
 
 <script context="module">

@@ -224,11 +224,59 @@ fn apply_body(
     Ok(builder)
 }
 
+/// A client certificate to present for requests to `host` (and its
+/// subdomains) — for mTLS-protected APIs. `pem` is the certificate and
+/// its private key concatenated in one PEM blob (what reqwest's
+/// `Identity::from_pem` expects).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ClientCertEntry {
+    pub host: String,
+    pub pem: String,
+}
+
+/// Network-level settings that apply to every request, resolved once by
+/// the caller (who has access to the settings store) and threaded
+/// through rather than read from inside `send()` itself, which stays
+/// storage-agnostic. `Default` = exactly today's behavior (no proxy, no
+/// custom trust/identity).
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct NetworkSettings {
+    pub proxy_url: Option<String>,
+    /// An extra CA certificate (PEM) to trust, for internal APIs behind
+    /// a self-signed or private-CA cert — added alongside, not instead
+    /// of, the normal system trust roots.
+    pub extra_ca_pem: Option<String>,
+    #[serde(default)]
+    pub client_certs: Vec<ClientCertEntry>,
+}
+
 pub async fn send(req: &HttpRequest) -> Result<HttpResponse> {
-    let client = reqwest::Client::builder()
+    send_with(req, &NetworkSettings::default()).await
+}
+
+pub async fn send_with(req: &HttpRequest, net: &NetworkSettings) -> Result<HttpResponse> {
+    let mut builder = reqwest::Client::builder()
         .timeout(Duration::from_secs(req.timeout_secs.unwrap_or(60)))
-        .cookie_provider(cookie_jar())
-        .build()?;
+        .cookie_provider(cookie_jar());
+    if let Some(proxy_url) = net.proxy_url.as_deref().filter(|p| !p.trim().is_empty()) {
+        builder = builder.proxy(reqwest::Proxy::all(proxy_url).context("invalid proxy URL")?);
+    }
+    if let Some(ca_pem) = net.extra_ca_pem.as_deref().filter(|c| !c.trim().is_empty()) {
+        let cert = reqwest::Certificate::from_pem(ca_pem.as_bytes()).context("invalid CA certificate PEM")?;
+        builder = builder.add_root_certificate(cert);
+    }
+    if let Some(host) = reqwest::Url::parse(&req.url).ok().and_then(|u| u.host_str().map(str::to_string)) {
+        if let Some(entry) = net
+            .client_certs
+            .iter()
+            .find(|c| host == c.host || host.ends_with(&format!(".{}", c.host)))
+        {
+            let identity =
+                reqwest::Identity::from_pem(entry.pem.as_bytes()).context("invalid client certificate PEM")?;
+            builder = builder.identity(identity);
+        }
+    }
+    let client = builder.build()?;
     let method = reqwest::Method::from_bytes(req.method.to_ascii_uppercase().as_bytes())?;
     let mut builder = client.request(method, &req.url);
     for (k, v) in &req.headers {

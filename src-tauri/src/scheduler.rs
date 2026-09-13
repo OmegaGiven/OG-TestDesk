@@ -157,7 +157,8 @@ pub async fn run_one(metadata: &MetadataStore, s: &Schedule) -> String {
                 None => return "misconfigured".into(),
             };
             apply_environment(&mut req, &active_vars(metadata).await);
-            let res = http_requests::send(&req).await;
+            let net = crate::load_network_settings(metadata).await;
+            let res = http_requests::send_with(&req, &net).await;
             let entry = match &res {
                 Ok(r) => RequestHistoryEntry {
                     id: uuid::Uuid::new_v4().to_string(),

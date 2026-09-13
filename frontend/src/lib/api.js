@@ -93,6 +93,8 @@ export const api = {
   cookiesList: () => call('cookies_list'),
   cookiesClear: (domain) => call('cookies_clear', { domain }),
   cookieDelete: (domain, name) => call('cookie_delete', { domain, name }),
+  networkSettingsGet: () => call('network_settings_get'),
+  networkSettingsSet: (settings) => call('network_settings_set', { settings }),
 
   // request globals (plain variables, applied under the active environment)
   globalsGet: () => call('state_get', { key: 'request_globals' }),
