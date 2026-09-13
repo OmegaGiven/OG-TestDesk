@@ -20,10 +20,11 @@ release, roughly in priority order.
 - [ ] `docs/design-decisions.md` — reread and update against what
       actually shipped; some early decisions (e.g. the old tool-group
       top-bar design) have since been superseded.
-- [ ] `.github/workflows/release.yml` — cross-platform (mac/Windows/
-      Linux) `tauri-action` build + code signing / notarization is not
-      set up yet. `ci.yml` (check/test/build) exists; release
-      packaging does not.
+- [ ] Code signing / notarization — `release.yml` builds mac/Windows/
+      Linux on a `v*` tag push via `tauri-action`, but unsigned: macOS
+      Gatekeeper and Windows SmartScreen will both warn on install.
+      Needs an Apple Developer ID cert + notarization credentials and a
+      Windows code-signing cert, wired in as repo secrets.
 - [ ] `cargo fmt` / `cargo clippy` are wired into CI as informational
       only (`continue-on-error`) since the codebase isn't currently
       clean under either — decide whether to actually run

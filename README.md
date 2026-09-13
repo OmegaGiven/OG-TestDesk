@@ -59,6 +59,23 @@ cd frontend && pnpm build && cd ..
 cargo tauri build
 ```
 
+## Versioning
+
+One version, in one place: the workspace `Cargo.toml`'s
+`[workspace.package] version` — `src-tauri`/`core` inherit it via
+`version.workspace = true`, and `tauri.conf.json` has no `version` of
+its own, so Tauri reads it from `src-tauri`'s Cargo.toml too.
+
+```
+scripts/bump-version.sh 0.2.0     # updates Cargo.toml + frontend/package.json
+git add -A && git commit -m "Bump version to 0.2.0"
+git tag v0.2.0 && git push origin main v0.2.0
+```
+
+Pushing a `v*` tag triggers `.github/workflows/release.yml`, which
+builds and packages the app for macOS, Windows, and Linux and attaches
+the installers to a (draft) GitHub Release. See `CHANGELOG.md`.
+
 ## Feature status
 
 | Feature   | Status                                                                 |

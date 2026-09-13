@@ -3,6 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "license": "SEE LICENSE IN ../LICENSE",
+  "packageManager": "pnpm@12.3.4",
   "type": "module",
   "scripts": {
     "dev": "vite dev --host",
@@ -32,5 +33,8 @@
     "@tauri-apps/plugin-shell": "^2.3.6",
     "chart.js": "^4.5.1",
     "codemirror": "^6.0.1"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": ["esbuild", "svelte-preprocess"]
   }
 }
