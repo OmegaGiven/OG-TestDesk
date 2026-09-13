@@ -29,7 +29,8 @@
     reloadSavedQueries,
     reloadSavedCharts,
     sendToInspector,
-    connMenuOpen
+    connMenuOpen,
+    debugSnapshot
   } from '../lib/stores.js';
 
   let settingsOpen = false;
@@ -75,6 +76,19 @@
   // already land in the error log via every command's `err()` helper.
   // Without this, these just vanish into the devtools console the user
   // never opens.
+  // Keep the backend's copy of "what does the app think is open" fresh
+  // — debounced, since this store recomputes on nearly every tab/tool
+  // action — so the get_app_state MCP tool isn't reading something
+  // stale from minutes ago.
+  let debugPushTimer;
+  $: debugSnapshotJson = JSON.stringify($debugSnapshot, null, 2);
+  $: if (debugSnapshotJson) {
+    clearTimeout(debugPushTimer);
+    debugPushTimer = setTimeout(() => {
+      api.debugStateSet(debugSnapshotJson).catch(() => {});
+    }, 400);
+  }
+
   function onWindowError(e) {
     api.logClientError('window', e.message || String(e.error || e)).catch(() => {});
   }

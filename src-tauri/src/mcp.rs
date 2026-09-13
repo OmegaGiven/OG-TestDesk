@@ -153,6 +153,9 @@ struct AppCtx {
     /// never an AI-chosen path, so this tool can't touch arbitrary
     /// locations on disk.
     exports_dir: PathBuf,
+    /// The frontend's last-reported `debugSnapshot` (raw JSON, opaque
+    /// here) — see the `get_app_state` tool.
+    debug_state: Arc<Mutex<String>>,
 }
 
 pub struct McpHandle {
@@ -172,6 +175,7 @@ pub async fn start(
     metadata: Arc<MetadataStore>,
     cfg: McpConfig,
     exports_dir: PathBuf,
+    debug_state: Arc<Mutex<String>>,
 ) -> Result<McpHandle> {
     let ctx = AppCtx {
         metadata,
@@ -179,6 +183,7 @@ pub async fn start(
         sessions: Arc::new(Mutex::new(HashMap::new())),
         oauth: Arc::new(Mutex::new(OAuthState::default())),
         exports_dir,
+        debug_state,
     };
 
     let app = Router::new()
@@ -645,6 +650,11 @@ async fn dispatch(ctx: &AppCtx, method: &str, params: Value) -> Result<Value> {
 fn tool_defs(cfg: &McpConfig) -> Vec<Value> {
     let mut tools = vec![
         json!({
+            "name": "get_app_state",
+            "description": "Read the app's current UI state as reported by the frontend — every open SQL/request tab (id, title, dirty flag, which is active), split-screen state, Inspector open/closed, connections, and top-bar group layout. Use this to see what tabs actually exist when debugging a tab-count/visibility mismatch, instead of asking the human to describe their screen. May be empty or stale if the app hasn't reported yet or was just restarted.",
+            "inputSchema": { "type": "object", "properties": {} }
+        }),
+        json!({
             "name": "get_error_log",
             "description": "Read the app's recent error log (backend, MCP tool calls, and reported frontend errors) — for diagnosing something that just went wrong. Never contains passwords.",
             "inputSchema": { "type": "object", "properties": {
@@ -810,6 +820,14 @@ async fn call_tool(ctx: &AppCtx, name: &str, args: Value) -> Result<String> {
     let s = |k: &str| args.get(k).and_then(|v| v.as_str()).map(str::to_string);
 
     match name {
+        "get_app_state" => {
+            let snap = ctx.debug_state.lock().await.clone();
+            if snap.is_empty() {
+                Ok("(no state reported yet — the app may have just started; give it a moment)".to_string())
+            } else {
+                Ok(snap)
+            }
+        }
         "get_error_log" => {
             let limit = args.get("limit").and_then(|v| v.as_u64()).unwrap_or(50) as usize;
             let entries = og_testdesk_core::recent_errors(Some(limit));

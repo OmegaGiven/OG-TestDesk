@@ -21,6 +21,10 @@ struct AppState {
     metadata: Arc<MetadataStore>,
     mcp: Arc<AsyncMutex<Option<McpHandle>>>,
     exports_dir: std::path::PathBuf,
+    /// Last debug-state snapshot the frontend reported (raw JSON string,
+    /// opaque to the backend) — see `debug_state_set`/`debug_state_get`
+    /// and the MCP `get_app_state` tool.
+    debug_state: Arc<AsyncMutex<String>>,
 }
 
 async fn load_mcp_config(meta: &MetadataStore) -> McpConfig {
@@ -637,9 +641,14 @@ async fn start_mcp(state: &State<'_, AppState>) -> R<()> {
     if guard.is_some() {
         return Ok(());
     }
-    let handle = mcp::start(state.metadata.clone(), cfg, state.exports_dir.clone())
-        .await
-        .map_err(err)?;
+    let handle = mcp::start(
+        state.metadata.clone(),
+        cfg,
+        state.exports_dir.clone(),
+        state.debug_state.clone(),
+    )
+    .await
+    .map_err(err)?;
     *guard = Some(handle);
     Ok(())
 }
@@ -727,6 +736,23 @@ async fn log_client_error(source: String, message: String) -> R<()> {
     Ok(())
 }
 
+// ------------------------------------------------------------------- debug
+
+/// The frontend pushes its `debugSnapshot` store here (debounced) so the
+/// running app's tab/tool/group state can be read from outside the
+/// webview — the in-app Activity → Debug tab reads the store directly,
+/// but the `get_app_state` MCP tool has no other way to see it.
+#[tauri::command]
+async fn debug_state_set(state: State<'_, AppState>, json: String) -> R<()> {
+    *state.debug_state.lock().await = json;
+    Ok(())
+}
+
+#[tauri::command]
+async fn debug_state_get(state: State<'_, AppState>) -> R<String> {
+    Ok(state.debug_state.lock().await.clone())
+}
+
 // ---------------------------------------------------------------------- main
 
 #[tokio::main]
@@ -745,13 +771,14 @@ async fn main() {
         .expect("open metadata store");
     let metadata = Arc::new(metadata);
     let exports_dir = app_data_dir.join("exports");
+    let debug_state: Arc<AsyncMutex<String>> = Arc::new(AsyncMutex::new(String::new()));
 
     // Auto-start the MCP server if it was left enabled.
     let mcp_slot: Arc<AsyncMutex<Option<McpHandle>>> = Arc::new(AsyncMutex::new(None));
     {
         let cfg = load_mcp_config(&metadata).await;
         if cfg.enabled {
-            match mcp::start(metadata.clone(), cfg, exports_dir.clone()).await {
+            match mcp::start(metadata.clone(), cfg, exports_dir.clone(), debug_state.clone()).await {
                 Ok(h) => *mcp_slot.lock().await = Some(h),
                 Err(e) => eprintln!("[mcp] failed to auto-start: {e}"),
             }
@@ -770,6 +797,7 @@ async fn main() {
         metadata: metadata.clone(),
         mcp: mcp_slot,
         exports_dir,
+        debug_state: debug_state.clone(),
     };
 
     tauri::Builder::default()
@@ -839,6 +867,8 @@ async fn main() {
             error_log_list,
             error_log_clear,
             log_client_error,
+            debug_state_set,
+            debug_state_get,
             mcp_config_get,
             mcp_config_set,
             mcp_status,

@@ -548,3 +548,82 @@ export function loadFromHistory(kind, entry, resolved = null) {
   activeTool.set(kind === 'sql' ? 'sql' : 'requests');
 }
 
+/* ---------------------------------------------------------- debug snapshot */
+// One live, structured view of "what does the app think is open right
+// now" — every tab, which one's active, split/group/inspector state.
+// Built for exactly the class of bug where the top bar and a workspace
+// visibly disagree about how many tabs exist: this is the same data
+// both of them read, dumped in one place so that disagreement is easy
+// to see instead of having to reason about it from a screenshot.
+// Rendered live in Activity → Debug, and separately pushed (debounced)
+// to the backend so the `get_app_state` MCP tool can read it too — an
+// AI helping debug can't see the screen, but can read this.
+export const debugSnapshot = derived(
+  [
+    activeTool,
+    sqlTabs,
+    activeSqlTabId,
+    requestTabs,
+    activeRequestTabId,
+    splitTabId,
+    inspectorOpen,
+    connections,
+    tabGroupOverride,
+    groupOrder,
+    tabOrder,
+    connMenuOpen
+  ],
+  ([
+    $activeTool,
+    $sqlTabs,
+    $activeSqlTabId,
+    $requestTabs,
+    $activeRequestTabId,
+    $splitTabId,
+    $inspectorOpen,
+    $connections,
+    $tabGroupOverride,
+    $groupOrder,
+    $tabOrder,
+    $connMenuOpen
+  ]) => ({
+    at: Date.now(),
+    activeTool: $activeTool,
+    connMenuOpen: $connMenuOpen,
+    sql: {
+      activeTabId: $activeSqlTabId,
+      splitTabId: $splitTabId,
+      tabCount: $sqlTabs.length,
+      tabs: $sqlTabs.map((t) => ({
+        id: t.id,
+        title: t.title,
+        connectionId: t.connection_id,
+        dirty: !!t.dirty,
+        active: t.id === $activeSqlTabId,
+        inSplit: t.id === $splitTabId,
+        groupOverride: $tabGroupOverride[t.id] ?? null
+      }))
+    },
+    requests: {
+      activeTabId: $activeRequestTabId,
+      tabCount: $requestTabs.length,
+      tabs: $requestTabs.map((t) => ({
+        id: t.id,
+        title: t.title,
+        method: t.method,
+        url: t.url,
+        dirty: !!t.dirty,
+        active: t.id === $activeRequestTabId,
+        groupOverride: $tabGroupOverride[t.id] ?? null
+      }))
+    },
+    inspector: {
+      open: $inspectorOpen,
+      groupOverride: $tabGroupOverride[INSPECTOR_TAB_ID] ?? null
+    },
+    connections: $connections.map((c) => ({ id: c.id, nickname: c.nickname, kind: c.kind })),
+    groupOrder: $groupOrder,
+    tabOrder: $tabOrder
+  })
+);
+

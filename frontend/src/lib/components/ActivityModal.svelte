@@ -12,12 +12,13 @@
     loadFromHistory,
     sendToInspector,
     toast,
-    toastError
+    toastError,
+    debugSnapshot
   } from '../stores.js';
 
   const dispatch = createEventDispatcher();
 
-  let tab = 'history'; // history | schedules | charts | errors
+  let tab = 'history'; // history | schedules | charts | errors | debug
   let histKind = 'sql'; // sql | request
   let sqlHist = [];
   let reqHist = [];
@@ -31,6 +32,7 @@
     if (at === 'schedules') tab = 'schedules';
     if (at === 'charts') tab = 'charts';
     if (at === 'errors') tab = 'errors';
+    if (at === 'debug') tab = 'debug';
     if (at === 'requests') histKind = 'request';
     if (q.has('newschedule')) {
       tab = 'schedules';
@@ -66,6 +68,13 @@
       .join('\n');
     navigator.clipboard?.writeText(text).then(
       () => toast('Error log copied', 'success', 1500),
+      () => toastError('Copy blocked')
+    );
+  }
+
+  function copyDebugJson() {
+    navigator.clipboard?.writeText(JSON.stringify($debugSnapshot, null, 2)).then(
+      () => toast('Debug state copied', 'success', 1500),
       () => toastError('Copy blocked')
     );
   }
@@ -218,6 +227,7 @@
     <button class:active={tab === 'errors'} on:click={() => (tab = 'errors')}>
       Errors {#if errors.length}<span class="n">{errors.length}</span>{/if}
     </button>
+    <button class:active={tab === 'debug'} on:click={() => (tab = 'debug')}>Debug</button>
   </div>
 
   {#if tab === 'history'}
@@ -410,6 +420,55 @@
       {/each}
       {#if errors.length === 0}<div class="empty">No errors logged. Good sign.</div>{/if}
     </div>
+  {:else if tab === 'debug'}
+    <div class="subtabs">
+      <span class="muted">
+        Live app state — every open tab, which is active, split/group/inspector state. Also
+        readable by an MCP-connected AI via the <code>get_app_state</code> tool.
+      </span>
+      <span style="flex:1" />
+      <button class="btn ghost sm" on:click={copyDebugJson}>Copy JSON</button>
+    </div>
+    <div class="debug-body">
+      <div class="dbg-section">
+        <div class="dbg-head">SQL tabs ({$debugSnapshot.sql.tabCount})</div>
+        {#each $debugSnapshot.sql.tabs as t (t.id)}
+          <div class="dbg-row">
+            <span class="tag" class:on={t.active}>{t.active ? 'active' : ''}</span>
+            {#if t.inSplit}<span class="tag on">split</span>{/if}
+            <span class="dbg-title">{t.title}</span>
+            <span class="dbg-meta">conn {t.connectionId?.slice(0, 8) ?? '—'}{t.dirty ? ' · dirty' : ''}</span>
+          </div>
+        {/each}
+        {#if $debugSnapshot.sql.tabCount === 0}<div class="empty small">none</div>{/if}
+      </div>
+      <div class="dbg-section">
+        <div class="dbg-head">Request tabs ({$debugSnapshot.requests.tabCount})</div>
+        {#each $debugSnapshot.requests.tabs as t (t.id)}
+          <div class="dbg-row">
+            <span class="tag" class:on={t.active}>{t.active ? 'active' : ''}</span>
+            <span class="dbg-title">{t.method} {t.title}</span>
+            <span class="dbg-meta">{t.url || '(no url)'}{t.dirty ? ' · dirty' : ''}</span>
+          </div>
+        {/each}
+        {#if $debugSnapshot.requests.tabCount === 0}<div class="empty small">none</div>{/if}
+      </div>
+      <div class="dbg-section">
+        <div class="dbg-head">Tool / Inspector</div>
+        <div class="dbg-row">
+          <span class="dbg-meta">active tool: <b>{$debugSnapshot.activeTool}</b></span>
+        </div>
+        <div class="dbg-row">
+          <span class="dbg-meta">
+            Inspector: {$debugSnapshot.inspector.open ? 'open' : 'closed'}
+          </span>
+        </div>
+      </div>
+      <div class="dbg-section">
+        <div class="dbg-head">Raw snapshot</div>
+        <pre class="dbg-json">{JSON.stringify($debugSnapshot, null, 2)}</pre>
+      </div>
+    </div>
   {/if}
 </Modal>
 
@@ -528,6 +587,76 @@
     white-space: nowrap;
   }
   .err-msg {
+    white-space: pre-wrap;
+    word-break: break-word;
+  }
+  .debug-body {
+    max-height: 52vh;
+    overflow: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+  }
+  .dbg-section {
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    overflow: hidden;
+  }
+  .dbg-head {
+    padding: 6px 8px;
+    font-size: 10px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+    color: var(--text-secondary);
+    background: var(--surface-2);
+    border-bottom: 1px solid var(--border);
+  }
+  .dbg-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 5px 8px;
+    font-size: 11px;
+    border-bottom: 1px solid var(--border);
+  }
+  .dbg-row:last-child {
+    border-bottom: none;
+  }
+  .dbg-row .tag {
+    min-width: 40px;
+    text-align: center;
+    visibility: hidden;
+  }
+  .dbg-row .tag.on {
+    visibility: visible;
+    color: var(--ok);
+    background: color-mix(in srgb, var(--ok) 16%, transparent);
+  }
+  .dbg-title {
+    font-weight: 600;
+    color: var(--text-primary);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .dbg-meta {
+    margin-left: auto;
+    color: var(--text-muted);
+    font-family: var(--font-mono);
+    font-size: 10px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .dbg-json {
+    margin: 0;
+    padding: 8px;
+    max-height: 220px;
+    overflow: auto;
+    background: var(--surface-2);
+    font-family: var(--font-mono);
+    font-size: 10.5px;
     white-space: pre-wrap;
     word-break: break-word;
   }

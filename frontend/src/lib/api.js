@@ -87,6 +87,7 @@ export const api = {
   errorLogList: (limit) => call('error_log_list', { limit }),
   errorLogClear: () => call('error_log_clear'),
   logClientError: (source, message) => call('log_client_error', { source, message }),
+  debugStateSet: (json) => call('debug_state_set', { json }),
 
   // request globals (plain variables, applied under the active environment)
   globalsGet: () => call('state_get', { key: 'request_globals' }),
