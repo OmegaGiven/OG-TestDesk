@@ -43,6 +43,41 @@
   let testing = false;
   let saving = false;
   let testResult = null;
+  let urlPaste = '';
+  let urlError = '';
+
+  // Accepts postgres(ql)://, mysql://, and sqlite:/// / file: connection
+  // URLs (the schemes Postico and most other DB tools accept) and fills
+  // the form from them — paste one instead of typing each field by hand.
+  function applyConnectionUrl() {
+    const raw = urlPaste.trim();
+    urlError = '';
+    if (!raw) return;
+    try {
+      if (/^sqlite:/i.test(raw) || /^file:/i.test(raw)) {
+        form.kind = 'sqlite';
+        // "sqlite://" + "/absolute/path" is the 3-slash form seen in the
+        // wild — strip only the two-slash scheme prefix so the path's own
+        // leading slash (for an absolute path) survives.
+        form.file_path = raw.replace(/^sqlite:\/\//i, '').replace(/^sqlite:/i, '').replace(/^file:\/\//i, '');
+        urlPaste = '';
+        return;
+      }
+      const m = raw.match(/^(postgres(?:ql)?|mysql):\/\/(?:([^:@/]+)(?::([^@/]*))?@)?([^:/?]+)(?::(\d+))?\/?([^?]*)/i);
+      if (!m) throw new Error('Unrecognized connection URL');
+      const [, scheme, user, pw, host, port, db] = m;
+      form.kind = /^postgres/i.test(scheme) ? 'postgres' : 'mysql';
+      form.host = decodeURIComponent(host || 'localhost');
+      form.port = port ? Number(port) : form.kind === 'postgres' ? 5432 : 3306;
+      form.database = db ? decodeURIComponent(db) : '';
+      form.user = user ? decodeURIComponent(user) : '';
+      if (pw) password = decodeURIComponent(pw);
+      form.use_tls = /sslmode=require|ssl=true|ssl=1/i.test(raw);
+      urlPaste = '';
+    } catch (e) {
+      urlError = String(e.message || e);
+    }
+  }
 
   $: isSqlite = form.kind === 'sqlite';
   $: if (form.kind === 'postgres' && !form.port) form.port = 5432;
@@ -111,6 +146,21 @@
 </script>
 
 <Modal title={existing ? 'Edit connection' : 'New connection'} width="480px" on:close>
+  <div class="field">
+    <label for="url">Paste a connection URL (optional)</label>
+    <div class="url-row">
+      <input
+        id="url"
+        class="input mono"
+        bind:value={urlPaste}
+        placeholder="postgres://user:pass@host:5432/db"
+        on:keydown={(e) => e.key === 'Enter' && applyConnectionUrl()}
+      />
+      <button class="btn ghost sm" on:click={applyConnectionUrl}>Fill in</button>
+    </div>
+    {#if urlError}<div class="test bad">{urlError}</div>{/if}
+  </div>
+
   <div class="field">
     <label for="nick">Name</label>
     <input id="nick" class="input" bind:value={form.nickname} placeholder="PROD" />
@@ -195,6 +245,13 @@
 </Modal>
 
 <style>
+  .url-row {
+    display: flex;
+    gap: 6px;
+  }
+  .url-row .input {
+    flex: 1;
+  }
   .swatches {
     display: flex;
     gap: 5px;
