@@ -1,6 +1,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod mcp;
+mod mockserver;
 mod scheduler;
 
 use std::collections::HashMap;
@@ -20,6 +21,7 @@ use tauri::{Manager, State};
 struct AppState {
     metadata: Arc<MetadataStore>,
     mcp: Arc<AsyncMutex<Option<McpHandle>>>,
+    mock: Arc<AsyncMutex<Option<mockserver::MockHandle>>>,
     exports_dir: std::path::PathBuf,
     /// Last debug-state snapshot the frontend reported (raw JSON string,
     /// opaque to the backend) — see `debug_state_set`/`debug_state_get`
@@ -744,6 +746,54 @@ async fn error_log_clear() -> R<()> {
     Ok(())
 }
 
+// -------------------------------------------------------------- mock server
+
+#[tauri::command]
+async fn mock_routes_list(state: State<'_, AppState>) -> R<Vec<og_testdesk_core::MockRoute>> {
+    state.metadata.list_mock_routes().await.map_err(err)
+}
+
+#[tauri::command]
+async fn mock_route_save(
+    state: State<'_, AppState>,
+    mut route: og_testdesk_core::MockRoute,
+) -> R<og_testdesk_core::MockRoute> {
+    if route.id.is_empty() {
+        route.id = new_id();
+    }
+    state.metadata.upsert_mock_route(&route).await.map_err(err)?;
+    Ok(route)
+}
+
+#[tauri::command]
+async fn mock_route_delete(state: State<'_, AppState>, id: String) -> R<()> {
+    state.metadata.delete_mock_route(&id).await.map_err(err)
+}
+
+#[tauri::command]
+async fn mock_server_status(state: State<'_, AppState>) -> R<serde_json::Value> {
+    let running = state.mock.lock().await.as_ref().map(|h| h.port);
+    Ok(serde_json::json!({ "running": running.is_some(), "port": running }))
+}
+
+#[tauri::command]
+async fn mock_server_start(state: State<'_, AppState>, port: u16) -> R<serde_json::Value> {
+    if state.mock.lock().await.is_some() {
+        return mock_server_status(state).await;
+    }
+    let handle = mockserver::start(state.metadata.clone(), port).await.map_err(err)?;
+    *state.mock.lock().await = Some(handle);
+    mock_server_status(state).await
+}
+
+#[tauri::command]
+async fn mock_server_stop(state: State<'_, AppState>) -> R<serde_json::Value> {
+    if let Some(h) = state.mock.lock().await.take() {
+        h.stop();
+    }
+    mock_server_status(state).await
+}
+
 // --------------------------------------------------------- network settings
 
 pub(crate) async fn load_network_settings(metadata: &MetadataStore) -> og_testdesk_core::requests::NetworkSettings {
@@ -937,6 +987,7 @@ async fn main() {
     let exports_dir = app_data_dir.join("exports");
     let debug_state: Arc<AsyncMutex<String>> = Arc::new(AsyncMutex::new(String::new()));
     let mcp_slot: Arc<AsyncMutex<Option<McpHandle>>> = Arc::new(AsyncMutex::new(None));
+    let mock_slot: Arc<AsyncMutex<Option<mockserver::MockHandle>>> = Arc::new(AsyncMutex::new(None));
 
     if let Ok(Some(s)) = metadata.get_state("query_max_rows").await {
         if let Ok(n) = s.parse::<usize>() {
@@ -949,6 +1000,7 @@ async fn main() {
     let managed = AppState {
         metadata: metadata.clone(),
         mcp: mcp_slot.clone(),
+        mock: mock_slot.clone(),
         exports_dir: exports_dir.clone(),
         debug_state: debug_state.clone(),
         app_handle: OnceLock::new(),
@@ -1047,6 +1099,12 @@ async fn main() {
             cookie_delete,
             network_settings_get,
             network_settings_set,
+            mock_routes_list,
+            mock_route_save,
+            mock_route_delete,
+            mock_server_status,
+            mock_server_start,
+            mock_server_stop,
             log_client_error,
             debug_state_set,
             debug_state_get,

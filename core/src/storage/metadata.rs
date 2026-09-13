@@ -133,6 +133,17 @@ CREATE TABLE IF NOT EXISTS saved_requests (
     created_at    INTEGER NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS mock_routes (
+    id           TEXT PRIMARY KEY,
+    method       TEXT NOT NULL DEFAULT 'GET',
+    path         TEXT NOT NULL,
+    status       INTEGER NOT NULL DEFAULT 200,
+    headers_json TEXT NOT NULL DEFAULT '{}',
+    body         TEXT NOT NULL DEFAULT '',
+    enabled      INTEGER NOT NULL DEFAULT 1,
+    sort_order   INTEGER NOT NULL DEFAULT 0
+);
+
 CREATE TABLE IF NOT EXISTS environments (
     id            TEXT PRIMARY KEY,
     name          TEXT NOT NULL,
@@ -375,6 +386,21 @@ pub struct SavedRequest {
     pub test_script: Option<String>,
     #[serde(default)]
     pub body_mode_json: Option<String>,
+}
+
+/// A single canned response: any request matching `method`+`path`
+/// exactly (no wildcards/path params in this first pass) gets `status`/
+/// `headers_json`/`body` back, unconditionally.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MockRoute {
+    pub id: String,
+    pub method: String,
+    pub path: String,
+    pub status: u16,
+    pub headers_json: String,
+    pub body: String,
+    pub enabled: bool,
+    pub sort_order: i64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -1201,6 +1227,60 @@ impl MetadataStore {
 
     pub async fn delete_saved_request(&self, id: &str) -> Result<()> {
         sqlx::query("DELETE FROM saved_requests WHERE id = ?")
+            .bind(id)
+            .execute(&self.pool)
+            .await?;
+        Ok(())
+    }
+
+    // -------------------------------------------------------------- mock server
+
+    pub async fn list_mock_routes(&self) -> Result<Vec<MockRoute>> {
+        let rows = sqlx::query(
+            "SELECT id, method, path, status, headers_json, body, enabled, sort_order
+             FROM mock_routes ORDER BY sort_order, path",
+        )
+        .fetch_all(&self.pool)
+        .await?;
+        Ok(rows
+            .into_iter()
+            .map(|r| MockRoute {
+                id: r.get("id"),
+                method: r.get("method"),
+                path: r.get("path"),
+                status: r.get::<i64, _>("status") as u16,
+                headers_json: r.get("headers_json"),
+                body: r.get("body"),
+                enabled: r.get::<i64, _>("enabled") != 0,
+                sort_order: r.get("sort_order"),
+            })
+            .collect())
+    }
+
+    pub async fn upsert_mock_route(&self, r: &MockRoute) -> Result<()> {
+        sqlx::query(
+            "INSERT INTO mock_routes (id, method, path, status, headers_json, body, enabled, sort_order)
+             VALUES (?,?,?,?,?,?,?,?)
+             ON CONFLICT(id) DO UPDATE SET
+                method=excluded.method, path=excluded.path, status=excluded.status,
+                headers_json=excluded.headers_json, body=excluded.body, enabled=excluded.enabled,
+                sort_order=excluded.sort_order",
+        )
+        .bind(&r.id)
+        .bind(&r.method)
+        .bind(&r.path)
+        .bind(r.status as i64)
+        .bind(&r.headers_json)
+        .bind(&r.body)
+        .bind(r.enabled as i64)
+        .bind(r.sort_order)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    pub async fn delete_mock_route(&self, id: &str) -> Result<()> {
+        sqlx::query("DELETE FROM mock_routes WHERE id = ?")
             .bind(id)
             .execute(&self.pool)
             .await?;

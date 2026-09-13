@@ -4,6 +4,7 @@
   import EnvModal from './EnvModal.svelte';
   import CookieManagerModal from './CookieManagerModal.svelte';
   import NetworkSettingsModal from './NetworkSettingsModal.svelte';
+  import MockServerModal from './MockServerModal.svelte';
   import ConnPicker from '../sql/ConnPicker.svelte';
   import { api } from '../api.js';
   import { parsePostman, toPostmanCollection } from './postman.js';
@@ -53,6 +54,7 @@
   let envModal = false;
   let cookieModal = false;
   let networkModal = false;
+  let mockModal = false;
   let splitPct = 50;
   let dragging = false;
 
@@ -1123,6 +1125,9 @@
       <button class="btn ghost sm" title="Proxy, custom CA, client certificates" on:click={() => (networkModal = true)}>
         Network
       </button>
+      <button class="btn ghost sm" title="Local mock server — canned responses, no real backend" on:click={() => (mockModal = true)}>
+        Mock
+      </button>
     </div>
   </aside>
 
@@ -1532,6 +1537,9 @@
 {/if}
 {#if networkModal}
   <NetworkSettingsModal on:close={() => (networkModal = false)} />
+{/if}
+{#if mockModal}
+  <MockServerModal on:close={() => (mockModal = false)} />
 {/if}
 
 <script context="module">

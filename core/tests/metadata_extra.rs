@@ -5,7 +5,7 @@
 //! environments, and both history tables.
 
 use og_testdesk_core::{
-    ConnConfig, DbKind, Environment, HistoryEntry, MetadataStore, RequestCollection,
+    ConnConfig, DbKind, Environment, HistoryEntry, MetadataStore, MockRoute, RequestCollection,
     RequestHistoryEntry, RequestTab, SavedChart, SavedQuery, SavedQueryFolder, SavedRequest,
     Schedule,
 };
@@ -316,4 +316,39 @@ async fn sql_and_request_history_keep_blobs_off_the_list() {
     assert!(rlist[0].has_response);
     let rblob = db.request_history_result("rh1").await.unwrap().unwrap();
     assert!(rblob.contains("200"));
+}
+
+#[tokio::test]
+async fn mock_routes_crud() {
+    let db = store().await;
+    let r = MockRoute {
+        id: "".into(),
+        method: "GET".into(),
+        path: "/api/ping".into(),
+        status: 200,
+        headers_json: r#"{"Content-Type":"application/json"}"#.into(),
+        body: r#"{"ok":true}"#.into(),
+        enabled: true,
+        sort_order: 0,
+    };
+    let mut r = r;
+    r.id = "mr1".into();
+    db.upsert_mock_route(&r).await.unwrap();
+
+    let list = db.list_mock_routes().await.unwrap();
+    assert_eq!(list.len(), 1);
+    assert_eq!(list[0].path, "/api/ping");
+    assert_eq!(list[0].status, 200);
+
+    let mut updated = r.clone();
+    updated.status = 404;
+    updated.enabled = false;
+    db.upsert_mock_route(&updated).await.unwrap();
+    let list2 = db.list_mock_routes().await.unwrap();
+    assert_eq!(list2.len(), 1, "upsert on the same id should update, not duplicate");
+    assert_eq!(list2[0].status, 404);
+    assert!(!list2[0].enabled);
+
+    db.delete_mock_route("mr1").await.unwrap();
+    assert!(db.list_mock_routes().await.unwrap().is_empty());
 }

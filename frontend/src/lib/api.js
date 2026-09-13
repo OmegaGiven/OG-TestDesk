@@ -95,6 +95,12 @@ export const api = {
   cookieDelete: (domain, name) => call('cookie_delete', { domain, name }),
   networkSettingsGet: () => call('network_settings_get'),
   networkSettingsSet: (settings) => call('network_settings_set', { settings }),
+  mockRoutesList: () => call('mock_routes_list'),
+  mockRouteSave: (route) => call('mock_route_save', { route }),
+  mockRouteDelete: (id) => call('mock_route_delete', { id }),
+  mockServerStatus: () => call('mock_server_status'),
+  mockServerStart: (port) => call('mock_server_start', { port }),
+  mockServerStop: () => call('mock_server_stop'),
 
   // request globals (plain variables, applied under the active environment)
   globalsGet: () => call('state_get', { key: 'request_globals' }),
