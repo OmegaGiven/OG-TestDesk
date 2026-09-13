@@ -101,6 +101,9 @@ export const api = {
   mockServerStatus: () => call('mock_server_status'),
   mockServerStart: (port) => call('mock_server_start', { port }),
   mockServerStop: () => call('mock_server_stop'),
+  grpcListServices: (url) => call('grpc_list_services', { url }),
+  grpcListMethods: (url, service) => call('grpc_list_methods', { url, service }),
+  grpcCallUnary: (url, service, method, payload) => call('grpc_call_unary', { url, service, method, payload }),
 
   // request globals (plain variables, applied under the active environment)
   globalsGet: () => call('state_get', { key: 'request_globals' }),

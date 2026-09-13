@@ -746,6 +746,46 @@ async fn error_log_clear() -> R<()> {
     Ok(())
 }
 
+// ------------------------------------------------------------------- gRPC
+
+#[derive(serde::Serialize)]
+struct GrpcMethodOut {
+    service: String,
+    method: String,
+    input_type: String,
+    output_type: String,
+    client_streaming: bool,
+    server_streaming: bool,
+}
+
+#[tauri::command]
+async fn grpc_list_services(url: String) -> R<Vec<String>> {
+    og_testdesk_core::grpc::list_services(&url).await.map_err(err)
+}
+
+#[tauri::command]
+async fn grpc_list_methods(url: String, service: String) -> R<Vec<GrpcMethodOut>> {
+    let methods = og_testdesk_core::grpc::list_methods(&url, &service).await.map_err(err)?;
+    Ok(methods
+        .into_iter()
+        .map(|m| GrpcMethodOut {
+            service: m.service,
+            method: m.method,
+            input_type: m.input_type,
+            output_type: m.output_type,
+            client_streaming: m.client_streaming,
+            server_streaming: m.server_streaming,
+        })
+        .collect())
+}
+
+#[tauri::command]
+async fn grpc_call_unary(url: String, service: String, method: String, payload: String) -> R<String> {
+    og_testdesk_core::grpc::call_unary(&url, &service, &method, &payload)
+        .await
+        .map_err(err)
+}
+
 // -------------------------------------------------------------- mock server
 
 #[tauri::command]
@@ -1099,6 +1139,9 @@ async fn main() {
             cookie_delete,
             network_settings_get,
             network_settings_set,
+            grpc_list_services,
+            grpc_list_methods,
+            grpc_call_unary,
             mock_routes_list,
             mock_route_save,
             mock_route_delete,

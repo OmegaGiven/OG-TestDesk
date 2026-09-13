@@ -3,6 +3,7 @@
 //! backend (`src-tauri`) via `tauri::command` wrappers.
 
 pub mod drivers;
+pub mod grpc;
 pub mod requests;
 pub mod storage;
 

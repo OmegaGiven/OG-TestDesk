@@ -6,6 +6,7 @@
   import NetworkSettingsModal from './NetworkSettingsModal.svelte';
   import MockServerModal from './MockServerModal.svelte';
   import WebSocketPanel from './WebSocketPanel.svelte';
+  import GrpcPanel from './GrpcPanel.svelte';
   import ConnPicker from '../sql/ConnPicker.svelte';
   import { api } from '../api.js';
   import { parsePostman, toPostmanCollection } from './postman.js';
@@ -57,6 +58,7 @@
   let networkModal = false;
   let mockModal = false;
   let wsModal = false;
+  let grpcModal = false;
   let splitPct = 50;
   let dragging = false;
 
@@ -1133,6 +1135,9 @@
       <button class="btn ghost sm" title="WebSocket connection tester" on:click={() => (wsModal = true)}>
         WS
       </button>
+      <button class="btn ghost sm" title="gRPC — reflection-based discovery, unary calls" on:click={() => (grpcModal = true)}>
+        gRPC
+      </button>
     </div>
   </aside>
 
@@ -1548,6 +1553,9 @@
 {/if}
 {#if wsModal}
   <WebSocketPanel on:close={() => (wsModal = false)} />
+{/if}
+{#if grpcModal}
+  <GrpcPanel on:close={() => (grpcModal = false)} />
 {/if}
 
 <script context="module">
