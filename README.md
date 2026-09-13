@@ -80,7 +80,7 @@ the installers to a (draft) GitHub Release. See `CHANGELOG.md`.
 
 | Feature   | Status                                                                 |
 | --------- | ----------------------------------------------------------------------- |
-| SQL       | Working. Connection manager (test + accent color), lazy schema/column browser, CodeMirror editor (⌘↵ run, run-selection, ⌘S save), sortable result grid, CSV/JSON export, per-connection query tabs persisted across restarts. Postgres / MySQL / SQLite. |
+| SQL       | Working. Connection manager (test + accent color), lazy schema/column browser, CodeMirror editor (⌘↵ run, run-selection, ⌘S save), sortable result grid, CSV/JSON export, per-connection query tabs persisted across restarts. Real row editing — a plain `SELECT * FROM <table>` on a table with a primary key can be edited in the grid and saved as actual UPDATE/INSERT/DELETE statements, with a confirmation prompt before anything runs. Postgres / MySQL / SQLite. |
 | Requests  | Working. Collections + saved requests, method/URL bar with Params⇄URL sync, headers, JSON body (beautify), response viewer (status/time/size, body + headers), `{{variable}}` environments with an active-env switcher. |
 | Inspector | Working. Tree / Table / Summary modes, search with match count + auto-expand, detail panel (path / type / size / pretty-print + copy). Fed by SQL results and HTTP responses, or paste raw JSON. |
 | Top nav   | Color-coded tool → connection → tab, live from app state. |

@@ -27,7 +27,8 @@
     splitTabId,
     closeSplit,
     draggingSqlTab,
-    promptDialog
+    promptDialog,
+    confirmDialog
   } from '../stores.js';
 
   // When this instance is one half of a split (rendered via
@@ -246,6 +247,124 @@
     return '"' + ident.replace(/"/g, '""') + '"';
   }
 
+  function literal(conn, val) {
+    if (val === null || val === undefined) return 'NULL';
+    if (typeof val === 'number') return String(val);
+    if (typeof val === 'boolean') {
+      return conn.kind === 'mysql' ? (val ? '1' : '0') : val ? 'TRUE' : 'FALSE';
+    }
+    const s = (typeof val === 'object' ? JSON.stringify(val) : String(val)).replace(/'/g, "''");
+    return `'${s}'`;
+  }
+
+  function defaultSchema(conn) {
+    if (conn.kind === 'sqlite') return 'main';
+    if (conn.kind === 'mysql') return conn.database || '';
+    return 'public';
+  }
+
+  // Recognizes exactly the `openRelation()`-style statement (`SELECT *
+  // FROM [schema.]table [WHERE|ORDER BY|LIMIT ...]`) that real row
+  // editing supports — anything with an explicit column list, a join, or
+  // an aggregate can't be safely mapped back to one table's primary key.
+  function parseSingleTable(sql) {
+    const s = sql.trim().replace(/;\s*$/, '');
+    const ident = '(?:"[^"]+"|`[^`]+`|\\[[^\\]]+\\]|[A-Za-z_][\\w$]*)';
+    const re = new RegExp(`^select\\s+\\*\\s+from\\s+(${ident}(?:\\.${ident})?)\\s*(where\\s|order\\s+by\\s|limit\\s|$)`, 'is');
+    const m = s.match(re);
+    if (!m) return null;
+    const unquote = (id) => id.replace(/^["`[]/, '').replace(/["'`\]]$/, '');
+    const parts = m[1].split('.');
+    return parts.length === 2
+      ? { schema: unquote(parts[0]), table: unquote(parts[1]) }
+      : { schema: null, table: unquote(parts[0]) };
+  }
+
+  let columnsCache = {}; // `${connId}:${schema}.${table}` -> Promise<Column[]>
+  async function refreshEditableTable(t, conn, sql) {
+    const parsed = parseSingleTable(sql);
+    if (!parsed) {
+      touchSqlTab(t.id, { editableTable: null });
+      return;
+    }
+    const schema = parsed.schema || defaultSchema(conn);
+    const key = `${conn.id}:${schema}.${parsed.table}`;
+    try {
+      if (!columnsCache[key]) columnsCache[key] = api.columnsList(conn, schema, parsed.table);
+      const cols = await columnsCache[key];
+      const pkCols = cols.filter((c) => c.primary_key).map((c) => c.name);
+      touchSqlTab(t.id, { editableTable: pkCols.length ? { schema, table: parsed.table, pkCols } : null });
+    } catch {
+      touchSqlTab(t.id, { editableTable: null });
+    }
+  }
+
+  async function onSaveEdits(e) {
+    const t = tab;
+    const et = t?.editableTable;
+    if (!t || !et || !t.result) return;
+    const conn = tabConn;
+    const cols = t.result.columns;
+    const pkIdx = et.pkCols.map((pk) => cols.findIndex((c) => c.name === pk));
+    if (pkIdx.some((i) => i < 0)) {
+      toast('Primary key column missing from result — cannot save', 'error', 4000);
+      return;
+    }
+    const ref =
+      conn.kind === 'sqlite' ? quote(conn, et.table) : `${quote(conn, et.schema)}.${quote(conn, et.table)}`;
+    const whereFor = (row) =>
+      pkIdx.map((pi, i) => `${quote(conn, et.pkCols[i])} = ${literal(conn, row[pi])}`).join(' AND ');
+
+    const stmts = [];
+    for (const { rowIndex, changes } of e.detail.edits) {
+      const row = t.result.rows[rowIndex];
+      if (!row) continue;
+      const sets = Object.entries(changes)
+        .map(([ci, val]) => `${quote(conn, cols[+ci].name)} = ${literal(conn, val)}`)
+        .join(', ');
+      if (!sets) continue;
+      stmts.push(`UPDATE ${ref} SET ${sets} WHERE ${whereFor(row)}`);
+    }
+    for (const rowIndex of e.detail.deletes) {
+      const row = t.result.rows[rowIndex];
+      if (!row) continue;
+      stmts.push(`DELETE FROM ${ref} WHERE ${whereFor(row)}`);
+    }
+    for (const values of e.detail.inserts) {
+      const names = [];
+      const vals = [];
+      for (const ci in values) {
+        names.push(quote(conn, cols[+ci].name));
+        vals.push(literal(conn, values[ci]));
+      }
+      if (!names.length) continue;
+      stmts.push(`INSERT INTO ${ref} (${names.join(', ')}) VALUES (${vals.join(', ')})`);
+    }
+    if (!stmts.length) return;
+
+    const preview = stmts.slice(0, 5).join(';\n') + (stmts.length > 5 ? `\n… +${stmts.length - 5} more` : '');
+    const ok = await confirmDialog(
+      `Run ${stmts.length} SQL statement${stmts.length === 1 ? '' : 's'} against "${conn.nickname}"?\n\n${preview}`,
+      { danger: true }
+    );
+    if (!ok) return;
+
+    for (let i = 0; i < stmts.length; i++) {
+      try {
+        await api.queryRun(conn, stmts[i], null, null, false);
+      } catch (err) {
+        toast(
+          `Statement ${i + 1}/${stmts.length} failed: ${err} — ${i} of ${stmts.length} already applied; re-run the query to see current state.`,
+          'error',
+          8000
+        );
+        return;
+      }
+    }
+    toast(`${stmts.length} statement${stmts.length === 1 ? '' : 's'} applied`, 'success', 2500);
+    await run();
+  }
+
   async function openRelation(e) {
     const { schema, relation } = e.detail;
     const c = sidebarConn;
@@ -303,6 +422,9 @@
       if (result.is_select) {
         const shown = result.total != null ? ` of ${result.total.toLocaleString()}` : '';
         toast(`${result.row_count.toLocaleString()} rows${shown} · ${result.duration_ms} ms`, 'success', 2500);
+        refreshEditableTable(t, conn, sql);
+      } else {
+        touchSqlTab(t.id, { editableTable: null });
       }
     } catch (e) {
       touchSqlTab(t.id, { error: String(e), running: false });
@@ -591,8 +713,10 @@
               name={tab.title}
               loadingMore={tab.running}
               appending={appendFlag}
+              editableTable={tab.editableTable}
               on:loadmore={loadMore}
               on:inspect={inspectResult}
+              on:save={onSaveEdits}
             />
           {/if}
         </div>

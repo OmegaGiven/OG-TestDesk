@@ -7,6 +7,13 @@
   export let name = 'result';
   export let loadingMore = false; // parent is fetching the next page
   export let appending = false; // true while `result` is being replaced by an append (keep scroll/edits)
+  // Set by the parent only when the running statement was a plain
+  // `SELECT * FROM <table>` (no join/aggregate) and that table has a
+  // primary key — `{ schema, table, pkCols }`. Presence of this is what
+  // turns "Edit" from a view/export-only scratchpad into real writes:
+  // the parent builds UPDATE/INSERT/DELETE from what we hand back on
+  // `save` and actually runs them against the connection.
+  export let editableTable = null;
   const dispatch = createEventDispatcher();
 
   let sortCol = -1;
@@ -35,10 +42,46 @@
     hiddenCols = new Set(cols.slice(1).map((_, i) => i + 1));
   }
 
-  // ---- inline edits (view/export only — never written back to the DB)
+  // ---- inline edits. Without editableTable these stay view/export-only
+  // scratch state (never written back). With it, "Save changes" turns
+  // them into real UPDATE/DELETE/INSERT statements run by the parent.
   let editing = false;
   let edits = new Map(); // row (array ref, stable across sort/filter/append) -> {colIndex: value}
+  let deletedRows = new Set(); // row refs marked for deletion
+  let newRows = []; // [{ id, values: {colIndex: value} }] — appended rows not yet saved
   $: editCount = [...edits.values()].reduce((n, e) => n + Object.keys(e).length, 0);
+  $: pendingCount = editCount + deletedRows.size + newRows.length;
+
+  function addNewRow() {
+    newRows = [...newRows, { id: `${Date.now()}-${Math.random()}`, values: {} }];
+  }
+  function removeNewRow(nr) {
+    newRows = newRows.filter((x) => x !== nr);
+  }
+  function setNewRowVal(nr, c, str) {
+    const values = { ...nr.values };
+    if (str === '') delete values[c];
+    else values[c] = str;
+    newRows = newRows.map((x) => (x === nr ? { ...nr, values } : x));
+  }
+  function toggleDelete(row) {
+    const s = new Set(deletedRows);
+    s.has(row) ? s.delete(row) : s.add(row);
+    deletedRows = s;
+  }
+  function saveChanges() {
+    const editList = [];
+    for (const [row, e] of edits) {
+      if (deletedRows.has(row)) continue;
+      const rowIndex = baseRows.indexOf(row);
+      if (rowIndex === -1) continue;
+      editList.push({ rowIndex, changes: e });
+    }
+    const deletes = [...deletedRows].map((r) => baseRows.indexOf(r)).filter((i) => i !== -1);
+    const inserts = newRows.map((nr) => nr.values).filter((v) => Object.keys(v).length > 0);
+    if (!editList.length && !deletes.length && !inserts.length) return;
+    dispatch('save', { edits: editList, deletes, inserts });
+  }
 
   function coerceEdit(original, str) {
     if (str.trim() === '') return null;
@@ -70,6 +113,8 @@
   }
   function discardEdits() {
     edits = new Map();
+    deletedRows = new Set();
+    newRows = [];
   }
   $: exportRows =
     edits.size === 0
@@ -154,6 +199,8 @@
       scrollTop = 0;
       if (scrollEl) scrollEl.scrollTop = 0;
       edits = new Map();
+      deletedRows = new Set();
+      newRows = [];
     }
     // keep sort + filters across paging; clear only when column set changes
     const colKey = cols.map((c) => c.name).join('');
@@ -330,11 +377,30 @@
       <span class="fcount">{total.toLocaleString()} of {baseRows.length.toLocaleString()}</span>
       <button class="btn ghost sm" on:click={clearFilters}>Clear</button>
     {/if}
-    <button class="btn ghost sm" class:on={editing} title="Edit cells (view/export only, does not write to the DB)" on:click={() => (editing = !editing)}>
+    <button
+      class="btn ghost sm"
+      class:on={editing}
+      title={editableTable
+        ? 'Edit rows — writes real UPDATE/INSERT/DELETE statements when saved'
+        : 'Edit cells (view/export only — no primary key found, can\'t write back)'}
+      on:click={() => (editing = !editing)}
+    >
       {ICONS.editCells.glyph} Edit
     </button>
-    {#if editCount}
-      <span class="fcount">{editCount.toLocaleString()} edited</span>
+    {#if editing && editableTable}
+      <button class="btn ghost sm" on:click={addNewRow}>+ New row</button>
+    {/if}
+    {#if pendingCount}
+      <span class="fcount"
+        >{editCount ? `${editCount.toLocaleString()} edited` : ''}{editCount && deletedRows.size ? ', ' : ''}{deletedRows.size
+          ? `${deletedRows.size} deleted`
+          : ''}{(editCount || deletedRows.size) && newRows.length ? ', ' : ''}{newRows.length
+          ? `${newRows.length} new`
+          : ''}</span
+      >
+      {#if editableTable}
+        <button class="btn primary sm" on:click={saveChanges}>{ICONS.success.glyph} Save changes</button>
+      {/if}
       <button class="btn ghost sm" on:click={discardEdits}>{ICONS.revert.glyph} Discard</button>
     {/if}
     <span style="flex:1" />
@@ -406,10 +472,20 @@
           <tr class="spacer"><td colspan={visibleIdx.length + 1} style="height:{padTop}px"></td></tr>
         {/if}
         {#each visible as row, vi (startIdx + vi)}
-          <tr>
-            <td class="rownum">{startIdx + vi + 1}</td>
+          <tr class:row-deleted={deletedRows.has(row)}>
+            <td class="rownum">
+              {#if editing && editableTable}
+                <button
+                  class="del-toggle"
+                  title={deletedRows.has(row) ? 'Undo delete' : 'Mark row for deletion'}
+                  on:click={() => toggleDelete(row)}
+                >{deletedRows.has(row) ? ICONS.revert.glyph : ICONS.delete?.glyph ?? '×'}</button>
+              {:else}
+                {startIdx + vi + 1}
+              {/if}
+            </td>
             {#each visibleIdx as c (c)}
-              {#if editing}
+              {#if editing && !deletedRows.has(row)}
                 <td class="editing-cell" class:edited={hasEdit(row, c)}>
                   <input
                     class="cell-edit"
@@ -437,6 +513,28 @@
         {/each}
         {#if padBottom}
           <tr class="spacer"><td colspan={visibleIdx.length + 1} style="height:{padBottom}px"></td></tr>
+        {/if}
+        {#if editing && editableTable}
+          {#each newRows as nr (nr.id)}
+            <tr class="new-row">
+              <td class="rownum">
+                <button class="del-toggle" title="Remove this new row" on:click={() => removeNewRow(nr)}>×</button>
+              </td>
+              {#each visibleIdx as c (c)}
+                <td class="editing-cell">
+                  <input
+                    class="cell-edit"
+                    placeholder={cols[c].name}
+                    value={nr.values[c] ?? ''}
+                    on:change={(e) => setNewRowVal(nr, c, e.target.value)}
+                    on:keydown={(e) => {
+                      if (e.key === 'Enter') e.target.blur();
+                    }}
+                  />
+                </td>
+              {/each}
+            </tr>
+          {/each}
         {/if}
         {#if loadingMore}
           <tr class="loading-more"><td colspan={visibleIdx.length + 1}>Loading more…</td></tr>
@@ -692,6 +790,24 @@
     border-radius: 3px;
     background: var(--surface-2);
     color: var(--text-primary);
+  }
+  tr.row-deleted td:not(.rownum) {
+    background: color-mix(in srgb, var(--danger) 14%, transparent);
+    text-decoration: line-through;
+    color: var(--text-muted);
+  }
+  tr.new-row td {
+    background: color-mix(in srgb, var(--success, #2fa860) 12%, transparent);
+  }
+  .del-toggle {
+    all: unset;
+    cursor: pointer;
+    color: var(--text-muted);
+    font-size: 11px;
+    padding: 0 2px;
+  }
+  .del-toggle:hover {
+    color: var(--danger);
   }
   .loading-more td {
     text-align: center;
