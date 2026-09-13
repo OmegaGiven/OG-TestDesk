@@ -11,6 +11,7 @@
   import { format as formatSqlText } from 'sql-formatter';
   import { quote, literal, defaultSchema } from '../sqlIdent.js';
   import CsvImportModal from './CsvImportModal.svelte';
+  import TableStructureModal from './TableStructureModal.svelte';
   import { downloadText } from '../export.js';
   import {
     connections,
@@ -43,6 +44,10 @@
   export let tabId = null;
   export let side = null; // null | 'left' | 'right'
   let showCsvImport = false;
+  let structureTarget = null; // { schema, relation } | null
+  function openStructure(e) {
+    structureTarget = e.detail;
+  }
 
   // ---- split-screen host (top-level instance only): render two
   // <svelte:self> side by side, resizable, when a split is active.
@@ -802,7 +807,7 @@
 
       {#if sidebarConn}
         <div class="schema-host">
-          <SchemaTree conn={sidebarConn} on:open={openRelation} />
+          <SchemaTree conn={sidebarConn} on:open={openRelation} on:structure={openStructure} />
         </div>
       {/if}
     </aside>
@@ -989,6 +994,15 @@
         showCsvImport = false;
         toast('Refresh the schema panel (↻) to see the new/updated table', 'success', 4000);
       }}
+    />
+  {/if}
+  {#if structureTarget && sidebarConn}
+    <TableStructureModal
+      conn={sidebarConn}
+      schema={structureTarget.schema}
+      table={structureTarget.relation}
+      on:close={() => (structureTarget = null)}
+      on:changed={() => toast('Refresh the schema panel (↻) to see the change', 'success', 4000)}
     />
   {/if}
 </div>

@@ -28,6 +28,7 @@ export const ICONS = {
   help: { glyph: '?', label: 'Help', where: 'Top bar' },
   history: { glyph: '⏱', label: 'History & schedules', where: 'Top bar' },
   settings: { glyph: '⚙', label: 'Settings', where: 'Top bar' },
+  structure: { glyph: '⚙', label: 'Edit table structure / view DDL', where: 'Schema tree' },
   themeDark: { glyph: '☾', label: 'Theme: dark — click to cycle', where: 'Top bar' },
   themeLight: { glyph: '☀', label: 'Theme: light — click to cycle', where: 'Top bar' },
   themeSystem: { glyph: '◐', label: 'Theme: follows system — click to cycle', where: 'Top bar' },

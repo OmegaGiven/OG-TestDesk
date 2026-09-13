@@ -280,6 +280,13 @@
                     title="Open the full table, paginated"
                     on:click={() => dispatch('open', { schema: schema.name, relation: rel.name })}
                   >{ICONS.insertName.glyph}</button>
+                  {#if rel.kind !== 'view'}
+                    <button
+                      class="icon-btn peek"
+                      title={ICONS.structure.label}
+                      on:click={() => dispatch('structure', { schema: schema.name, relation: rel.name })}
+                    >{ICONS.structure.glyph}</button>
+                  {/if}
                 </div>
                 {#if openRels.has(`${schema.name}.${rel.name}`)}
                   <div class="cols">
