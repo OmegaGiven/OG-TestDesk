@@ -47,22 +47,27 @@
     }
   }
 
-  // Re-pull everything from the backend metadata store — used on launch
-  // and again whenever the window regains focus, since the MCP server's
-  // "populate" tools (open_sql_tab, save_query, save_request,
-  // add_connection) write there from outside the UI's own action flow;
-  // there's no push channel from the Rust side, so a focus-triggered
-  // refetch is how a tab/query/connection an AI just added actually
-  // shows up without the user having to manually reload.
+  // Re-pull everything from the backend metadata store on launch.
   async function reloadEverything() {
     await reloadConnections();
-    await Promise.all([
-      reloadTabs(),
-      reloadRequests(),
-      reloadRequestTabs(),
-      reloadSavedQueries(),
-      reloadSavedCharts()
-    ]);
+    await Promise.all([reloadTabs(), reloadRequests(), reloadRequestTabs(), reloadSavedQueries(), reloadSavedCharts()]);
+  }
+
+  // Re-pull on window focus too — since the MCP server's "populate"
+  // tools (save_query, save_request, add_connection) write to the
+  // backend from outside the UI's own action flow and there's no push
+  // channel from Rust, this is how something an AI just added actually
+  // shows up without a manual reload. Deliberately NOT open SQL/request
+  // tabs here: a tab has its own live, locally-authoritative state
+  // (dirty edits, an in-flight close) and blindly overwriting it from
+  // a backend snapshot on every focus repeatedly proved to resurrect
+  // tabs that had just been closed, racing against their own delete /
+  // debounced-save calls. `open_sql_tab` results are still visible via
+  // Saved Queries / a manual reconnect; that's an acceptable trade for
+  // not clobbering live tab state on every alt-tab.
+  async function reloadOnFocus() {
+    await reloadConnections();
+    await Promise.all([reloadRequests(), reloadSavedQueries(), reloadSavedCharts()]);
   }
 
   // Genuinely frontend-only failures (an uncaught exception, a rejected
@@ -82,7 +87,7 @@
     window.addEventListener('error', onWindowError);
     window.addEventListener('unhandledrejection', onUnhandledRejection);
     await reloadEverything();
-    window.addEventListener('focus', reloadEverything);
+    window.addEventListener('focus', reloadOnFocus);
 
     // Dev/demo helpers via query string (no effect in normal use):
     //   ?tool=requests|inspector   ?run  (auto-run the active SQL tab)

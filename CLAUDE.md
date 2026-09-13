@@ -89,10 +89,13 @@ execute anything (SQL/HTTP) — they only write into a tab, a saved
 item, or a file under a fixed exports dir, for the human to read/run
 themselves. `add_connection` writes a real credential to the OS
 keychain but never auto-exposes the connection to MCP. Frontend has no
-push channel from Rust, so `+page.svelte` refetches everything on
-window focus to pick up anything these tools wrote while the app
-wasn't in front. UI: gear icon → Settings modal
-(`components/SettingsModal.svelte`).
+push channel from Rust, so `+page.svelte` refetches connections/saved
+queries/saved requests/charts on window focus to pick up anything MCP
+wrote while the app wasn't in front — deliberately NOT SQL/request
+tabs, since blindly overwriting live local tab state (dirty edits, an
+in-flight close) from a backend snapshot on every focus proved to
+resurrect just-closed tabs, racing their own delete/debounced-save.
+UI: gear icon → Settings modal (`components/SettingsModal.svelte`).
 
 ## What's left
 

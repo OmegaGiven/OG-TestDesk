@@ -338,6 +338,11 @@
       <button class="btn ghost sm" on:click={discardEdits}>{ICONS.revert.glyph} Discard</button>
     {/if}
     <span style="flex:1" />
+    {#if result.is_select}
+      <button class="btn ghost sm" on:click={() => dispatch('inspect')}
+        >{ICONS.toInspector.glyph} Inspector</button
+      >
+    {/if}
     <span class="export">
       <span class="ex-label"
         >Export{editCount

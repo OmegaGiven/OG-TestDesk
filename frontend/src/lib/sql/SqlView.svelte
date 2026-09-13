@@ -548,11 +548,8 @@
           </span>
         {/if}
         <span style="flex:1" />
-        {#if tab.result?.is_select}
-          {#if tab.result.page_size > 0 && (tab.result.has_more || tab.result.page > 0)}
-            <button class="btn ghost sm" on:click={() => run(-1)}>Load all</button>
-          {/if}
-          <button class="btn ghost sm" on:click={inspectResult}>{ICONS.toInspector.glyph} Inspector</button>
+        {#if tab.result?.is_select && tab.result.page_size > 0 && (tab.result.has_more || tab.result.page > 0)}
+          <button class="btn ghost sm" on:click={() => run(-1)}>Load all</button>
         {/if}
       </div>
 
@@ -594,6 +591,7 @@
               loadingMore={tab.running}
               appending={appendFlag}
               on:loadmore={loadMore}
+              on:inspect={inspectResult}
             />
           {/if}
         </div>
