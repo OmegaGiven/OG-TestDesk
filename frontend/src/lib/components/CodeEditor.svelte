@@ -60,6 +60,20 @@
           return true;
         },
         preventDefault: true
+      },
+      {
+        key: 'Alt-ArrowUp',
+        run: () => {
+          dispatch('histprev');
+          return true;
+        }
+      },
+      {
+        key: 'Alt-ArrowDown',
+        run: () => {
+          dispatch('histnext');
+          return true;
+        }
       }
     ]);
 

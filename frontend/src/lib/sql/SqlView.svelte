@@ -385,6 +385,14 @@
     if (!tab) return;
     touchSqlTab(tab.id, { sql_text: v, dirty: true });
     persistSqlTab(tab.id);
+    // A real keystroke (not our own cycleHistory-driven update) means the
+    // user has diverged from wherever they were in the history buffer —
+    // drop it so the next Alt-Up starts a fresh cycle from here.
+    if (!suppressHistoryReset && historyState[tab.id]) {
+      const { [tab.id]: _drop, ...rest } = historyState;
+      historyState = rest;
+    }
+    suppressHistoryReset = false;
   }
 
   const FORMATTER_LANG = { postgres: 'postgresql', mysql: 'mysql', sqlite: 'sqlite' };
@@ -404,6 +412,137 @@
     } catch (e) {
       toast(`Couldn't format: ${e}`, 'error', 3000);
     }
+  }
+
+  // Splits a script into top-level statements on `;`, respecting line
+  // comments, block comments, and quoted strings (single/double/back-tick,
+  // with doubled-quote escaping) so a semicolon inside a string literal
+  // doesn't end a statement early. Doesn't understand Postgres
+  // dollar-quoted (`$$...$$`) function bodies — a script that uses those
+  // should be run as one statement via plain Run, not Run All.
+  function splitStatements(sql) {
+    const stmts = [];
+    let cur = '';
+    let i = 0;
+    const n = sql.length;
+    while (i < n) {
+      const c = sql[i];
+      if (c === '-' && sql[i + 1] === '-') {
+        const nl = sql.indexOf('\n', i);
+        const end = nl === -1 ? n : nl;
+        cur += sql.slice(i, end);
+        i = end;
+        continue;
+      }
+      if (c === '/' && sql[i + 1] === '*') {
+        const close = sql.indexOf('*/', i + 2);
+        const end = close === -1 ? n : close + 2;
+        cur += sql.slice(i, end);
+        i = end;
+        continue;
+      }
+      if (c === "'" || c === '"' || c === '`') {
+        const quote = c;
+        let j = i + 1;
+        while (j < n) {
+          if (sql[j] === quote) {
+            if (sql[j + 1] === quote) {
+              j += 2;
+              continue;
+            }
+            j++;
+            break;
+          }
+          if (sql[j] === '\\' && quote !== '`') {
+            j += 2;
+            continue;
+          }
+          j++;
+        }
+        cur += sql.slice(i, j);
+        i = j;
+        continue;
+      }
+      if (c === ';') {
+        if (cur.trim()) stmts.push(cur.trim());
+        cur = '';
+        i++;
+        continue;
+      }
+      cur += c;
+      i++;
+    }
+    if (cur.trim()) stmts.push(cur.trim());
+    return stmts;
+  }
+
+  async function runAll() {
+    const t = tab;
+    if (!t || t.running) return;
+    const conn = get(connections).find((c) => c.id === t.connection_id);
+    if (!conn) return;
+    const raw = applyVars(t.sql_text, t.id);
+    if (VAR_RE.test(raw)) {
+      VAR_RE.lastIndex = 0;
+      toast('Unfilled variables — set values in the bar above the editor', 'error', 4000);
+      return;
+    }
+    const stmts = splitStatements(raw);
+    if (stmts.length === 0) return;
+    if (stmts.length === 1) {
+      run();
+      return;
+    }
+    touchSqlTab(t.id, { running: true, error: null, multiResults: [], activeResultIdx: 0, editableTable: null });
+    const results = [];
+    for (const sql of stmts) {
+      try {
+        const result = await api.queryRun(conn, sql, null, null, false);
+        results.push({ sql, result, error: null });
+      } catch (e) {
+        results.push({ sql, result: null, error: String(e) });
+        touchSqlTab(t.id, { multiResults: [...results], running: false, activeResultIdx: results.length - 1 });
+        toast(`Statement ${results.length}/${stmts.length} failed — stopped there`, 'error', 5000);
+        return;
+      }
+    }
+    touchSqlTab(t.id, {
+      multiResults: results,
+      running: false,
+      activeResultIdx: results.length - 1
+    });
+    toast(`${stmts.length} statements executed`, 'success', 2500);
+  }
+
+  // Alt-Up/Alt-Down in the editor cycle through this connection's recent
+  // history (newest first). The in-progress edit is stashed as a "draft"
+  // so cycling back down past the newest history entry restores it,
+  // matching a shell history buffer.
+  let historyState = {}; // tab.id -> { list, idx, draft }
+  let suppressHistoryReset = false;
+  async function cycleHistory(dir) {
+    const t = tab;
+    if (!t) return;
+    let hs = historyState[t.id];
+    if (!hs) {
+      let list = [];
+      try {
+        const all = await api.historyRecent(300);
+        list = all.filter((h) => h.connection_id === t.connection_id && h.sql_text?.trim());
+      } catch {
+        return;
+      }
+      hs = { list, idx: -1, draft: t.sql_text };
+      historyState = { ...historyState, [t.id]: hs };
+    }
+    if (!hs.list.length) return;
+    const nextIdx = Math.max(-1, Math.min(hs.list.length - 1, hs.idx + dir));
+    if (nextIdx === hs.idx) return;
+    if (hs.idx === -1 && nextIdx >= 0) hs.draft = t.sql_text; // capture draft on first step back
+    hs.idx = nextIdx;
+    const text = nextIdx === -1 ? hs.draft : hs.list[nextIdx].sql_text;
+    suppressHistoryReset = true;
+    touchSqlTab(t.id, { sql_text: text, dirty: true });
   }
 
   // Table-name completion for the SQL editor (`{ table: [] }` — no
@@ -457,7 +596,7 @@
 
     const full = page < 0;
     const size = get(appearance).pageSize ?? 500;
-    touchSqlTab(t.id, { running: true, error: null });
+    touchSqlTab(t.id, { running: true, error: null, multiResults: null });
     try {
       const result = await api.queryRun(
         conn,
@@ -684,6 +823,9 @@
         <button class="btn primary sm" on:click={() => run()} disabled={tab.running}>
           {tab.running ? 'Running…' : '▶ Run'}
         </button>
+        <button class="btn ghost sm" title="Run every statement in the editor, one after another" on:click={runAll} disabled={tab.running}>
+          Run All
+        </button>
         <button class="btn" on:click={saveQuery}>Save</button>
         <button class="btn ghost sm" title="Format SQL (⇧⌥F)" on:click={formatSql}>Format</button>
         <button class="icon-btn big-glyph" title={ICONS.saveFile.label} on:click={saveToFile}
@@ -751,19 +893,38 @@
             on:change={(e) => onChange(e.detail)}
             on:run={() => run()}
             on:save={saveQuery}
+            on:histprev={() => cycleHistory(-1)}
+            on:histnext={() => cycleHistory(1)}
           />
         </div>
         <div class="splitter" on:mousedown={startDrag} role="separator" tabindex="-1"></div>
         <div class="pane result-pane" style="height:{100 - splitPct}%">
+          {#if tab.multiResults?.length > 1}
+            <div class="multi-strip">
+              {#each tab.multiResults as mr, i (i)}
+                <button
+                  class="multi-tab"
+                  class:on={tab.activeResultIdx === i}
+                  class:bad={mr.error}
+                  title={mr.error || mr.sql}
+                  on:click={() => touchSqlTab(tab.id, { activeResultIdx: i })}
+                >
+                  {i + 1}{mr.error ? ' ✕' : mr.result?.is_select ? ` (${mr.result.row_count})` : ` (${mr.result?.rows_affected ?? 0})`}
+                </button>
+              {/each}
+            </div>
+          {/if}
           {#if tab.error}
             <div class="err">{tab.error}</div>
+          {:else if tab.multiResults?.length > 1 && tab.multiResults[tab.activeResultIdx]?.error}
+            <div class="err">{tab.multiResults[tab.activeResultIdx].error}</div>
           {:else}
             <ResultGrid
-              result={tab.result}
+              result={tab.multiResults?.length > 1 ? tab.multiResults[tab.activeResultIdx]?.result : tab.result}
               name={tab.title}
               loadingMore={tab.running}
               appending={appendFlag}
-              editableTable={tab.editableTable}
+              editableTable={tab.multiResults?.length > 1 ? null : tab.editableTable}
               on:loadmore={loadMore}
               on:inspect={inspectResult}
               on:save={onSaveEdits}
@@ -1122,6 +1283,34 @@
     white-space: pre-wrap;
     overflow: auto;
     height: 100%;
+  }
+  .multi-strip {
+    display: flex;
+    gap: 3px;
+    padding: 5px 8px;
+    border-bottom: 1px solid var(--border);
+    background: var(--surface-1);
+    overflow-x: auto;
+  }
+  .multi-tab {
+    all: unset;
+    cursor: pointer;
+    font-family: var(--font-mono);
+    font-size: 11px;
+    padding: 3px 8px;
+    border-radius: 4px;
+    color: var(--text-secondary);
+    white-space: nowrap;
+  }
+  .multi-tab:hover {
+    background: var(--surface-3);
+  }
+  .multi-tab.on {
+    background: var(--tool-sql-tint);
+    color: var(--tool-sql-text);
+  }
+  .multi-tab.bad {
+    color: var(--danger);
   }
   .pager {
     display: flex;
