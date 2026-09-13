@@ -266,11 +266,16 @@
   let columnsCache = {}; // `${connId}:${schema}.${table}` -> Promise<Column[]>
   async function refreshEditableTable(t, conn, sql) {
     const parsed = parseSingleTable(sql);
-    if (!parsed || conn.read_only) {
-      touchSqlTab(t.id, { editableTable: null });
+    if (!parsed) {
+      touchSqlTab(t.id, { editableTable: null, foreignKeys: null });
       return;
     }
     const schema = parsed.schema || defaultSchema(conn);
+    loadForeignKeysFor(t, conn, schema, parsed.table);
+    if (conn.read_only) {
+      touchSqlTab(t.id, { editableTable: null });
+      return;
+    }
     const key = `${conn.id}:${schema}.${parsed.table}`;
     try {
       if (!columnsCache[key]) columnsCache[key] = api.columnsList(conn, schema, parsed.table);
@@ -280,6 +285,43 @@
     } catch {
       touchSqlTab(t.id, { editableTable: null });
     }
+  }
+
+  // Foreign-key picker: { colName: { schema, table, column } } for the
+  // table the tab's result came from — lets ResultGrid render a "jump to
+  // referenced row" affordance on FK columns. Cached per connection since
+  // list_foreign_keys covers every schema/table at once.
+  let fkCache = {};
+  async function loadForeignKeysFor(t, conn, schema, table) {
+    try {
+      if (!fkCache[conn.id]) fkCache[conn.id] = api.foreignKeysList(conn);
+      const all = await fkCache[conn.id];
+      const map = {};
+      for (const fk of all) {
+        if (fk.schema === schema && fk.table === table) {
+          map[fk.column] = { schema: fk.ref_schema, table: fk.ref_table, column: fk.ref_column };
+        }
+      }
+      touchSqlTab(t.id, { foreignKeys: Object.keys(map).length ? map : null });
+    } catch {
+      touchSqlTab(t.id, { foreignKeys: null });
+    }
+  }
+
+  async function followForeignKey(e) {
+    const { column, value } = e.detail;
+    const fk = tab?.foreignKeys?.[column];
+    if (!fk || value === null || value === undefined) return;
+    const conn = tabConn;
+    if (!conn) return;
+    const q =
+      conn.kind === 'sqlite'
+        ? `SELECT * FROM ${quote(conn, fk.table)} WHERE ${quote(conn, fk.column)} = ${literal(conn, value)};`
+        : `SELECT * FROM ${quote(conn, fk.schema)}.${quote(conn, fk.table)} WHERE ${quote(conn, fk.column)} = ${literal(conn, value)};`;
+    const t = await newSqlTab(conn.id, q);
+    touchSqlTab(t.id, { title: fk.table });
+    persistSqlTab(t.id, true);
+    setTimeout(() => run(), 30);
   }
 
   async function onSaveEdits(e) {
@@ -593,7 +635,7 @@
         toast(`${result.row_count.toLocaleString()} rows${shown} · ${result.duration_ms} ms`, 'success', 2500);
         refreshEditableTable(t, conn, sql);
       } else {
-        touchSqlTab(t.id, { editableTable: null });
+        touchSqlTab(t.id, { editableTable: null, foreignKeys: null });
       }
     } catch (e) {
       touchSqlTab(t.id, { error: String(e), running: false });
@@ -912,9 +954,11 @@
               loadingMore={tab.running}
               appending={appendFlag}
               editableTable={tab.multiResults?.length > 1 ? null : tab.editableTable}
+              foreignKeys={tab.multiResults?.length > 1 ? null : tab.foreignKeys}
               on:loadmore={loadMore}
               on:inspect={inspectResult}
               on:save={onSaveEdits}
+              on:followfk={followForeignKey}
             />
           {/if}
         </div>

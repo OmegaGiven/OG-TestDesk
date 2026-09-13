@@ -14,6 +14,9 @@
   // the parent builds UPDATE/INSERT/DELETE from what we hand back on
   // `save` and actually runs them against the connection.
   export let editableTable = null;
+  // { colName: { schema, table, column } } — columns in this result that
+  // are a foreign key, for the "jump to referenced row" affordance.
+  export let foreignKeys = null;
   const dispatch = createEventDispatcher();
 
   let sortCol = -1;
@@ -506,6 +509,14 @@
                   title={display(cellVal(row, c))}
                 >
                   {display(cellVal(row, c))}
+                  {#if foreignKeys?.[cols[c].name] != null && cellVal(row, c) != null}
+                    <button
+                      class="fk-jump"
+                      title="Jump to {foreignKeys[cols[c].name].table}.{foreignKeys[cols[c].name].column} = {display(cellVal(row, c))}"
+                      on:click|stopPropagation={() =>
+                        dispatch('followfk', { column: cols[c].name, value: cellVal(row, c) })}
+                    >→</button>
+                  {/if}
                 </td>
               {/if}
             {/each}
@@ -808,6 +819,18 @@
   }
   .del-toggle:hover {
     color: var(--danger);
+  }
+  .fk-jump {
+    all: unset;
+    cursor: pointer;
+    margin-left: 5px;
+    color: var(--tool-sql-text);
+    font-weight: 700;
+    opacity: 0.55;
+  }
+  .fk-jump:hover {
+    opacity: 1;
+    text-decoration: underline;
   }
   .loading-more td {
     text-align: center;
