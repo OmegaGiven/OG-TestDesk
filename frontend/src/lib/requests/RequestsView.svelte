@@ -56,6 +56,11 @@
       headers: [{ k: '', v: '', on: true }],
       params: [{ k: '', v: '', on: true }],
       body: '',
+      bodyMode: 'raw', // raw | urlencoded | multipart | binary | graphql
+      formFields: [{ k: '', v: '', kind: 'text', filename: '', contentType: '', on: true }],
+      binaryFile: null, // { filename, base64, size }
+      graphqlQuery: '',
+      graphqlVariables: '',
       collection_id: null,
       pre_request_script: '',
       test_script: ''
@@ -96,6 +101,7 @@
       ),
       params: [{ k: '', v: '', on: true }],
       body: t.body || '',
+      ...hydrateBodyMode(t),
       collection_id: null,
       pre_request_script: t.pre_request_script || '',
       test_script: t.test_script || ''
@@ -106,6 +112,109 @@
     error = t.error ?? null;
     sending = t.sending ?? false;
     setTimeout(() => (hydrating = false), 0);
+  }
+
+  // ---- structured body (form-data / x-www-form-urlencoded / binary /
+  // GraphQL) — everything raw text can't express. Stored as body_mode_json
+  // on the tab/saved request, matching core::requests::RequestBody's exact
+  // JSON shape 1:1 so no translation is needed when actually sending.
+  function blankFormField() {
+    return { k: '', v: '', kind: 'text', filename: '', contentType: '', on: true, _fileBase64: '' };
+  }
+  function ensureTrailingFormRow(arr) {
+    const last = arr[arr.length - 1];
+    if (!last || last.k !== '') arr.push(blankFormField());
+    return arr;
+  }
+  function onFormFieldInput() {
+    draft.formFields = ensureTrailingFormRow([...draft.formFields]);
+  }
+  function hydrateBodyMode(t) {
+    const base = { bodyMode: 'raw', formFields: [blankFormField()], binaryFile: null, graphqlQuery: '', graphqlVariables: '' };
+    let rb = null;
+    try {
+      rb = t.body_mode_json ? JSON.parse(t.body_mode_json) : null;
+    } catch {}
+    if (!rb) return base;
+    if (rb.kind === 'form_url_encoded' || rb.kind === 'multipart') {
+      const fields = (rb.fields || []).map((f) => ({
+        k: f.key,
+        v: f.kind === 'file' ? '' : f.value,
+        kind: f.kind,
+        filename: f.filename || '',
+        contentType: f.content_type || '',
+        on: f.enabled !== false,
+        _fileBase64: f.kind === 'file' ? f.value : ''
+      }));
+      return { ...base, bodyMode: rb.kind === 'multipart' ? 'multipart' : 'urlencoded', formFields: ensureTrailingFormRow(fields) };
+    }
+    if (rb.kind === 'binary') {
+      return { ...base, bodyMode: 'binary', binaryFile: { filename: '', base64: rb.base64, size: Math.round((rb.base64 || '').length * 0.75) } };
+    }
+    if (rb.kind === 'graphql') {
+      return { ...base, bodyMode: 'graphql', graphqlQuery: rb.query || '', graphqlVariables: rb.variables || '' };
+    }
+    return base;
+  }
+  function buildBodyMode() {
+    if (draft.bodyMode === 'urlencoded') {
+      return {
+        kind: 'form_url_encoded',
+        fields: draft.formFields
+          .filter((f) => f.k)
+          .map((f) => ({ key: f.k, kind: 'text', value: f.v, filename: null, content_type: null, enabled: f.on }))
+      };
+    }
+    if (draft.bodyMode === 'multipart') {
+      return {
+        kind: 'multipart',
+        fields: draft.formFields
+          .filter((f) => f.k)
+          .map((f) => ({
+            key: f.k,
+            kind: f.kind,
+            value: f.kind === 'file' ? f._fileBase64 || '' : f.v,
+            filename: f.kind === 'file' ? f.filename || null : null,
+            content_type: f.kind === 'file' ? f.contentType || null : null,
+            enabled: f.on
+          }))
+      };
+    }
+    if (draft.bodyMode === 'binary') {
+      return draft.binaryFile ? { kind: 'binary', base64: draft.binaryFile.base64 } : null;
+    }
+    if (draft.bodyMode === 'graphql') {
+      return { kind: 'graphql', query: draft.graphqlQuery, variables: draft.graphqlVariables || null };
+    }
+    return null; // 'raw' — use draft.body as a plain string, unchanged
+  }
+  function bodyModeJsonForSave() {
+    if (draft.bodyMode === 'raw') return null;
+    const rb = buildBodyMode();
+    return rb ? JSON.stringify(rb) : null;
+  }
+
+  function readFileAsBase64(file) {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(String(reader.result).split(',')[1] || '');
+      reader.onerror = () => reject(reader.error);
+      reader.readAsDataURL(file);
+    });
+  }
+  async function onMultipartFilePick(e, row) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    row._fileBase64 = await readFileAsBase64(file);
+    row.filename = file.name;
+    row.contentType = file.type || 'application/octet-stream';
+    draft.formFields = [...draft.formFields];
+    onFormFieldInput();
+  }
+  async function onBinaryFilePick(e) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    draft.binaryFile = { filename: file.name, base64: await readFileAsBase64(file), size: file.size };
   }
 
   function safeJson(s) {
@@ -137,6 +246,7 @@
         saved_request_id: draft.id || null,
         pre_request_script: draft.pre_request_script || null,
         test_script: draft.test_script || null,
+        body_mode_json: bodyModeJsonForSave(),
         dirty: true
       });
       persistRequestTab(loadedTabId);
@@ -328,11 +438,13 @@
     response = null;
     touchRequestTab(tabId, { sending: true, error: null });
 
+    const noBody = ['GET', 'HEAD'].includes(draft.method);
     let req = {
       method: draft.method,
       url: draft.url.trim(),
       headers: headersObject(),
-      body: ['GET', 'HEAD'].includes(draft.method) ? null : draft.body || null,
+      body: noBody || draft.bodyMode !== 'raw' ? null : draft.body || null,
+      body_mode: noBody ? null : buildBodyMode(),
       timeout_secs: 60
     };
 
@@ -403,7 +515,8 @@
       body: s.body,
       saved_request_id: s.id,
       pre_request_script: s.pre_request_script || null,
-      test_script: s.test_script || null
+      test_script: s.test_script || null,
+      body_mode_json: s.body_mode_json || null
     });
   }
 
@@ -465,7 +578,8 @@
         sort_order: 0,
         created_at: 0,
         pre_request_script: draft.pre_request_script || null,
-        test_script: draft.test_script || null
+        test_script: draft.test_script || null,
+        body_mode_json: bodyModeJsonForSave()
       });
       draft.id = saved.id;
       draft.name = saved.name;
@@ -931,12 +1045,65 @@
           </div>
         {:else}
           <div class="body-tools">
-            <button class="btn ghost sm" on:click={prettyBody}>Beautify JSON</button>
+            <select class="select sm" bind:value={draft.bodyMode}>
+              <option value="raw">Raw</option>
+              <option value="urlencoded">x-www-form-urlencoded</option>
+              <option value="multipart">form-data</option>
+              <option value="binary">Binary</option>
+              <option value="graphql">GraphQL</option>
+            </select>
+            {#if draft.bodyMode === 'raw'}
+              <button class="btn ghost sm" on:click={prettyBody}>Beautify JSON</button>
+            {/if}
             <span class="muted">{['GET', 'HEAD'].includes(draft.method) ? 'body ignored for ' + draft.method : ''}</span>
           </div>
-          <div class="body-editor">
-            <CodeEditor bind:value={draft.body} language={bodyLang()} on:run={send} />
-          </div>
+          {#if draft.bodyMode === 'raw'}
+            <div class="body-editor">
+              <CodeEditor bind:value={draft.body} language={bodyLang()} on:run={send} />
+            </div>
+          {:else if draft.bodyMode === 'urlencoded' || draft.bodyMode === 'multipart'}
+            <div class="kv-grid">
+              {#each draft.formFields as row}
+                <div class="kv-row form-row" class:multipart={draft.bodyMode === 'multipart'}>
+                  <input type="checkbox" bind:checked={row.on} />
+                  <input class="input mono" placeholder="key" bind:value={row.k} on:input={onFormFieldInput} />
+                  {#if draft.bodyMode === 'multipart'}
+                    <select class="select sm" bind:value={row.kind}>
+                      <option value="text">Text</option>
+                      <option value="file">File</option>
+                    </select>
+                  {/if}
+                  {#if draft.bodyMode === 'multipart' && row.kind === 'file'}
+                    <span class="file-field">
+                      <input type="file" on:change={(e) => onMultipartFilePick(e, row)} />
+                      {#if row.filename}<span class="fname">{row.filename}</span>{/if}
+                    </span>
+                  {:else}
+                    <input class="input mono" placeholder="value" bind:value={row.v} on:input={onFormFieldInput} />
+                  {/if}
+                </div>
+              {/each}
+            </div>
+          {:else if draft.bodyMode === 'binary'}
+            <div class="binary-body">
+              <input type="file" on:change={onBinaryFilePick} />
+              {#if draft.binaryFile}
+                <span class="fname">{draft.binaryFile.filename} · {fmtSize(draft.binaryFile.size)}</span>
+                <button class="btn ghost sm" on:click={() => (draft.binaryFile = null)}>Clear</button>
+              {/if}
+            </div>
+          {:else if draft.bodyMode === 'graphql'}
+            <div class="graphql-body">
+              <div class="gql-pane">
+                <div class="gql-label">Query</div>
+                <CodeEditor bind:value={draft.graphqlQuery} language="text" on:run={send} />
+              </div>
+              <div class="gql-pane">
+                <div class="gql-label">Variables (JSON)</div>
+                <CodeEditor bind:value={draft.graphqlVariables} language="json" on:run={send} />
+              </div>
+            </div>
+          {/if}
         {/if}
       </div>
 
@@ -1323,6 +1490,62 @@
     align-items: center;
     gap: 8px;
     padding: 6px 8px;
+  }
+  .select.sm {
+    font-size: 11px;
+    padding: 3px 6px;
+  }
+  .form-row {
+    grid-template-columns: 18px 1fr auto 1.5fr;
+  }
+  .form-row:not(.multipart) {
+    grid-template-columns: 18px 1fr 1.5fr;
+  }
+  .file-field {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 11px;
+    overflow: hidden;
+  }
+  .fname {
+    color: var(--text-secondary);
+    font-family: var(--font-mono);
+    font-size: 11px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .binary-body {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px;
+  }
+  .graphql-body {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+  }
+  .gql-pane {
+    display: flex;
+    flex-direction: column;
+    flex: 1;
+    min-height: 0;
+    border-bottom: 1px solid var(--border);
+  }
+  .gql-pane:last-child {
+    border-bottom: none;
+  }
+  .gql-label {
+    font-size: 10px;
+    color: var(--text-muted);
+    padding: 4px 8px;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+  }
+  .gql-pane :global(.editor) {
+    flex: 1;
   }
   .auth-form {
     overflow: auto;

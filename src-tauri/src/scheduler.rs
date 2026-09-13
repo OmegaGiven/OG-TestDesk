@@ -218,6 +218,7 @@ async fn resolve_request(metadata: &MetadataStore, s: &Schedule) -> Option<HttpR
             url: saved.url,
             headers,
             body: saved.body,
+            body_mode: None,
             timeout_secs: Some(60),
         });
     }
@@ -231,6 +232,7 @@ async fn resolve_request(metadata: &MetadataStore, s: &Schedule) -> Option<HttpR
         url: s.request_url.clone()?,
         headers,
         body: s.request_body.clone(),
+        body_mode: None,
         timeout_secs: Some(60),
     })
 }

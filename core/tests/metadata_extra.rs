@@ -216,6 +216,7 @@ async fn request_collections_tabs_saved_requests_environments() {
         is_active: true,
         pre_request_script: None,
         test_script: None,
+        body_mode_json: None,
     };
     let mut tab = tab;
     tab.id = "rt1".into();
@@ -236,6 +237,7 @@ async fn request_collections_tabs_saved_requests_environments() {
         created_at: 0,
         pre_request_script: None,
         test_script: None,
+        body_mode_json: None,
     };
     let mut saved = saved;
     saved.id = "sr1".into();

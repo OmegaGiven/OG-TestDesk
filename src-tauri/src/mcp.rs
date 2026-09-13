@@ -957,6 +957,7 @@ async fn call_tool(ctx: &AppCtx, name: &str, args: Value) -> Result<String> {
                 url: req.url,
                 headers,
                 body: req.body,
+                body_mode: None,
                 timeout_secs: Some(60),
             };
             apply_vars(&ctx.metadata, &mut http).await;
@@ -973,6 +974,7 @@ async fn call_tool(ctx: &AppCtx, name: &str, args: Value) -> Result<String> {
                 url: s("url").ok_or_else(|| anyhow::anyhow!("missing 'url'"))?,
                 headers,
                 body: s("body"),
+                body_mode: None,
                 timeout_secs: Some(60),
             };
             apply_vars(&ctx.metadata, &mut http).await;
@@ -1019,6 +1021,7 @@ async fn call_tool(ctx: &AppCtx, name: &str, args: Value) -> Result<String> {
                 is_active: false,
                 pre_request_script: None,
                 test_script: None,
+                body_mode_json: None,
             };
             ctx.metadata.upsert_request_tab(&tab).await?;
             let _ = ctx.app_handle.emit("mcp:request-tab-opened", &tab);
@@ -1110,6 +1113,7 @@ async fn call_tool(ctx: &AppCtx, name: &str, args: Value) -> Result<String> {
                 created_at: chrono::Utc::now().timestamp(),
                 pre_request_script: None,
                 test_script: None,
+                body_mode_json: None,
             };
             ctx.metadata.upsert_saved_request(&r).await?;
             let _ = ctx.app_handle.emit("mcp:saved-request-created", &r);
