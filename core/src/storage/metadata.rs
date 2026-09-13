@@ -392,6 +392,11 @@ impl MetadataStore {
             "ALTER TABLE saved_queries ADD COLUMN folder_id TEXT",
             "ALTER TABLE saved_queries ADD COLUMN sort_order INTEGER NOT NULL DEFAULT 0",
             "ALTER TABLE connections ADD COLUMN read_only INTEGER NOT NULL DEFAULT 0",
+            "ALTER TABLE connections ADD COLUMN pre_connect_cmd TEXT",
+            "ALTER TABLE connections ADD COLUMN ssh_host TEXT",
+            "ALTER TABLE connections ADD COLUMN ssh_port INTEGER",
+            "ALTER TABLE connections ADD COLUMN ssh_user TEXT",
+            "ALTER TABLE connections ADD COLUMN ssh_key_path TEXT",
         ] {
             let _ = sqlx::query(stmt).execute(&pool).await; // ignore "duplicate column"
         }
@@ -437,7 +442,8 @@ impl MetadataStore {
 
     pub async fn list_connections(&self) -> Result<Vec<ConnConfig>> {
         let rows = sqlx::query(
-            "SELECT id, nickname, kind, host, port, database, user, file_path, use_tls, color, read_only
+            "SELECT id, nickname, kind, host, port, database, user, file_path, use_tls, color, read_only,
+                    pre_connect_cmd, ssh_host, ssh_port, ssh_user, ssh_key_path
              FROM connections ORDER BY sort_order, created_at",
         )
         .fetch_all(&self.pool)
@@ -456,6 +462,11 @@ impl MetadataStore {
                 use_tls: r.get::<i64, _>("use_tls") != 0,
                 color: r.get("color"),
                 read_only: r.get::<i64, _>("read_only") != 0,
+                pre_connect_cmd: r.get("pre_connect_cmd"),
+                ssh_host: r.get("ssh_host"),
+                ssh_port: r.get::<Option<i64>, _>("ssh_port").map(|p| p as u16),
+                ssh_user: r.get("ssh_user"),
+                ssh_key_path: r.get("ssh_key_path"),
             })
             .collect())
     }
@@ -464,8 +475,9 @@ impl MetadataStore {
         sqlx::query(
             "INSERT INTO connections
                 (id, nickname, kind, host, port, database, user, file_path, use_tls, color, read_only,
+                 pre_connect_cmd, ssh_host, ssh_port, ssh_user, ssh_key_path,
                  sort_order, created_at)
-             VALUES (?,?,?,?,?,?,?,?,?,?,?,
+             VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,
                  COALESCE((SELECT sort_order FROM connections WHERE id = ?),
                           (SELECT COALESCE(MAX(sort_order)+1,0) FROM connections)),
                  COALESCE((SELECT created_at FROM connections WHERE id = ?), ?))
@@ -473,7 +485,9 @@ impl MetadataStore {
                 nickname=excluded.nickname, kind=excluded.kind, host=excluded.host,
                 port=excluded.port, database=excluded.database, user=excluded.user,
                 file_path=excluded.file_path, use_tls=excluded.use_tls, color=excluded.color,
-                read_only=excluded.read_only",
+                read_only=excluded.read_only, pre_connect_cmd=excluded.pre_connect_cmd,
+                ssh_host=excluded.ssh_host, ssh_port=excluded.ssh_port, ssh_user=excluded.ssh_user,
+                ssh_key_path=excluded.ssh_key_path",
         )
         .bind(&c.id)
         .bind(&c.nickname)
@@ -486,6 +500,11 @@ impl MetadataStore {
         .bind(c.use_tls as i64)
         .bind(&c.color)
         .bind(c.read_only as i64)
+        .bind(&c.pre_connect_cmd)
+        .bind(&c.ssh_host)
+        .bind(c.ssh_port.map(|p| p as i64))
+        .bind(&c.ssh_user)
+        .bind(&c.ssh_key_path)
         .bind(&c.id)
         .bind(&c.id)
         .bind(now())

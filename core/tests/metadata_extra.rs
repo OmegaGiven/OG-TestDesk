@@ -30,6 +30,11 @@ async fn seed_connection(db: &MetadataStore, id: &str) {
         use_tls: false,
         color: None,
         read_only: false,
+        pre_connect_cmd: None,
+        ssh_host: None,
+        ssh_port: None,
+        ssh_user: None,
+        ssh_key_path: None,
     })
     .await
     .unwrap();

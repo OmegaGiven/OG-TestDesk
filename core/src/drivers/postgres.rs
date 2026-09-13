@@ -10,9 +10,9 @@ use sqlx::Row;
 
 pub struct PostgresDriverImpl;
 
-fn conn_url(cfg: &ConnConfig, password: Option<&str>) -> String {
-    let host = cfg.host.as_deref().unwrap_or("localhost");
-    let port = cfg.port.unwrap_or(5432);
+async fn conn_url(cfg: &ConnConfig, password: Option<&str>) -> Result<String> {
+    let (host, port) = super::tunnel::effective_host_port(cfg).await?;
+    let port = if port == 0 { 5432 } else { port };
     let user = cfg.user.as_deref().unwrap_or("postgres");
     let db = cfg.database.as_deref().unwrap_or("postgres");
     let mut url = String::from("postgres://");
@@ -29,7 +29,7 @@ fn conn_url(cfg: &ConnConfig, password: Option<&str>) -> String {
     } else {
         "?sslmode=prefer"
     });
-    url
+    Ok(url)
 }
 
 fn urlencode(s: &str) -> String {
@@ -48,9 +48,8 @@ fn urlencode(s: &str) -> String {
 #[async_trait]
 impl DbDriver for PostgresDriverImpl {
     async fn test_connection(&self, cfg: &ConnConfig, password: Option<&str>) -> Result<ServerInfo> {
-        let pool = pg_pool(&conn_url(cfg, password))
-            .await
-            .context("connecting to Postgres")?;
+        let url = conn_url(cfg, password).await?;
+        let pool = pg_pool(&url).await.context("connecting to Postgres")?;
         let version: String = sqlx::query_scalar("SELECT version()").fetch_one(&pool).await?;
         Ok(ServerInfo {
             kind: DbKind::Postgres,
@@ -59,7 +58,8 @@ impl DbDriver for PostgresDriverImpl {
     }
 
     async fn list_schemas(&self, cfg: &ConnConfig, password: Option<&str>) -> Result<Vec<Schema>> {
-        let pool = pg_pool(&conn_url(cfg, password)).await?;
+        let url = conn_url(cfg, password).await?;
+        let pool = pg_pool(&url).await?;
         let rows = sqlx::query(
             r#"
             SELECT table_schema, table_name, table_type
@@ -99,7 +99,8 @@ impl DbDriver for PostgresDriverImpl {
         schema: &str,
         relation: &str,
     ) -> Result<Vec<Column>> {
-        let pool = pg_pool(&conn_url(cfg, password)).await?;
+        let url = conn_url(cfg, password).await?;
+        let pool = pg_pool(&url).await?;
         let rows = sqlx::query(
             r#"
             SELECT
@@ -146,11 +147,12 @@ impl DbDriver for PostgresDriverImpl {
         sql: &str,
         opts: QueryOpts,
     ) -> Result<QueryResult> {
-        run_query_body!(cfg, pg_pool(&conn_url(cfg, password)).await?, sql, opts, pg_value)
+        run_query_body!(cfg, pg_pool(&conn_url(cfg, password).await?).await?, sql, opts, pg_value)
     }
 
     async fn list_foreign_keys(&self, cfg: &ConnConfig, password: Option<&str>) -> Result<Vec<ForeignKey>> {
-        let pool = pg_pool(&conn_url(cfg, password)).await?;
+        let url = conn_url(cfg, password).await?;
+        let pool = pg_pool(&url).await?;
         let rows = sqlx::query(
             r#"
             SELECT
@@ -182,7 +184,8 @@ impl DbDriver for PostgresDriverImpl {
     }
 
     async fn list_functions(&self, cfg: &ConnConfig, password: Option<&str>) -> Result<Vec<SqlFunction>> {
-        let pool = pg_pool(&conn_url(cfg, password)).await?;
+        let url = conn_url(cfg, password).await?;
+        let pool = pg_pool(&url).await?;
         let rows = sqlx::query(
             r#"
             SELECT
@@ -217,7 +220,8 @@ impl DbDriver for PostgresDriverImpl {
     }
 
     async fn server_time(&self, cfg: &ConnConfig, password: Option<&str>) -> Result<DbTime> {
-        let pool = pg_pool(&conn_url(cfg, password)).await?;
+        let url = conn_url(cfg, password).await?;
+        let pool = pg_pool(&url).await?;
         let row = sqlx::query(
             r#"
             SELECT

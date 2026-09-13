@@ -4,6 +4,7 @@ mod mysql;
 mod pool;
 mod postgres;
 mod sqlite;
+pub mod tunnel;
 
 pub(crate) use exec::run_query_body;
 
@@ -48,6 +49,30 @@ pub struct ConnConfig {
     /// from the per-connection MCP write ACL, which only governs AI access.
     #[serde(default)]
     pub read_only: bool,
+    /// A shell command run right before each connect; its trimmed stdout
+    /// becomes the password for that connect, overriding whatever's in
+    /// the OS keychain — for IAM-style auth (e.g. `aws rds
+    /// generate-db-auth-token ...`) where the real credential is a
+    /// short-lived token, not a stored secret. Runs via `sh -c` (Unix) /
+    /// `cmd /C` (Windows) with a hard timeout; the human owns this
+    /// connection profile, so this isn't a new trust boundary — it's the
+    /// same shell access the human already has.
+    #[serde(default)]
+    pub pre_connect_cmd: Option<String>,
+    /// SSH tunnel: connect to `host`/`port` through a `ssh -L` port
+    /// forward via this jump host instead of directly. `None` = no
+    /// tunnel. Uses the system `ssh` binary (not an embedded client) —
+    /// picks up the user's own `~/.ssh/config`, known_hosts, and agent.
+    #[serde(default)]
+    pub ssh_host: Option<String>,
+    #[serde(default)]
+    pub ssh_port: Option<u16>,
+    #[serde(default)]
+    pub ssh_user: Option<String>,
+    /// Path to a private key file. `None` relies on ssh-agent / the
+    /// default `~/.ssh/id_*` keys, same as running `ssh` by hand.
+    #[serde(default)]
+    pub ssh_key_path: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]

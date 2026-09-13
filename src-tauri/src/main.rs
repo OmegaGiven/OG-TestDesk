@@ -127,6 +127,10 @@ async fn connection_save(
             SecretsStore::set(&config.id, &pw).map_err(err)?;
         }
     }
+    // A saved edit might have changed the SSH settings (or turned the
+    // tunnel off) — never let a stale tunnel from the old config linger
+    // and get reused. A fresh one is started transparently on next use.
+    drivers::tunnel::stop_tunnel(&config.id);
     state.metadata.upsert_connection(&config).await.map_err(err)?;
     Ok(config)
 }
@@ -134,6 +138,7 @@ async fn connection_save(
 #[tauri::command]
 async fn connection_delete(state: State<'_, AppState>, id: String) -> R<()> {
     let _ = SecretsStore::delete(&id);
+    drivers::tunnel::stop_tunnel(&id);
     state.metadata.delete_connection(&id).await.map_err(err)
 }
 
@@ -146,7 +151,7 @@ async fn connections_reorder(state: State<'_, AppState>, ids: Vec<String>) -> R<
 async fn connection_test(config: ConnConfig, password: Option<String>) -> R<ServerInfo> {
     let pw = match password {
         Some(p) => Some(p),
-        None => SecretsStore::get(&config.id).map_err(err)?,
+        None => drivers::tunnel::resolve_password_for(&config).await.map_err(err)?,
     };
     drivers::driver_for(config.kind)
         .test_connection(&config, pw.as_deref())
@@ -158,7 +163,7 @@ async fn connection_test(config: ConnConfig, password: Option<String>) -> R<Serv
 
 #[tauri::command]
 async fn schemas_list(config: ConnConfig) -> R<Vec<Schema>> {
-    let pw = SecretsStore::get(&config.id).map_err(err)?;
+    let pw = drivers::tunnel::resolve_password_for(&config).await.map_err(err)?;
     drivers::driver_for(config.kind)
         .list_schemas(&config, pw.as_deref())
         .await
@@ -167,7 +172,7 @@ async fn schemas_list(config: ConnConfig) -> R<Vec<Schema>> {
 
 #[tauri::command]
 async fn columns_list(config: ConnConfig, schema: String, relation: String) -> R<Vec<Column>> {
-    let pw = SecretsStore::get(&config.id).map_err(err)?;
+    let pw = drivers::tunnel::resolve_password_for(&config).await.map_err(err)?;
     drivers::driver_for(config.kind)
         .list_columns(&config, pw.as_deref(), &schema, &relation)
         .await
@@ -176,7 +181,7 @@ async fn columns_list(config: ConnConfig, schema: String, relation: String) -> R
 
 #[tauri::command]
 async fn foreign_keys_list(config: ConnConfig) -> R<Vec<og_testdesk_core::ForeignKey>> {
-    let pw = SecretsStore::get(&config.id).map_err(err)?;
+    let pw = drivers::tunnel::resolve_password_for(&config).await.map_err(err)?;
     drivers::driver_for(config.kind)
         .list_foreign_keys(&config, pw.as_deref())
         .await
@@ -185,7 +190,7 @@ async fn foreign_keys_list(config: ConnConfig) -> R<Vec<og_testdesk_core::Foreig
 
 #[tauri::command]
 async fn functions_list(config: ConnConfig) -> R<Vec<og_testdesk_core::SqlFunction>> {
-    let pw = SecretsStore::get(&config.id).map_err(err)?;
+    let pw = drivers::tunnel::resolve_password_for(&config).await.map_err(err)?;
     drivers::driver_for(config.kind)
         .list_functions(&config, pw.as_deref())
         .await
@@ -194,7 +199,7 @@ async fn functions_list(config: ConnConfig) -> R<Vec<og_testdesk_core::SqlFuncti
 
 #[tauri::command]
 async fn db_time(config: ConnConfig) -> R<og_testdesk_core::DbTime> {
-    let pw = SecretsStore::get(&config.id).map_err(err)?;
+    let pw = drivers::tunnel::resolve_password_for(&config).await.map_err(err)?;
     drivers::driver_for(config.kind)
         .server_time(&config, pw.as_deref())
         .await
@@ -212,7 +217,7 @@ async fn query_run(
     page_size: Option<usize>,
     count: Option<bool>,
 ) -> R<QueryResult> {
-    let pw = SecretsStore::get(&config.id).map_err(err)?;
+    let pw = drivers::tunnel::resolve_password_for(&config).await.map_err(err)?;
     let opts = match page_size {
         Some(size) if size > 0 => {
             og_testdesk_core::QueryOpts::page(page.unwrap_or(0), size, count.unwrap_or(false))

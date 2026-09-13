@@ -889,7 +889,7 @@ async fn call_tool(ctx: &AppCtx, name: &str, args: Value) -> Result<String> {
         }
         "list_schemas" => {
             let (conn, _) = resolve_exposed(ctx, &s("connection").unwrap_or_default()).await?;
-            let pw = SecretsStore::get(&conn.id)?;
+            let pw = drivers::tunnel::resolve_password_for(&conn).await?;
             let schemas = drivers::driver_for(conn.kind)
                 .list_schemas(&conn, pw.as_deref())
                 .await?;
@@ -897,7 +897,7 @@ async fn call_tool(ctx: &AppCtx, name: &str, args: Value) -> Result<String> {
         }
         "list_columns" => {
             let (conn, _) = resolve_exposed(ctx, &s("connection").unwrap_or_default()).await?;
-            let pw = SecretsStore::get(&conn.id)?;
+            let pw = drivers::tunnel::resolve_password_for(&conn).await?;
             let cols = drivers::driver_for(conn.kind)
                 .list_columns(
                     &conn,
@@ -918,7 +918,7 @@ async fn call_tool(ctx: &AppCtx, name: &str, args: Value) -> Result<String> {
                     conn.nickname
                 ));
             }
-            let pw = SecretsStore::get(&conn.id)?;
+            let pw = drivers::tunnel::resolve_password_for(&conn).await?;
             // Always hard-capped, independent of the human's UI row-limit
             // preference (which can be set to "unlimited (risky)") — an
             // AI-driven call here is unattended, so it must never be able
@@ -1137,6 +1137,11 @@ async fn call_tool(ctx: &AppCtx, name: &str, args: Value) -> Result<String> {
                 use_tls: args.get("use_tls").and_then(|v| v.as_bool()).unwrap_or(false),
                 color: s("color"),
                 read_only: args.get("read_only").and_then(|v| v.as_bool()).unwrap_or(false),
+                pre_connect_cmd: None,
+                ssh_host: None,
+                ssh_port: None,
+                ssh_user: None,
+                ssh_key_path: None,
             };
             ctx.metadata.upsert_connection(&conn).await?;
             let _ = ctx.app_handle.emit("mcp:connection-created", &conn);

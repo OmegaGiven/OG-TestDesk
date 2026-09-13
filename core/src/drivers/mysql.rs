@@ -23,9 +23,9 @@ fn urlencode(s: &str) -> String {
     out
 }
 
-fn conn_url(cfg: &ConnConfig, password: Option<&str>) -> String {
-    let host = cfg.host.as_deref().unwrap_or("localhost");
-    let port = cfg.port.unwrap_or(3306);
+async fn conn_url(cfg: &ConnConfig, password: Option<&str>) -> Result<String> {
+    let (host, port) = super::tunnel::effective_host_port(cfg).await?;
+    let port = if port == 0 { 3306 } else { port };
     let user = cfg.user.as_deref().unwrap_or("root");
     let db = cfg.database.as_deref().unwrap_or("");
     let mut url = String::from("mysql://");
@@ -40,15 +40,14 @@ fn conn_url(cfg: &ConnConfig, password: Option<&str>) -> String {
     if cfg.use_tls {
         url.push_str("?ssl-mode=REQUIRED");
     }
-    url
+    Ok(url)
 }
 
 #[async_trait]
 impl DbDriver for MySqlDriverImpl {
     async fn test_connection(&self, cfg: &ConnConfig, password: Option<&str>) -> Result<ServerInfo> {
-        let pool = mysql_pool(&conn_url(cfg, password))
-            .await
-            .context("connecting to MySQL")?;
+        let url = conn_url(cfg, password).await?;
+        let pool = mysql_pool(&url).await.context("connecting to MySQL")?;
         let version: String = sqlx::query_scalar("SELECT VERSION()").fetch_one(&pool).await?;
         Ok(ServerInfo {
             kind: DbKind::MySql,
@@ -57,7 +56,8 @@ impl DbDriver for MySqlDriverImpl {
     }
 
     async fn list_schemas(&self, cfg: &ConnConfig, password: Option<&str>) -> Result<Vec<Schema>> {
-        let pool = mysql_pool(&conn_url(cfg, password)).await?;
+        let url = conn_url(cfg, password).await?;
+        let pool = mysql_pool(&url).await?;
         let rows = sqlx::query(
             r#"
             SELECT table_schema, table_name, table_type
@@ -97,7 +97,8 @@ impl DbDriver for MySqlDriverImpl {
         schema: &str,
         relation: &str,
     ) -> Result<Vec<Column>> {
-        let pool = mysql_pool(&conn_url(cfg, password)).await?;
+        let url = conn_url(cfg, password).await?;
+        let pool = mysql_pool(&url).await?;
         let rows = sqlx::query(
             r#"
             SELECT column_name, column_type, is_nullable, column_default, column_key
@@ -132,7 +133,7 @@ impl DbDriver for MySqlDriverImpl {
     ) -> Result<QueryResult> {
         run_query_body!(
             cfg,
-            mysql_pool(&conn_url(cfg, password)).await?,
+            mysql_pool(&conn_url(cfg, password).await?).await?,
             sql,
             opts,
             my_value
@@ -140,7 +141,8 @@ impl DbDriver for MySqlDriverImpl {
     }
 
     async fn list_foreign_keys(&self, cfg: &ConnConfig, password: Option<&str>) -> Result<Vec<ForeignKey>> {
-        let pool = mysql_pool(&conn_url(cfg, password)).await?;
+        let url = conn_url(cfg, password).await?;
+        let pool = mysql_pool(&url).await?;
         let rows = sqlx::query(
             r#"
             SELECT table_schema, table_name, column_name,
@@ -167,7 +169,8 @@ impl DbDriver for MySqlDriverImpl {
     }
 
     async fn list_functions(&self, cfg: &ConnConfig, password: Option<&str>) -> Result<Vec<SqlFunction>> {
-        let pool = mysql_pool(&conn_url(cfg, password)).await?;
+        let url = conn_url(cfg, password).await?;
+        let pool = mysql_pool(&url).await?;
         let rows = sqlx::query(
             r#"
             SELECT
@@ -203,7 +206,8 @@ impl DbDriver for MySqlDriverImpl {
     }
 
     async fn server_time(&self, cfg: &ConnConfig, password: Option<&str>) -> Result<DbTime> {
-        let pool = mysql_pool(&conn_url(cfg, password)).await?;
+        let url = conn_url(cfg, password).await?;
+        let pool = mysql_pool(&url).await?;
         let row = sqlx::query(
             r#"
             SELECT

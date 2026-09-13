@@ -11,7 +11,7 @@ use chrono::{TimeZone, Utc};
 use cron::Schedule as CronSchedule;
 use og_testdesk_core::{
     apply_environment, drivers, requests as http_requests, HistoryEntry, HttpRequest, MetadataStore,
-    RequestHistoryEntry, Schedule, SecretsStore,
+    RequestHistoryEntry, Schedule,
 };
 
 const MAX_CACHED_ROWS: usize = 5000;
@@ -108,7 +108,7 @@ pub async fn run_one(metadata: &MetadataStore, s: &Schedule) -> String {
             let Some(conn) = conns.into_iter().find(|c| c.id == conn_id) else {
                 return "connection missing".into();
             };
-            let pw = SecretsStore::get(&conn.id).ok().flatten();
+            let pw = drivers::tunnel::resolve_password_for(&conn).await.ok().flatten();
             // Hard-capped regardless of the human's UI row-limit preference —
             // nobody is watching a scheduled run to notice and cancel it.
             let res = drivers::driver_for(conn.kind)

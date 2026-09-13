@@ -24,7 +24,12 @@
         file_path: existing.file_path || '',
         use_tls: !!existing.use_tls,
         color: existing.color || DOT_COLORS[6],
-        read_only: !!existing.read_only
+        read_only: !!existing.read_only,
+        pre_connect_cmd: existing.pre_connect_cmd || '',
+        ssh_host: existing.ssh_host || '',
+        ssh_port: existing.ssh_port || 22,
+        ssh_user: existing.ssh_user || '',
+        ssh_key_path: existing.ssh_key_path || ''
       }
     : {
         id: '',
@@ -37,8 +42,14 @@
         file_path: '',
         use_tls: false,
         color: DOT_COLORS[0],
-        read_only: false
+        read_only: false,
+        pre_connect_cmd: '',
+        ssh_host: '',
+        ssh_port: 22,
+        ssh_user: '',
+        ssh_key_path: ''
       };
+  let showAdvanced = !!(existing?.pre_connect_cmd || existing?.ssh_host);
   let password = '';
   let testing = false;
   let saving = false;
@@ -100,7 +111,12 @@
       file_path: isSqlite ? form.file_path || null : null,
       use_tls: isSqlite ? false : form.use_tls,
       color: form.color,
-      read_only: form.read_only
+      read_only: form.read_only,
+      pre_connect_cmd: form.pre_connect_cmd?.trim() || null,
+      ssh_host: isSqlite ? null : form.ssh_host?.trim() || null,
+      ssh_port: form.ssh_port ? Number(form.ssh_port) : null,
+      ssh_user: form.ssh_user?.trim() || null,
+      ssh_key_path: form.ssh_key_path?.trim() || null
     };
   }
 
@@ -230,6 +246,51 @@
     <input type="checkbox" bind:checked={form.read_only} /> Read-only (block all writes)
   </label>
 
+  <button type="button" class="btn ghost sm adv-toggle" on:click={() => (showAdvanced = !showAdvanced)}>
+    {showAdvanced ? '▾' : '▸'} SSH tunnel / IAM auth
+  </button>
+  {#if showAdvanced}
+    <div class="adv">
+      <div class="field">
+        <label for="precmd">Pre-connect command <span class="muted">(stdout becomes the password)</span></label>
+        <input
+          id="precmd"
+          class="input mono"
+          bind:value={form.pre_connect_cmd}
+          placeholder="aws rds generate-db-auth-token --hostname ... --username ..."
+        />
+      </div>
+      {#if !isSqlite}
+        <div class="row">
+          <div class="field" style="flex:2">
+            <label for="sshhost">SSH jump host</label>
+            <input id="sshhost" class="input" bind:value={form.ssh_host} placeholder="bastion.example.com" />
+          </div>
+          <div class="field" style="flex:1">
+            <label for="sshport">SSH port</label>
+            <input id="sshport" class="input" type="number" bind:value={form.ssh_port} />
+          </div>
+        </div>
+        {#if form.ssh_host}
+          <div class="row">
+            <div class="field">
+              <label for="sshuser">SSH user</label>
+              <input id="sshuser" class="input" bind:value={form.ssh_user} />
+            </div>
+            <div class="field">
+              <label for="sshkey">SSH private key path <span class="muted">(optional — else agent/default keys)</span></label>
+              <input id="sshkey" class="input mono" bind:value={form.ssh_key_path} placeholder="~/.ssh/id_ed25519" />
+            </div>
+          </div>
+          <div class="hint">
+            Uses the system <code>ssh</code> binary — picks up your own ~/.ssh/config and known_hosts.
+            Connects to "{form.host || 'host'}:{form.port || 'port'}" as seen from {form.ssh_host}.
+          </div>
+        {/if}
+      {/if}
+    </div>
+  {/if}
+
   {#if testResult}
     <div class="test {testResult.ok ? 'ok' : 'bad'}">{testResult.text}</div>
   {/if}
@@ -245,6 +306,26 @@
 </Modal>
 
 <style>
+  .adv-toggle {
+    display: block;
+    margin-bottom: 8px;
+    padding-left: 0;
+  }
+  .adv {
+    border-left: 2px solid var(--border);
+    padding-left: 10px;
+    margin-bottom: 10px;
+  }
+  .muted {
+    color: var(--text-muted);
+    font-weight: 400;
+  }
+  .hint {
+    font-size: 10.5px;
+    color: var(--text-muted);
+    margin-top: -4px;
+    margin-bottom: 8px;
+  }
   .url-row {
     display: flex;
     gap: 6px;

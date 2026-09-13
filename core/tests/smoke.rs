@@ -13,6 +13,11 @@ fn sqlite_cfg(path: &str) -> ConnConfig {
         use_tls: false,
         color: None,
         read_only: false,
+        pre_connect_cmd: None,
+        ssh_host: None,
+        ssh_port: None,
+        ssh_user: None,
+        ssh_key_path: None,
     }
 }
 
