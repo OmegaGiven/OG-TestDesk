@@ -218,9 +218,9 @@
 <div class="sq">
   <div class="sq-tools">
     <input class="input sm" placeholder="Filter saved queries…" bind:value={filter} />
-    <button class="icon-btn" title="New query" on:click={() => newQuery(null)}>{ICONS.newQuery.glyph}</button>
+    <button class="icon-btn" title="New query" on:click={() => newQuery(null)}>{@html ICONS.newQuery.svg}</button>
     <button class="icon-btn" title="New folder" on:click={() => newFolder(null)}>{@html ICONS.newFolder.svg}</button>
-    <button class="icon-btn" title="Refresh" on:click={reload}>{ICONS.refresh.glyph}</button>
+    <button class="icon-btn" title="Refresh" on:click={reload}>{@html ICONS.refresh.svg}</button>
   </div>
 
   <div
@@ -237,8 +237,8 @@
             <span class="qname">{s.name}</span>
             {#if folderPath(s.folder_id)}<span class="qconn">{folderPath(s.folder_id)}</span>{/if}
           </button>
-          <button class="icon-btn sm" title="Rename" on:click={() => renameQuery(s)}>{ICONS.rename.glyph}</button>
-          <button class="icon-btn sm danger" title="Delete" on:click={() => deleteQuery(s)}>{ICONS.delete.glyph}</button>
+          <button class="icon-btn sm" title="Rename" on:click={() => renameQuery(s)}>{@html ICONS.rename.svg}</button>
+          <button class="icon-btn sm danger" title="Delete" on:click={() => deleteQuery(s)}>{@html ICONS.delete.svg}</button>
         </div>
       {/each}
       {#if matches.length === 0}<div class="none">No matches.</div>{/if}
@@ -252,8 +252,8 @@
             <span class="qname">{q.name}</span>
             {#if connName(q.connection_id)}<span class="qconn">{connName(q.connection_id)}</span>{/if}
           </button>
-          <button class="icon-btn sm" title="Rename" on:click={() => renameQuery(q)}>{ICONS.rename.glyph}</button>
-          <button class="icon-btn sm danger" title="Delete" on:click={() => deleteQuery(q)}>{ICONS.delete.glyph}</button>
+          <button class="icon-btn sm" title="Rename" on:click={() => renameQuery(q)}>{@html ICONS.rename.svg}</button>
+          <button class="icon-btn sm danger" title="Delete" on:click={() => deleteQuery(q)}>{@html ICONS.delete.svg}</button>
         </div>
       {/each}
       {#if rootFolders.length === 0 && rootQueries.length === 0}

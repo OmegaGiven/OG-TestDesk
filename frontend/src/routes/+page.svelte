@@ -196,11 +196,11 @@
   <div class="chrome" class:mac={isMac}>
     {#if isMac}<div class="tl-space"></div>{/if}
     <TopNav />
-    <button class="chrome-btn" on:click={() => (activityOpen = true)} title="History & schedules">{ICONS.history.glyph}</button>
-    <button class="chrome-btn" on:click={() => (helpOpen = true)} title="Help">{ICONS.help.glyph}</button>
-    <button class="chrome-btn" on:click={() => (settingsOpen = true)} title="Settings">{ICONS.settings.glyph}</button>
+    <button class="chrome-btn" on:click={() => (activityOpen = true)} title="History & schedules">{@html ICONS.history.svg}</button>
+    <button class="chrome-btn" on:click={() => (helpOpen = true)} title="Help">{@html ICONS.help.svg}</button>
+    <button class="chrome-btn" on:click={() => (settingsOpen = true)} title="Settings">{@html ICONS.settings.svg}</button>
     <button class="chrome-btn" on:click={cycleTheme} title="Theme: {$theme}">
-      {$theme === 'dark' ? ICONS.themeDark.glyph : $theme === 'light' ? ICONS.themeLight.glyph : ICONS.themeSystem.glyph}
+      {@html $theme === 'dark' ? ICONS.themeDark.svg : $theme === 'light' ? ICONS.themeLight.svg : ICONS.themeSystem.svg}
     </button>
     {#if !isMac}<WindowControls />{/if}
   </div>

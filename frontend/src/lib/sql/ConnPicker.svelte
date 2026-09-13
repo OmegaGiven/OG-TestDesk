@@ -88,10 +88,10 @@
         <span class="meta">
           {c.kind}{c.host ? ` · ${c.host}` : ''}{c.database ? `/${c.database}` : ''}
         </span>
-        {#if testing[c.id] === 'ok'}<span class="st ok">{ICONS.connOk.glyph}</span>{/if}
-        {#if testing[c.id] === 'err'}<span class="st err">{ICONS.connErr.glyph}</span>{/if}
+        {#if testing[c.id] === 'ok'}<span class="st ok">{@html ICONS.connOk.svg}</span>{/if}
+        {#if testing[c.id] === 'err'}<span class="st err">{@html ICONS.connErr.svg}</span>{/if}
       </button>
-      <button class="icon-btn sm" title="Edit" on:click={() => (modal = { existing: c })}>{ICONS.rename.glyph}</button>
+      <button class="icon-btn sm" title="Edit" on:click={() => (modal = { existing: c })}>{@html ICONS.rename.svg}</button>
     </div>
   {/each}
   {#if $connections.length === 0}

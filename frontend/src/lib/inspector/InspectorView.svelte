@@ -369,7 +369,7 @@
         <span class="ex-label">Export</span>
         <button class="btn ghost sm" on:click={() => doExport('csv')}>CSV</button>
         <button class="btn ghost sm" on:click={() => doExport('json')}>JSON</button>
-        <button class="btn ghost sm" title="Copy pretty JSON" on:click={() => doExport('copy')}>{ICONS.copy.glyph}</button>
+        <button class="btn ghost sm" title="Copy pretty JSON" on:click={() => doExport('copy')}>{@html ICONS.copy.svg}</button>
       </span>
     {/if}
     <button class="btn ghost sm" class:active={rawMode} on:click={() => (rawMode = !rawMode)}>
@@ -455,7 +455,7 @@
       {:else if mode === 'raw'}
         <div class="raw-view">
           <div class="raw-view-tools">
-            <button class="btn ghost sm" on:click={() => copy(rawPretty)} disabled={!rawPretty}>{ICONS.copy.glyph} Copy</button>
+            <button class="btn ghost sm" on:click={() => copy(rawPretty)} disabled={!rawPretty}>{@html ICONS.copy.svg} Copy</button>
             {#if !rawMode}
               {#if editingRaw}
                 <button class="btn primary sm" on:click={applyRawEdit}>Apply</button>
@@ -463,7 +463,7 @@
                 {#if editError}<span class="raw-err inline">{editError}</span>{/if}
               {:else}
                 <button class="btn ghost sm" on:click={startRawEdit} disabled={!rawPretty}
-                  >{ICONS.editCells.glyph} Edit</button
+                  >{@html ICONS.editCells.svg} Edit</button
                 >
               {/if}
             {/if}
@@ -514,7 +514,7 @@
           {:else}
             <pre class="d-json">{subtreePretty()}</pre>
             <div class="d-actions">
-              <button class="btn sm" on:click={startNodeEdit}>{ICONS.editCells.glyph} Edit</button>
+              <button class="btn sm" on:click={startNodeEdit}>{@html ICONS.editCells.svg} Edit</button>
               <button class="btn sm" on:click={() => copy(selected.path)}>Copy path</button>
               <button class="btn sm" on:click={() => copy(String(selectedValue))}>Copy value</button>
               <button class="btn sm" on:click={() => copy(subtreePretty())}>Copy pretty</button>

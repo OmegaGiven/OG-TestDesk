@@ -284,7 +284,7 @@
                     on:change={(e) => setVar(v.key, e.target.value.trim())}
                   />
                   {#if customSlice[v.key]}
-                    <button class="mini" title="Revert this one" on:click={() => clearVar(v.key)}>{ICONS.revert.glyph}</button>
+                    <button class="mini" title="Revert this one" on:click={() => clearVar(v.key)}>{@html ICONS.revert.svg}</button>
                   {:else}
                     <span class="mini dim" title="Inherits from the base palette">—</span>
                   {/if}

@@ -3,6 +3,7 @@
   import { api } from '../api.js';
   import { toast, toastError, confirmDialog } from '../stores.js';
   import { quote, literal } from '../sqlIdent.js';
+  import { ICONS } from '../icons.js';
   import { createEventDispatcher, onMount } from 'svelte';
 
   export let conn;
@@ -190,8 +191,14 @@
             <td><input class="cell mono" bind:value={r.data_type} disabled={limited && !r.isNew} /></td>
             <td class="center"><input type="checkbox" bind:checked={r.nullable} disabled={limited && !r.isNew} /></td>
             <td><input class="cell mono" bind:value={r.default} placeholder="—" disabled={limited && !r.isNew} /></td>
-            <td class="center">{r.primary_key ? '✓' : ''}</td>
-            <td><button class="btn ghost sm" on:click={() => toggleDrop(r)}>{dropped.has(r.origName) ? 'Undo' : r.isNew ? '✕' : 'Drop'}</button></td>
+            <td class="center">{#if r.primary_key}{@html ICONS.check.svg}{/if}</td>
+            <td>
+              <button class="btn ghost sm" on:click={() => toggleDrop(r)}>
+                {#if dropped.has(r.origName)}{@html ICONS.revert.svg} Undo
+                {:else if r.isNew}{@html ICONS.cancel.svg}
+                {:else}{@html ICONS.delete.svg} Drop{/if}
+              </button>
+            </td>
           </tr>
         {/each}
       </tbody>

@@ -235,7 +235,7 @@
       </ul>
       <div class="nav-footer">
         <button class="report-issue" on:click={reportIssue}>Report an issue on GitHub ↗</button>
-        <button class="report-issue sponsor" on:click={sponsor}>♥ Sponsor this project</button>
+        <button class="report-issue sponsor" on:click={sponsor}>{@html ICONS.heart.svg} Sponsor this project</button>
         {#if appVersion}<div class="app-version">OG TestDesk v{appVersion}</div>{/if}
       </div>
     </aside>
@@ -260,7 +260,7 @@
               {#each Object.values(ICONS) as icon}
                 <tr>
                   <td class="ic" style={icon.colorVar ? `color:var(${icon.colorVar})` : ''}>
-                    {#if icon.svg}{@html icon.svg}{:else}{icon.glyph}{/if}
+                    {@html icon.svg}
                   </td>
                   <td>{icon.label}</td>
                   <td class="where">{icon.where}</td>

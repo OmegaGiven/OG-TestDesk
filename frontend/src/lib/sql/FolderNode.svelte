@@ -32,7 +32,7 @@
       on:drop|preventDefault|stopPropagation={() => ctx.drop(folderId)}
     >
       <button class="icon-btn sm chev" on:click={() => ctx.toggle(folderId)}
-        >{open ? ICONS.expandOpen.glyph : ICONS.expandClosed.glyph}</button
+        >{@html open ? ICONS.expandOpen.svg : ICONS.expandClosed.svg}</button
       >
       <button class="fname" title="Rename" on:click={() => ctx.renameFolder(folder)}>{folder.name}</button>
       <span class="fcount">{subs.length + qs.length}</span>
@@ -41,10 +41,10 @@
           >{@html ICONS.newSubfolder.svg}</button
         >
         <button class="icon-btn sm" title="New query here" on:click={() => ctx.newQuery(folderId)}
-          >{ICONS.newQueryHere.glyph}</button
+          >{@html ICONS.newQueryHere.svg}</button
         >
         <button class="icon-btn sm danger" title="Delete folder" on:click={() => ctx.deleteFolder(folder)}
-          >{ICONS.delete.glyph}</button
+          >{@html ICONS.delete.svg}</button
         >
       </span>
     </div>
@@ -63,9 +63,9 @@
             <span class="qname">{q.name}</span>
             {#if ctx.connName(q.connection_id)}<span class="qconn">{ctx.connName(q.connection_id)}</span>{/if}
           </button>
-          <button class="icon-btn sm" title="Rename" on:click={() => ctx.renameQuery(q)}>{ICONS.rename.glyph}</button>
+          <button class="icon-btn sm" title="Rename" on:click={() => ctx.renameQuery(q)}>{@html ICONS.rename.svg}</button>
           <button class="icon-btn sm danger" title="Delete" on:click={() => ctx.deleteQuery(q)}
-            >{ICONS.delete.glyph}</button
+            >{@html ICONS.delete.svg}</button
           >
         </div>
       {/each}

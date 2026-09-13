@@ -2,6 +2,7 @@
   import Modal from '../components/Modal.svelte';
   import { api } from '../api.js';
   import { toast, toastError } from '../stores.js';
+  import { ICONS } from '../icons.js';
   import { createEventDispatcher, onMount } from 'svelte';
 
   const dispatch = createEventDispatcher();
@@ -69,7 +70,7 @@
         <div class="cert-row">
           <input class="input mono" bind:value={c.host} placeholder="api.example.com" />
           <textarea class="input mono" rows="3" bind:value={c.pem} placeholder={'-----BEGIN CERTIFICATE-----\n...\n-----BEGIN PRIVATE KEY-----\n...'} />
-          <button class="btn ghost sm" on:click={() => removeCert(i)}>✕</button>
+          <button class="btn ghost sm" on:click={() => removeCert(i)}>{@html ICONS.cancel.svg}</button>
         </div>
       {/each}
       <button class="btn ghost sm" on:click={addCert}>+ Add client certificate</button>

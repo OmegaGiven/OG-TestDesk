@@ -781,7 +781,7 @@
     </div>
     <div class="split-resizer" on:mousedown={startHDrag} role="separator" tabindex="-1">
       <button class="split-close" title="Close split" on:click|stopPropagation={closeSplit}
-        >{ICONS.closeTab.glyph}</button
+        >{@html ICONS.closeTab.svg}</button
       >
     </div>
     <div class="split-pane" style="width:{100 - hSplitPct}%">
@@ -794,7 +794,7 @@
     <aside class="sidebar" class:collapsed={sidebarCollapsed} style="width:{sidebarCollapsed ? 0 : sidebarW}px">
       <div class="sq-section" class:open={sqOpen}>
         <button class="sec-head sq-toggle" on:click={() => (sqOpen = !sqOpen)}>
-          <span class="chev">{sqOpen ? ICONS.expandOpen.glyph : ICONS.expandClosed.glyph}</span>
+          <span class="chev">{@html sqOpen ? ICONS.expandOpen.svg : ICONS.expandClosed.svg}</span>
           <span>Saved queries</span>
           <span class="sq-badge">{$savedQueries.length}</span>
         </button>
@@ -863,7 +863,7 @@
           </button>
         {/if}
         <button class="icon-btn big-glyph" title={ICONS.saveFile.label} on:click={saveToFile}
-          >{ICONS.saveFile.glyph}</button
+          >{@html ICONS.saveFile.svg}</button
         >
         <span class="tb-conn" style="--c: {tabConn?.color || 'var(--conn-slate)'}">
           {tabConn?.nickname}
@@ -943,7 +943,9 @@
                   title={mr.error || mr.sql}
                   on:click={() => touchSqlTab(tab.id, { activeResultIdx: i })}
                 >
-                  {i + 1}{mr.error ? ' ✕' : mr.result?.is_select ? ` (${mr.result.row_count})` : ` (${mr.result?.rows_affected ?? 0})`}
+                  {i + 1}{#if mr.error}{@html ICONS.cancel.svg}{:else}
+                    {mr.result?.is_select ? ` (${mr.result.row_count})` : ` (${mr.result?.rows_affected ?? 0})`}
+                  {/if}
                 </button>
               {/each}
             </div>

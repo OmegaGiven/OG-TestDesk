@@ -301,7 +301,7 @@
             >
               {item.tab.dirty ? '•' : ''}{item.tab.title}
               <span class="x" on:click={(e) => close(item.tab.id, e)} role="button" tabindex="-1"
-                >{ICONS.closeTab.glyph}</span
+                >{@html ICONS.closeTab.svg}</span
               >
             </button>
           {:else if item.kind === 'request'}
@@ -322,7 +322,7 @@
               </span>
               {item.tab.dirty ? '•' : ''}{item.tab.title}
               <span class="x" on:click={(e) => closeReq(item.tab.id, e)} role="button" tabindex="-1"
-                >{ICONS.closeTab.glyph}</span
+                >{@html ICONS.closeTab.svg}</span
               >
             </button>
           {:else}
@@ -341,7 +341,7 @@
               <span class="insp-icon" style="color: var(--tool-inspector-text)">I</span>
               Inspector
               <span class="x" on:click={closeInspector} role="button" tabindex="-1"
-                >{ICONS.closeTab.glyph}</span
+                >{@html ICONS.closeTab.svg}</span
               >
             </button>
           {/if}
@@ -368,7 +368,7 @@
           </span>
           {item.tab.dirty ? '•' : ''}{item.tab.title}
           <span class="x" on:click={(e) => closeReq(item.tab.id, e)} role="button" tabindex="-1"
-            >{ICONS.closeTab.glyph}</span
+            >{@html ICONS.closeTab.svg}</span
           >
         </button>
       {:else}
@@ -387,7 +387,7 @@
           <span class="insp-icon" style="color: var(--tool-inspector-text)">I</span>
           Inspector
           <span class="x" on:click={closeInspector} role="button" tabindex="-1"
-            >{ICONS.closeTab.glyph}</span
+            >{@html ICONS.closeTab.svg}</span
           >
         </button>
       {/if}

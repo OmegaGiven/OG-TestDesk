@@ -331,7 +331,7 @@
   <div class="empty">Run a query to see results.</div>
 {:else if !result.is_select}
   <div class="empty">
-    <div style="font-size:22px">{ICONS.success.glyph}</div>
+    <div style="font-size:22px">{@html ICONS.success.svg}</div>
     {result.rows_affected} row{result.rows_affected === 1 ? '' : 's'} affected · {result.duration_ms} ms
   </div>
 {:else if baseRows.length === 0}
@@ -347,7 +347,7 @@
       class="btn ghost sm"
       class:on={showColFilters}
       title="Per-column filters"
-      on:click={() => (showColFilters = !showColFilters)}>{ICONS.columnFilters.glyph} Filters</button
+      on:click={() => (showColFilters = !showColFilters)}>{@html ICONS.columnFilters.svg} Filters</button
     >
     <span class="cols-menu-wrap">
       <button
@@ -355,7 +355,7 @@
         class:on={colsMenuOpen}
         title="Show / hide columns"
         on:click={() => (colsMenuOpen = !colsMenuOpen)}
-        >{ICONS.columns.glyph} Columns{hiddenCols.size ? ` (${visibleIdx.length}/${cols.length})` : ''}</button
+        >{@html ICONS.columns.svg} Columns{hiddenCols.size ? ` (${visibleIdx.length}/${cols.length})` : ''}</button
       >
       {#if colsMenuOpen}
         <div class="backdrop" on:click={() => (colsMenuOpen = false)} role="presentation" />
@@ -388,7 +388,7 @@
         : 'Edit cells (view/export only — no primary key found, can\'t write back)'}
       on:click={() => (editing = !editing)}
     >
-      {ICONS.editCells.glyph} Edit
+      {@html ICONS.editCells.svg} Edit
     </button>
     {#if editing && editableTable}
       <button class="btn ghost sm" on:click={addNewRow}>+ New row</button>
@@ -402,14 +402,14 @@
           : ''}</span
       >
       {#if editableTable}
-        <button class="btn primary sm" on:click={saveChanges}>{ICONS.success.glyph} Save changes</button>
+        <button class="btn primary sm" on:click={saveChanges}>{@html ICONS.success.svg} Save changes</button>
       {/if}
-      <button class="btn ghost sm" on:click={discardEdits}>{ICONS.revert.glyph} Discard</button>
+      <button class="btn ghost sm" on:click={discardEdits}>{@html ICONS.revert.svg} Discard</button>
     {/if}
     <span style="flex:1" />
     {#if result.is_select}
       <button class="btn ghost sm" on:click={() => dispatch('inspect')}
-        >{ICONS.toInspector.glyph} Inspector</button
+        >{@html ICONS.toInspector.svg} Inspector</button
       >
     {/if}
     <span class="export">
@@ -425,7 +425,7 @@
       <button class="btn ghost sm" on:click={() => doExport('csv')}>CSV</button>
       <button class="btn ghost sm" on:click={() => doExport('tsv')}>TSV</button>
       <button class="btn ghost sm" on:click={() => doExport('json')}>JSON</button>
-      <button class="btn ghost sm" title="Copy as TSV (paste into a spreadsheet)" on:click={() => doExport('copy')}>{ICONS.copy.glyph}</button>
+      <button class="btn ghost sm" title="Copy as TSV (paste into a spreadsheet)" on:click={() => doExport('copy')}>{@html ICONS.copy.svg}</button>
     </span>
   </div>
 
@@ -447,7 +447,7 @@
                 <span class="cn">{cols[i].name}</span>
                 <span class="ty">{cols[i].type_name}</span>
               </span>
-              {#if sortCol === i}<span class="arr">{sortDir === 1 ? ICONS.sortAsc.glyph : ICONS.sortDesc.glyph}</span>{/if}
+              {#if sortCol === i}<span class="arr">{@html sortDir === 1 ? ICONS.sortAsc.svg : ICONS.sortDesc.svg}</span>{/if}
             </th>
           {/each}
         </tr>
@@ -482,7 +482,7 @@
                   class="del-toggle"
                   title={deletedRows.has(row) ? 'Undo delete' : 'Mark row for deletion'}
                   on:click={() => toggleDelete(row)}
-                >{deletedRows.has(row) ? ICONS.revert.glyph : ICONS.delete?.glyph ?? '×'}</button>
+                >{@html deletedRows.has(row) ? ICONS.revert.svg : ICONS.delete.svg}</button>
               {:else}
                 {startIdx + vi + 1}
               {/if}

@@ -206,3 +206,17 @@
   text-align: center;
   padding: 24px;
 }
+
+/* Every icon in the app (icons.js) renders as an inline <svg class="ico-svg">
+   sized in `em` so it scales with its container's font-size. An inline
+   SVG's default baseline sits noticeably above surrounding text — this is
+   the one shared rule that fixes it everywhere at once, plus a bit of
+   right-margin when it's followed directly by a text label. */
+:global(.ico-svg) {
+  vertical-align: -0.15em;
+  flex-shrink: 0;
+}
+:global(.btn .ico-svg + :not(.ico-svg)),
+:global(button .ico-svg:not(:last-child)) {
+  margin-right: 0.4em;
+}

@@ -124,15 +124,15 @@
   <div class="list">
     <div class="env-block">
       <div class="env globals-row" on:click={() => toggle(GLOBALS_KEY, draftFromGlobals)}>
-        <span class="chevron">{expandedId === GLOBALS_KEY ? ICONS.expandOpen.glyph : ICONS.expandClosed.glyph}</span>
-        <span class="radio on">★</span>
+        <span class="chevron">{@html expandedId === GLOBALS_KEY ? ICONS.expandOpen.svg : ICONS.expandClosed.svg}</span>
+        <span class="radio on">{@html ICONS.radioOn.svg}</span>
         <span class="name">Globals</span>
         <span class="cnt">{Object.keys($requestGlobals).length} vars · always on</span>
         <button
           class="icon-btn sm"
           title="Export as Postman environment"
           on:click|stopPropagation={() => exportEnv('Globals', $requestGlobals)}
-          >{ICONS.exportPostman.glyph}</button
+          >{@html ICONS.exportPostman.svg}</button
         >
       </div>
       {#if expandedId === GLOBALS_KEY && drafts[GLOBALS_KEY]}
@@ -147,7 +147,7 @@
                 <input class="input mono" placeholder="baseUrl" bind:value={row.k} />
                 <input class="input mono" placeholder="https://api.example.com" bind:value={row.v} />
                 <button class="icon-btn sm" title="Remove row" on:click={() => removeRow(GLOBALS_KEY, i)}
-                  >{ICONS.delete.glyph}</button
+                  >{@html ICONS.delete.svg}</button
                 >
               </div>
             {/each}
@@ -164,14 +164,14 @@
     {#each list as env (env.id)}
       <div class="env-block">
         <div class="env" on:click={() => toggle(env.id, () => draftFromEnv(env))}>
-          <span class="chevron">{expandedId === env.id ? ICONS.expandOpen.glyph : ICONS.expandClosed.glyph}</span>
+          <span class="chevron">{@html expandedId === env.id ? ICONS.expandOpen.svg : ICONS.expandClosed.svg}</span>
           <button
             class="radio"
             class:on={env.is_active}
             on:click|stopPropagation={() => activate(env)}
             title="Set active"
           >
-            {env.is_active ? '●' : '○'}
+            {@html env.is_active ? ICONS.radioOn.svg : ICONS.radioOff.svg}
           </button>
           <span class="name">{env.name}</span>
           <span class="cnt">{Object.keys(JSON.parse(env.variables_json || '{}')).length} vars</span>
@@ -179,10 +179,10 @@
             class="icon-btn sm"
             title="Export as Postman environment"
             on:click|stopPropagation={() => exportEnv(env.name, JSON.parse(env.variables_json || '{}'))}
-            >{ICONS.exportPostman.glyph}</button
+            >{@html ICONS.exportPostman.svg}</button
           >
           <button class="icon-btn sm danger" on:click|stopPropagation={() => remove(env)}
-            >{ICONS.delete.glyph}</button
+            >{@html ICONS.delete.svg}</button
           >
         </div>
         {#if expandedId === env.id && drafts[env.id]}
@@ -201,7 +201,7 @@
                   <input class="input mono" placeholder="baseUrl" bind:value={row.k} />
                   <input class="input mono" placeholder="https://api.example.com" bind:value={row.v} />
                   <button class="icon-btn sm" title="Remove row" on:click={() => removeRow(env.id, i)}
-                    >{ICONS.delete.glyph}</button
+                    >{@html ICONS.delete.svg}</button
                   >
                 </div>
               {/each}
@@ -234,7 +234,7 @@
                 <input class="input mono" placeholder="baseUrl" bind:value={row.k} />
                 <input class="input mono" placeholder="https://api.example.com" bind:value={row.v} />
                 <button class="icon-btn sm" title="Remove row" on:click={() => removeRow('', i)}
-                  >{ICONS.delete.glyph}</button
+                  >{@html ICONS.delete.svg}</button
                 >
               </div>
             {/each}

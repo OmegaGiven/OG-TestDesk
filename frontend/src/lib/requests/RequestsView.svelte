@@ -1056,16 +1056,16 @@
         <button
           class="icon-btn big-glyph"
           title={ICONS.importPostman.label}
-          on:click={() => fileInput.click()}>{ICONS.importPostman.glyph}</button
+          on:click={() => fileInput.click()}>{@html ICONS.importPostman.svg}</button
         >
         <button class="icon-btn big-glyph" title={ICONS.exportPostman.label} on:click={exportPostman}
-          >{ICONS.exportPostman.glyph}</button
+          >{@html ICONS.exportPostman.svg}</button
         >
         <button class="icon-btn" title="New folder" on:click={newCollection}
           >{@html ICONS.newFolder.svg}</button
         >
         <button class="icon-btn" title="New request" on:click={() => newRequestTab()}
-          >{ICONS.newQuery.glyph}</button
+          >{@html ICONS.newQuery.svg}</button
         >
       </div>
     </div>
@@ -1080,7 +1080,7 @@
       {#each grouped.collections as col (col.id)}
         {@const isOpen = !collapsedCols.has(col.id)}
         <button class="col-head" on:click={() => toggleCol(col.id)}>
-          <span class="chev">{isOpen ? ICONS.expandOpen.glyph : ICONS.expandClosed.glyph}</span>
+          <span class="chev">{@html isOpen ? ICONS.expandOpen.svg : ICONS.expandClosed.svg}</span>
           <span class="col-name">{col.name}</span>
           <span class="col-cnt">{col.items.length}</span>
           <span
@@ -1088,7 +1088,7 @@
             title="Delete collection"
             on:click|stopPropagation={() => delCollection(col)}
             role="button"
-            tabindex="-1">{ICONS.delete.glyph}</span
+            tabindex="-1">{@html ICONS.delete.svg}</span
           >
         </button>
         {#if isOpen}
@@ -1098,7 +1098,7 @@
                 <span class="mm" style="color:var(--m-{s.method.toLowerCase()})">{s.method}</span>
                 <span class="rn">{s.name}</span>
               </button>
-              <button class="del" on:click={() => delSaved(s)}>{ICONS.delete.glyph}</button>
+              <button class="del" on:click={() => delSaved(s)}>{@html ICONS.delete.svg}</button>
             </div>
           {/each}
         {/if}
@@ -1111,7 +1111,7 @@
               <span class="mm" style="color:var(--m-{s.method.toLowerCase()})">{s.method}</span>
               <span class="rn">{s.name}</span>
             </button>
-            <button class="del" on:click={() => delSaved(s)}>{ICONS.delete.glyph}</button>
+            <button class="del" on:click={() => delSaved(s)}>{@html ICONS.delete.svg}</button>
           </div>
         {/each}
       {/if}
@@ -1121,22 +1121,22 @@
     </div>
     <div class="env-bar">
       <button class="btn ghost sm" on:click={() => (envModal = true)}>
-        Env: {$activeEnvironment?.name || 'none'} ▾
+        Env: {$activeEnvironment?.name || 'none'} {@html ICONS.expandOpen.svg}
       </button>
       <button class="btn ghost sm" title="Cookies collected from responses, replayed automatically" on:click={() => (cookieModal = true)}>
-        🍪 Cookies
+        {@html ICONS.cookie.svg} Cookies
       </button>
       <button class="btn ghost sm" title="Proxy, custom CA, client certificates" on:click={() => (networkModal = true)}>
-        Network
+        {@html ICONS.network.svg} Network
       </button>
       <button class="btn ghost sm" title="Local mock server — canned responses, no real backend" on:click={() => (mockModal = true)}>
-        Mock
+        {@html ICONS.mockServer.svg} Mock
       </button>
       <button class="btn ghost sm" title="WebSocket connection tester" on:click={() => (wsModal = true)}>
-        WS
+        {@html ICONS.websocket.svg} WS
       </button>
       <button class="btn ghost sm" title="gRPC — reflection-based discovery, unary calls" on:click={() => (grpcModal = true)}>
-        gRPC
+        {@html ICONS.grpc.svg} gRPC
       </button>
     </div>
   </aside>
@@ -1445,16 +1445,16 @@
             {#if response.content_type}<span class="meta ct">{response.content_type.split(';')[0]}</span>{/if}
             <span style="flex:1" />
             {#if response.is_json}
-              <button class="btn ghost sm" on:click={inspectResponse}>{ICONS.toInspector.glyph} Inspector</button>
+              <button class="btn ghost sm" on:click={inspectResponse}>{@html ICONS.toInspector.svg} Inspector</button>
               <button class="btn ghost sm" title="Export as CSV (needs an array of objects)" on:click={exportResponseCsv}
                 >Export CSV</button
               >
             {/if}
             <button class="btn ghost sm" on:click={saveResponse}>{response.is_json ? 'Export JSON' : 'Save'}</button>
-            <button class="btn ghost sm" title="Copy response body" on:click={copyResponse}>{ICONS.copy.glyph} Body</button>
+            <button class="btn ghost sm" title="Copy response body" on:click={copyResponse}>{@html ICONS.copy.svg} Body</button>
             <span class="code-menu-wrap">
               <button class="btn ghost sm" class:on={showCodeMenu} on:click={() => (showCodeMenu = !showCodeMenu)}>
-                {'</>'} Code
+                {@html ICONS.code.svg} Code
               </button>
               {#if showCodeMenu}
                 <div class="backdrop" on:click={() => (showCodeMenu = false)} role="presentation" />
@@ -1465,7 +1465,7 @@
                     {/each}
                   </div>
                   <pre class="code-snippet">{codeSnippet()}</pre>
-                  <button class="btn ghost sm" on:click={copyCodeSnippet}>{ICONS.copy.glyph} Copy</button>
+                  <button class="btn ghost sm" on:click={copyCodeSnippet}>{@html ICONS.copy.svg} Copy</button>
                 </div>
               {/if}
             </span>
@@ -1516,7 +1516,7 @@
             <div class="resp-tests">
               {#each response.testResults || [] as t}
                 <div class="test-row" class:fail={!t.passed}>
-                  <span class="test-dot">{t.passed ? '✓' : '✕'}</span>
+                  <span class="test-dot">{@html t.passed ? ICONS.check.svg : ICONS.cancel.svg}</span>
                   <span class="test-name">{t.name}</span>
                   {#if t.error}<span class="test-err">{t.error}</span>{/if}
                 </div>

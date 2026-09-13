@@ -373,7 +373,7 @@
           </span>
           <button class="btn ghost sm" on:click={() => runNow(s)}>Run</button>
           <button class="btn ghost sm" on:click={() => editSchedule(s)}>Edit</button>
-          <button class="icon-btn sm danger" on:click={() => delSchedule(s)}>{ICONS.delete.glyph}</button>
+          <button class="icon-btn sm danger" on:click={() => delSchedule(s)}>{@html ICONS.delete.svg}</button>
         </div>
       {/each}
       {#if schedules.length === 0}<div class="empty">No schedules.</div>{/if}
@@ -393,7 +393,7 @@
           <span class="s-meta">
             {c.connection_id && c.sql_text ? 'linked to a query' : 'snapshot only'} · last run {fmtRunAt(c.last_run_at)}
           </span>
-          <button class="icon-btn sm danger" on:click={() => deleteChart(c)}>{ICONS.delete.glyph}</button>
+          <button class="icon-btn sm danger" on:click={() => deleteChart(c)}>{@html ICONS.delete.svg}</button>
         </div>
       {/each}
       {#if $savedCharts.length === 0}

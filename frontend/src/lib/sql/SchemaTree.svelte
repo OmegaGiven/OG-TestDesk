@@ -175,7 +175,7 @@
         class:on={fkMenuOpen}
         title={ICONS.relationships.label}
         bind:this={fkBtn}
-        on:click={openFks}>{ICONS.relationships.glyph}</button
+        on:click={openFks}>{@html ICONS.relationships.svg}</button
       >
       {#if fkMenuOpen}
         <div class="backdrop" on:click={() => (fkMenuOpen = false)} role="presentation" />
@@ -210,7 +210,7 @@
       class="icon-btn"
       title="Refresh"
       on:click={() => (browseTab === 'functions' ? loadFunctions() : load(true))}
-      >{ICONS.refresh.glyph}</button
+      >{@html ICONS.refresh.svg}</button
     >
   </div>
 
@@ -258,7 +258,7 @@
       {#each schemas as schema (schema.name)}
         {#if visibleRels(schema).length || !filter}
           <button class="node schema" on:click={() => toggleSchema(schema.name)}>
-            <span class="chev">{openSchemas.has(schema.name) ? ICONS.expandOpen.glyph : ICONS.expandClosed.glyph}</span>
+            <span class="chev">{@html openSchemas.has(schema.name) ? ICONS.expandOpen.svg : ICONS.expandClosed.svg}</span>
             {schema.name}
             <span class="count">{schema.relations.length}</span>
           </button>
@@ -269,23 +269,23 @@
                   <button class="node rel" on:click={() => toggleRel(schema.name, rel.name)}>
                     <span class="chev"
                       >{openRels.has(`${schema.name}.${rel.name}`)
-                        ? ICONS.expandOpen.glyph
-                        : ICONS.expandClosed.glyph}</span
+                        ? ICONS.expandOpen.svg
+                        : ICONS.expandClosed.svg}</span
                     >
-                    <span class="ico">{rel.kind === 'view' ? ICONS.view.glyph : ICONS.table.glyph}</span>
+                    <span class="ico">{@html rel.kind === 'view' ? ICONS.view.svg : ICONS.table.svg}</span>
                     {rel.name}
                   </button>
                   <button
                     class="icon-btn peek"
                     title="Open the full table, paginated"
                     on:click={() => dispatch('open', { schema: schema.name, relation: rel.name })}
-                  >{ICONS.insertName.glyph}</button>
+                  >{@html ICONS.insertName.svg}</button>
                   {#if rel.kind !== 'view'}
                     <button
                       class="icon-btn peek"
                       title={ICONS.structure.label}
                       on:click={() => dispatch('structure', { schema: schema.name, relation: rel.name })}
-                    >{ICONS.structure.glyph}</button>
+                    >{@html ICONS.structure.svg}</button>
                   {/if}
                 </div>
                 {#if openRels.has(`${schema.name}.${rel.name}`)}
