@@ -1,10 +1,21 @@
 <script>
+  import { onMount } from 'svelte';
   import Modal from './Modal.svelte';
   import { ICONS } from '../icons.js';
   import { open as openExternal } from '@tauri-apps/plugin-shell';
   import { api } from '../api.js';
 
   const ISSUE_REPO = 'OmegaGiven/OG-TestDesk';
+
+  // Shown at the bottom of the nav so a bug report (or the person
+  // reading one) always knows which build they're looking at.
+  let appVersion = '';
+  onMount(async () => {
+    try {
+      const { getVersion } = await import('@tauri-apps/api/app');
+      appVersion = await getVersion();
+    } catch {}
+  });
 
   async function reportIssue() {
     let logTail = '';
@@ -23,7 +34,7 @@
       typeof navigator !== 'undefined' ? navigator.platform || navigator.userAgent : 'unknown';
     const body =
       `**What happened**\n\n\n**What you expected**\n\n\n**Steps to reproduce**\n\n\n` +
-      `---\nPlatform: ${platform}${logTail}`;
+      `---\nVersion: ${appVersion || 'unknown'}\nPlatform: ${platform}${logTail}`;
     const url =
       `https://github.com/${ISSUE_REPO}/issues/new?` +
       `title=${encodeURIComponent('')}&body=${encodeURIComponent(body)}`;
@@ -214,6 +225,7 @@
         {/if}
       </ul>
       <button class="report-issue" on:click={reportIssue}>Report an issue on GitHub ↗</button>
+      {#if appVersion}<div class="app-version">OG TestDesk v{appVersion}</div>{/if}
     </aside>
 
     <article class="content">
@@ -297,6 +309,12 @@
     border-radius: 0;
     color: var(--text-muted);
     font-size: 11px;
+  }
+  .app-version {
+    padding: 4px 8px 0;
+    font-size: 10px;
+    color: var(--text-muted);
+    text-align: center;
   }
   .nav button.active {
     background: var(--tool-sql-tint);
