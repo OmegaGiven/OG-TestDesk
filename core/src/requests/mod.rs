@@ -1,8 +1,22 @@
+pub mod cookiejar;
+
 use anyhow::{Context, Result};
 use base64::Engine;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::sync::{Arc, OnceLock};
 use std::time::{Duration, Instant};
+
+/// One cookie jar shared by every request this app process sends — so a
+/// login response's Set-Cookie actually gets replayed on the next
+/// request, the way a browser (and Postman) does. In-memory only; see
+/// cookiejar.rs's module doc for what's deliberately not implemented.
+static COOKIE_JAR: OnceLock<Arc<cookiejar::SharedCookieJar>> = OnceLock::new();
+pub fn cookie_jar() -> Arc<cookiejar::SharedCookieJar> {
+    COOKIE_JAR
+        .get_or_init(|| Arc::new(cookiejar::SharedCookieJar::default()))
+        .clone()
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct HttpRequest {
@@ -186,6 +200,7 @@ fn apply_body(
 pub async fn send(req: &HttpRequest) -> Result<HttpResponse> {
     let client = reqwest::Client::builder()
         .timeout(Duration::from_secs(req.timeout_secs.unwrap_or(60)))
+        .cookie_provider(cookie_jar())
         .build()?;
     let method = reqwest::Method::from_bytes(req.method.to_ascii_uppercase().as_bytes())?;
     let mut builder = client.request(method, &req.url);

@@ -2,6 +2,7 @@
   import { onMount, tick } from 'svelte';
   import CodeEditor from '../components/CodeEditor.svelte';
   import EnvModal from './EnvModal.svelte';
+  import CookieManagerModal from './CookieManagerModal.svelte';
   import ConnPicker from '../sql/ConnPicker.svelte';
   import { api } from '../api.js';
   import { parsePostman, toPostmanCollection } from './postman.js';
@@ -49,6 +50,7 @@
   let error = null;
   let respTab = 'body'; // body | headers
   let envModal = false;
+  let cookieModal = false;
   let splitPct = 50;
   let dragging = false;
 
@@ -1101,6 +1103,9 @@
       <button class="btn ghost sm" on:click={() => (envModal = true)}>
         Env: {$activeEnvironment?.name || 'none'} ▾
       </button>
+      <button class="btn ghost sm" title="Cookies collected from responses, replayed automatically" on:click={() => (cookieModal = true)}>
+        🍪 Cookies
+      </button>
     </div>
   </aside>
 
@@ -1484,6 +1489,9 @@
 
 {#if envModal}
   <EnvModal on:close={() => (envModal = false)} />
+{/if}
+{#if cookieModal}
+  <CookieManagerModal on:close={() => (cookieModal = false)} />
 {/if}
 
 <script context="module">

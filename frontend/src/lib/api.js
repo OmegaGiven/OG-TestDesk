@@ -90,6 +90,9 @@ export const api = {
   debugStateSet: (json) => call('debug_state_set', { json }),
   oauthStartListener: () => call('oauth_start_listener'),
   oauthWaitCallback: (port, timeoutSecs) => call('oauth_wait_callback', { port, timeoutSecs }),
+  cookiesList: () => call('cookies_list'),
+  cookiesClear: (domain) => call('cookies_clear', { domain }),
+  cookieDelete: (domain, name) => call('cookie_delete', { domain, name }),
 
   // request globals (plain variables, applied under the active environment)
   globalsGet: () => call('state_get', { key: 'request_globals' }),

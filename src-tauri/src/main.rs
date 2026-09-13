@@ -743,6 +743,25 @@ async fn error_log_clear() -> R<()> {
     Ok(())
 }
 
+// -------------------------------------------------------------- cookie jar
+
+#[tauri::command]
+async fn cookies_list() -> R<Vec<og_testdesk_core::requests::cookiejar::CookieRecord>> {
+    Ok(og_testdesk_core::requests::cookie_jar().list())
+}
+
+#[tauri::command]
+async fn cookies_clear(domain: Option<String>) -> R<()> {
+    og_testdesk_core::requests::cookie_jar().clear(domain.as_deref());
+    Ok(())
+}
+
+#[tauri::command]
+async fn cookie_delete(domain: String, name: String) -> R<()> {
+    og_testdesk_core::requests::cookie_jar().delete(&domain, &name);
+    Ok(())
+}
+
 // ---------------------------------------------------------- oauth2 loopback
 //
 // For the Authorization Code flow: the frontend opens the system browser to
@@ -992,6 +1011,9 @@ async fn main() {
             error_log_clear,
             oauth_start_listener,
             oauth_wait_callback,
+            cookies_list,
+            cookies_clear,
+            cookie_delete,
             log_client_error,
             debug_state_set,
             debug_state_get,
