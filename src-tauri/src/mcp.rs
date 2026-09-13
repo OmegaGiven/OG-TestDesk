@@ -204,6 +204,13 @@ pub async fn start(
         debug_state,
     };
 
+    // Permissive CORS: this server only ever binds 127.0.0.1, and every
+    // route that does anything is already gated by the bearer token or
+    // an OAuth access token regardless of origin — CORS only controls
+    // whether a *browser* lets its own page JS read the response, so
+    // this doesn't widen who can actually call these endpoints, just
+    // lets a browser-hosted MCP client (rather than one whose own
+    // backend makes the request) work at all.
     let app = Router::new()
         .route("/health", get(|| async { "ok" }))
         .route("/sse", get(sse_handler))
@@ -219,6 +226,7 @@ pub async fn start(
         .route("/register", post(oauth_register))
         .route("/authorize", get(oauth_authorize_get).post(oauth_authorize_post))
         .route("/token", post(oauth_token))
+        .layer(tower_http::cors::CorsLayer::permissive())
         .with_state(ctx);
 
     let addr = SocketAddr::from(([127, 0, 0, 1], cfg.port));

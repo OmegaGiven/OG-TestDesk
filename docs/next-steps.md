@@ -57,11 +57,6 @@ release, roughly in priority order.
 
 ## MCP
 
-- [ ] `tower-http`'s `cors` feature is a declared dependency but never
-      actually wired into the axum router — either use it (if a
-      browser-based MCP client ever needs to hit `127.0.0.1` directly
-      from page JS, CORS will block it without explicit headers) or
-      drop the unused feature/dependency.
 - [ ] `release.yml`/distribution note: the OAuth flow's "Approve
       access?" page has no branding beyond plain text — fine
       functionally, worth a pass once the app has real visual identity
