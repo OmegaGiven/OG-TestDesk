@@ -89,12 +89,14 @@ Post-MVP polish is tracked in `docs/next-steps.md`.
 
 ## License
 
-Free for personal and noncommercial use under the [PolyForm
-Noncommercial License 1.0.0](LICENSE) — that covers individual use,
-hobby/research/learning, and use by nonprofits/educational/government
-institutions. Any use by or for a business requires a separate
-commercial license; open an issue or reach out to arrange one. (This
-makes the source available and free to read, use personally, and
-modify — it isn't "open source" in the OSI sense, since that
-definition doesn't allow field-of-use restrictions like the
-commercial-use carve-out here.)
+[Apache License 2.0](LICENSE) — genuinely open source, free for
+anyone, personal or commercial, no strings attached.
+
+## Support the project
+
+If OG TestDesk has replaced Postman, Postico, pgAdmin, or a handful of
+troubleshooting tools in your day-to-day — especially if that's at a
+company where this now sits in the toolchain — consider
+[sponsoring](https://github.com/sponsors/OmegaGiven) its development.
+Nothing is gated behind it; it's just the most direct way to help keep
+this maintained and moving.

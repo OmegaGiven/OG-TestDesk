@@ -46,6 +46,15 @@
     }
   }
 
+  async function sponsor() {
+    const url = 'https://github.com/sponsors/OmegaGiven';
+    try {
+      await openExternal(url);
+    } catch {
+      window.open(url, '_blank');
+    }
+  }
+
   // Each section: plain text `body` lines (rendered as <p>), `code` blocks,
   // and `steps` (ordered). Searchable over title + keywords + all text.
   const SECTIONS = [
@@ -224,8 +233,11 @@
           <li class="none">No matches.</li>
         {/if}
       </ul>
-      <button class="report-issue" on:click={reportIssue}>Report an issue on GitHub ↗</button>
-      {#if appVersion}<div class="app-version">OG TestDesk v{appVersion}</div>{/if}
+      <div class="nav-footer">
+        <button class="report-issue" on:click={reportIssue}>Report an issue on GitHub ↗</button>
+        <button class="report-issue sponsor" on:click={sponsor}>♥ Sponsor this project</button>
+        {#if appVersion}<div class="app-version">OG TestDesk v{appVersion}</div>{/if}
+      </div>
     </aside>
 
     <article class="content">
@@ -302,13 +314,21 @@
   .nav button:hover {
     background: var(--surface-3);
   }
-  .nav button.report-issue {
+  .nav-footer {
     margin-top: auto;
+  }
+  .nav button.report-issue {
     padding-top: 10px;
     border-top: 1px solid var(--border);
     border-radius: 0;
     color: var(--text-muted);
     font-size: 11px;
+  }
+  .nav button.report-issue.sponsor {
+    border-top: none;
+    padding-top: 2px;
+    color: var(--danger);
+    font-weight: 600;
   }
   .app-version {
     padding: 4px 8px 0;
