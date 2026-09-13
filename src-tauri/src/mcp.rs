@@ -1017,6 +1017,8 @@ async fn call_tool(ctx: &AppCtx, name: &str, args: Value) -> Result<String> {
                 body: s("body"),
                 position,
                 is_active: false,
+                pre_request_script: None,
+                test_script: None,
             };
             ctx.metadata.upsert_request_tab(&tab).await?;
             let _ = ctx.app_handle.emit("mcp:request-tab-opened", &tab);
@@ -1106,6 +1108,8 @@ async fn call_tool(ctx: &AppCtx, name: &str, args: Value) -> Result<String> {
                 body: s("body"),
                 sort_order: 0,
                 created_at: chrono::Utc::now().timestamp(),
+                pre_request_script: None,
+                test_script: None,
             };
             ctx.metadata.upsert_saved_request(&r).await?;
             let _ = ctx.app_handle.emit("mcp:saved-request-created", &r);

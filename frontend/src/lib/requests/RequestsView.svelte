@@ -5,6 +5,7 @@
   import ConnPicker from '../sql/ConnPicker.svelte';
   import { api } from '../api.js';
   import { parsePostman, toPostmanCollection } from './postman.js';
+  import { runScript } from './ScriptSandbox.js';
   import { ICONS } from '../icons.js';
   import { downloadText, copyText, toCurl, rowsToDelimited } from '../export.js';
   import {
@@ -55,7 +56,9 @@
       headers: [{ k: '', v: '', on: true }],
       params: [{ k: '', v: '', on: true }],
       body: '',
-      collection_id: null
+      collection_id: null,
+      pre_request_script: '',
+      test_script: ''
     };
   }
 
@@ -93,7 +96,9 @@
       ),
       params: [{ k: '', v: '', on: true }],
       body: t.body || '',
-      collection_id: null
+      collection_id: null,
+      pre_request_script: t.pre_request_script || '',
+      test_script: t.test_script || ''
     };
     urlToParams();
     if (draft.body) tab = 'body';
@@ -130,6 +135,8 @@
         headers_json: JSON.stringify(headersObject()),
         body: draft.body || null,
         saved_request_id: draft.id || null,
+        pre_request_script: draft.pre_request_script || null,
+        test_script: draft.test_script || null,
         dirty: true
       });
       persistRequestTab(loadedTabId);
@@ -286,6 +293,33 @@
     if (!hydrating) applyAuth();
   }
 
+  // pm.globals aren't tied to any one environment (that's the point —
+  // they're the same across all of them), so there's no natural backend
+  // row for them yet. Kept in localStorage for now: per-viewer, but
+  // durable across restarts, and zero new backend surface for something
+  // this small. Revisit if it needs to sync via MCP/other surfaces.
+  const GLOBALS_KEY = 'og_testdesk_pm_globals';
+  function loadGlobals() {
+    try {
+      return JSON.parse(localStorage.getItem(GLOBALS_KEY) || '{}');
+    } catch {
+      return {};
+    }
+  }
+  function saveGlobals(obj) {
+    try {
+      localStorage.setItem(GLOBALS_KEY, JSON.stringify(obj));
+    } catch {}
+  }
+
+  async function persistEnvIfChanged(env, before, after) {
+    if (env && JSON.stringify(before) !== JSON.stringify(after)) {
+      try {
+        await api.environmentSave({ ...env, variables_json: JSON.stringify(after) });
+      } catch {}
+    }
+  }
+
   async function send() {
     if (!draft.url.trim()) return;
     const tabId = loadedTabId;
@@ -293,19 +327,66 @@
     error = null;
     response = null;
     touchRequestTab(tabId, { sending: true, error: null });
-    const req = {
+
+    let req = {
       method: draft.method,
       url: draft.url.trim(),
       headers: headersObject(),
       body: ['GET', 'HEAD'].includes(draft.method) ? null : draft.body || null,
       timeout_secs: 60
     };
+
+    const env = $activeEnvironment;
+    let envVars = env ? safeJson(env.variables_json) : {};
+    const envVarsBefore = { ...envVars };
+    let globals = loadGlobals();
+
+    if (draft.pre_request_script?.trim()) {
+      const out = await runScript('pre', draft.pre_request_script, {
+        request: { method: req.method, url: req.url, headers: req.headers, body: req.body },
+        environment: envVars,
+        globals
+      });
+      if (out.error) {
+        error = `Pre-request script error: ${out.error}`;
+        touchRequestTab(tabId, { error, sending: false });
+        sending = false;
+        return;
+      }
+      if (out.request) {
+        req = {
+          ...req,
+          method: out.request.method || req.method,
+          url: out.request.url || req.url,
+          headers: out.request.headers || req.headers,
+          body: out.request.body !== undefined ? out.request.body : req.body
+        };
+      }
+      envVars = out.vars.environment;
+      globals = out.vars.globals;
+      saveGlobals(globals);
+    }
+
     try {
       const r = await api.requestSend(req, true, draft.id || null, draft.name || null);
-      response = r;
+      let testResults = null;
+      if (draft.test_script?.trim()) {
+        const out = await runScript('test', draft.test_script, {
+          response: r,
+          environment: envVars,
+          globals
+        });
+        testResults = out.error ? [{ name: 'Script error', passed: false, error: out.error }] : out.results;
+        envVars = out.vars.environment;
+        globals = out.vars.globals;
+        saveGlobals(globals);
+      }
+      await persistEnvIfChanged(env, envVarsBefore, envVars);
+      response = { ...r, testResults };
       respTab = 'body';
-      touchRequestTab(tabId, { response: r, error: null, sending: false });
+      touchRequestTab(tabId, { response, error: null, sending: false });
     } catch (e) {
+      await persistEnvIfChanged(env, envVarsBefore, envVars);
       error = String(e);
       touchRequestTab(tabId, { error: String(e), sending: false });
     } finally {
@@ -320,7 +401,9 @@
       url: s.url,
       headers_json: s.headers_json,
       body: s.body,
-      saved_request_id: s.id
+      saved_request_id: s.id,
+      pre_request_script: s.pre_request_script || null,
+      test_script: s.test_script || null
     });
   }
 
@@ -380,7 +463,9 @@
         headers_json: JSON.stringify(headers),
         body: draft.body || null,
         sort_order: 0,
-        created_at: 0
+        created_at: 0,
+        pre_request_script: draft.pre_request_script || null,
+        test_script: draft.test_script || null
       });
       draft.id = saved.id;
       draft.name = saved.name;
@@ -737,9 +822,9 @@
     <div class="rq-work">
       <div class="req-pane" style="height:{splitPct}%">
         <div class="subtabs">
-          {#each ['params', 'headers', 'auth', 'body'] as t}
+          {#each ['params', 'headers', 'auth', 'body', 'pre-request', 'tests'] as t}
             <button class:active={tab === t} on:click={() => (tab = t)}>
-              {t}
+              {t === 'pre-request' ? 'Pre-request' : t === 'tests' ? 'Tests' : t}
               {#if t === 'headers' && draft.headers.filter((h) => h.k).length}
                 <span class="n">{draft.headers.filter((h) => h.k).length}</span>
               {/if}
@@ -747,6 +832,8 @@
                 <span class="n">{draft.params.filter((p) => p.k).length}</span>
               {/if}
               {#if t === 'auth' && authType !== 'none'}<span class="n">1</span>{/if}
+              {#if t === 'pre-request' && draft.pre_request_script?.trim()}<span class="n">●</span>{/if}
+              {#if t === 'tests' && draft.test_script?.trim()}<span class="n">●</span>{/if}
             </button>
           {/each}
         </div>
@@ -824,6 +911,24 @@
               </div>
             {/each}
           </div>
+        {:else if tab === 'pre-request'}
+          <p class="hint script-hint">
+            Runs before the request is sent. Has <code>pm.environment</code>/<code>pm.globals</code>
+            get/set/unset, <code>pm.variables.get</code>, and a mutable <code>pm.request</code>
+            ({'{'}method, url, headers, body{'}'}) — changes to it apply to the outgoing request.
+          </p>
+          <div class="body-editor">
+            <CodeEditor bind:value={draft.pre_request_script} language="text" on:run={send} />
+          </div>
+        {:else if tab === 'tests'}
+          <p class="hint script-hint">
+            Runs after the response arrives. Has <code>pm.response</code> ({'{'}code, status, responseTime,
+            headers, json(), text(){'}'}), <code>pm.test(name, fn)</code>, and <code>pm.expect(actual)</code>
+            (equal/eql/include/above/below/ok). Results show in the response panel's Tests tab.
+          </p>
+          <div class="body-editor">
+            <CodeEditor bind:value={draft.test_script} language="text" on:run={send} />
+          </div>
         {:else}
           <div class="body-tools">
             <button class="btn ghost sm" on:click={prettyBody}>Beautify JSON</button>
@@ -863,6 +968,14 @@
               <button class:active={respTab === 'headers'} on:click={() => (respTab = 'headers')}>
                 Headers <span class="n">{response.headers.length}</span>
               </button>
+              {#if response.testResults}
+                <button class:active={respTab === 'tests'} on:click={() => (respTab = 'tests')}>
+                  Tests
+                  <span class="n" class:bad={response.testResults.some((t) => !t.passed)}>
+                    {response.testResults.filter((t) => t.passed).length}/{response.testResults.length}
+                  </span>
+                </button>
+              {/if}
             </div>
           </div>
           {#if respTab === 'body'}
@@ -872,6 +985,19 @@
                 language={response.is_json ? 'json' : 'text'}
                 readonly
               />
+            </div>
+          {:else if respTab === 'tests'}
+            <div class="resp-tests">
+              {#each response.testResults || [] as t}
+                <div class="test-row" class:fail={!t.passed}>
+                  <span class="test-dot">{t.passed ? '✓' : '✕'}</span>
+                  <span class="test-name">{t.name}</span>
+                  {#if t.error}<span class="test-err">{t.error}</span>{/if}
+                </div>
+              {/each}
+              {#if !response.testResults?.length}
+                <div class="empty">No pm.test(...) assertions in the test script.</div>
+              {/if}
             </div>
           {:else}
             <div class="resp-headers">
@@ -1162,6 +1288,23 @@
     padding: 0 5px;
     font-size: 9px;
   }
+  .n.bad {
+    background: color-mix(in srgb, var(--danger) 25%, transparent);
+    color: var(--danger);
+  }
+  .script-hint {
+    padding: 8px 10px;
+    margin: 0;
+    font-size: 11px;
+    line-height: 1.5;
+    border-bottom: 1px solid var(--border);
+  }
+  .script-hint code {
+    font-family: var(--font-mono);
+    background: var(--surface-3);
+    padding: 0 3px;
+    border-radius: 3px;
+  }
   .kv-grid {
     overflow: auto;
     padding: 8px;
@@ -1274,6 +1417,36 @@
   }
   .hv {
     color: var(--text-secondary);
+    word-break: break-all;
+  }
+  .resp-tests {
+    overflow: auto;
+    padding: 8px;
+    font-size: 12px;
+  }
+  .test-row {
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+    padding: 5px 4px;
+    border-bottom: 1px solid var(--border);
+  }
+  .test-dot {
+    color: var(--ok);
+    font-weight: 700;
+    width: 14px;
+    flex-shrink: 0;
+  }
+  .test-row.fail .test-dot {
+    color: var(--danger);
+  }
+  .test-name {
+    flex-shrink: 0;
+  }
+  .test-err {
+    color: var(--danger);
+    font-family: var(--font-mono);
+    font-size: 11px;
     word-break: break-all;
   }
 </style>

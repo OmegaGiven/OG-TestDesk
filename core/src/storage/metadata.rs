@@ -340,6 +340,10 @@ pub struct RequestTab {
     pub body: Option<String>,
     pub position: i64,
     pub is_active: bool,
+    #[serde(default)]
+    pub pre_request_script: Option<String>,
+    #[serde(default)]
+    pub test_script: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -354,6 +358,15 @@ pub struct SavedRequest {
     pub body: Option<String>,
     pub sort_order: i64,
     pub created_at: i64,
+    /// JS run before the request is sent — mutates the request and/or
+    /// environment/global variables. Executed in a sandboxed iframe, not
+    /// here; this is just storage.
+    #[serde(default)]
+    pub pre_request_script: Option<String>,
+    /// JS run after the response arrives — `pm.test(...)` assertions
+    /// against `pm.response`, shown as pass/fail in the response viewer.
+    #[serde(default)]
+    pub test_script: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -397,6 +410,10 @@ impl MetadataStore {
             "ALTER TABLE connections ADD COLUMN ssh_port INTEGER",
             "ALTER TABLE connections ADD COLUMN ssh_user TEXT",
             "ALTER TABLE connections ADD COLUMN ssh_key_path TEXT",
+            "ALTER TABLE request_tabs ADD COLUMN pre_request_script TEXT",
+            "ALTER TABLE request_tabs ADD COLUMN test_script TEXT",
+            "ALTER TABLE saved_requests ADD COLUMN pre_request_script TEXT",
+            "ALTER TABLE saved_requests ADD COLUMN test_script TEXT",
         ] {
             let _ = sqlx::query(stmt).execute(&pool).await; // ignore "duplicate column"
         }
@@ -1051,7 +1068,8 @@ impl MetadataStore {
 
     pub async fn list_request_tabs(&self) -> Result<Vec<RequestTab>> {
         let rows = sqlx::query(
-            "SELECT id, saved_request_id, title, method, url, headers_json, body, position, is_active
+            "SELECT id, saved_request_id, title, method, url, headers_json, body, position, is_active,
+                    pre_request_script, test_script
              FROM request_tabs ORDER BY position",
         )
         .fetch_all(&self.pool)
@@ -1068,6 +1086,8 @@ impl MetadataStore {
                 body: r.get("body"),
                 position: r.get("position"),
                 is_active: r.get::<i64, _>("is_active") != 0,
+                pre_request_script: r.get("pre_request_script"),
+                test_script: r.get("test_script"),
             })
             .collect())
     }
@@ -1075,12 +1095,14 @@ impl MetadataStore {
     pub async fn upsert_request_tab(&self, t: &RequestTab) -> Result<()> {
         sqlx::query(
             "INSERT INTO request_tabs
-                (id, saved_request_id, title, method, url, headers_json, body, position, is_active)
-             VALUES (?,?,?,?,?,?,?,?,?)
+                (id, saved_request_id, title, method, url, headers_json, body, position, is_active,
+                 pre_request_script, test_script)
+             VALUES (?,?,?,?,?,?,?,?,?,?,?)
              ON CONFLICT(id) DO UPDATE SET
                 saved_request_id=excluded.saved_request_id, title=excluded.title,
                 method=excluded.method, url=excluded.url, headers_json=excluded.headers_json,
-                body=excluded.body, position=excluded.position, is_active=excluded.is_active",
+                body=excluded.body, position=excluded.position, is_active=excluded.is_active,
+                pre_request_script=excluded.pre_request_script, test_script=excluded.test_script",
         )
         .bind(&t.id)
         .bind(&t.saved_request_id)
@@ -1091,6 +1113,8 @@ impl MetadataStore {
         .bind(&t.body)
         .bind(t.position)
         .bind(t.is_active as i64)
+        .bind(&t.pre_request_script)
+        .bind(&t.test_script)
         .execute(&self.pool)
         .await?;
         Ok(())
@@ -1108,7 +1132,8 @@ impl MetadataStore {
 
     pub async fn list_saved_requests(&self) -> Result<Vec<SavedRequest>> {
         let rows = sqlx::query(
-            "SELECT id, collection_id, name, method, url, headers_json, body, sort_order, created_at
+            "SELECT id, collection_id, name, method, url, headers_json, body, sort_order, created_at,
+                    pre_request_script, test_script
              FROM saved_requests ORDER BY sort_order, created_at",
         )
         .fetch_all(&self.pool)
@@ -1125,6 +1150,8 @@ impl MetadataStore {
                 body: r.get("body"),
                 sort_order: r.get("sort_order"),
                 created_at: r.get("created_at"),
+                pre_request_script: r.get("pre_request_script"),
+                test_script: r.get("test_script"),
             })
             .collect())
     }
@@ -1132,12 +1159,14 @@ impl MetadataStore {
     pub async fn upsert_saved_request(&self, s: &SavedRequest) -> Result<()> {
         sqlx::query(
             "INSERT INTO saved_requests
-                (id, collection_id, name, method, url, headers_json, body, sort_order, created_at)
-             VALUES (?,?,?,?,?,?,?,?,?)
+                (id, collection_id, name, method, url, headers_json, body, sort_order, created_at,
+                 pre_request_script, test_script)
+             VALUES (?,?,?,?,?,?,?,?,?,?,?)
              ON CONFLICT(id) DO UPDATE SET
                 collection_id=excluded.collection_id, name=excluded.name, method=excluded.method,
                 url=excluded.url, headers_json=excluded.headers_json, body=excluded.body,
-                sort_order=excluded.sort_order",
+                sort_order=excluded.sort_order, pre_request_script=excluded.pre_request_script,
+                test_script=excluded.test_script",
         )
         .bind(&s.id)
         .bind(&s.collection_id)
@@ -1148,6 +1177,8 @@ impl MetadataStore {
         .bind(&s.body)
         .bind(s.sort_order)
         .bind(if s.created_at == 0 { now() } else { s.created_at })
+        .bind(&s.pre_request_script)
+        .bind(&s.test_script)
         .execute(&self.pool)
         .await?;
         Ok(())

@@ -477,7 +477,9 @@ export async function newRequestTab(seed = {}) {
     headers_json: seed.headers_json || '{}',
     body: seed.body ?? null,
     position: tabs.length,
-    is_active: true
+    is_active: true,
+    pre_request_script: seed.pre_request_script ?? null,
+    test_script: seed.test_script ?? null
   };
   tab = await api.requestTabSave(tab);
   const local = { ...tab, response: null, error: null, sending: false, dirty: false };
