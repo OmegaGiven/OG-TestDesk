@@ -461,7 +461,6 @@ export async function reloadRequestTabs() {
     );
     const active = rows.find((t) => t.is_active);
     activeRequestTabId.set(active?.id ?? rows[0]?.id ?? null);
-    if (rows.length === 0) await newRequestTab();
   } catch (e) {
     toastError(e);
   }
