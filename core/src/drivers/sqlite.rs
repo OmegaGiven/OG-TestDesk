@@ -93,7 +93,7 @@ impl DbDriver for SqliteDriverImpl {
         sql: &str,
         opts: QueryOpts,
     ) -> Result<QueryResult> {
-        run_query_body!(sqlite_pool(path_of(cfg)?).await?, sql, opts, sqlite_value)
+        run_query_body!(cfg, sqlite_pool(path_of(cfg)?).await?, sql, opts, sqlite_value)
     }
 
     async fn list_foreign_keys(&self, cfg: &ConnConfig, _password: Option<&str>) -> Result<Vec<ForeignKey>> {

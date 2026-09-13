@@ -807,7 +807,8 @@ fn tool_defs(cfg: &McpConfig) -> Vec<Value> {
                 "password": { "type": "string" },
                 "file_path": { "type": "string", "description": "sqlite only" },
                 "use_tls": { "type": "boolean" },
-                "color": { "type": "string", "description": "hex accent color, e.g. #4f8cff" }
+                "color": { "type": "string", "description": "hex accent color, e.g. #4f8cff" },
+                "read_only": { "type": "boolean", "description": "blocks every write statement on this connection app-wide (not just for MCP) — defaults to false" }
             }, "required": ["nickname", "kind"] }
         }));
     }
@@ -1135,6 +1136,7 @@ async fn call_tool(ctx: &AppCtx, name: &str, args: Value) -> Result<String> {
                 file_path: s("file_path"),
                 use_tls: args.get("use_tls").and_then(|v| v.as_bool()).unwrap_or(false),
                 color: s("color"),
+                read_only: args.get("read_only").and_then(|v| v.as_bool()).unwrap_or(false),
             };
             ctx.metadata.upsert_connection(&conn).await?;
             let _ = ctx.app_handle.emit("mcp:connection-created", &conn);

@@ -391,6 +391,7 @@ impl MetadataStore {
             "ALTER TABLE query_history ADD COLUMN result_json TEXT",
             "ALTER TABLE saved_queries ADD COLUMN folder_id TEXT",
             "ALTER TABLE saved_queries ADD COLUMN sort_order INTEGER NOT NULL DEFAULT 0",
+            "ALTER TABLE connections ADD COLUMN read_only INTEGER NOT NULL DEFAULT 0",
         ] {
             let _ = sqlx::query(stmt).execute(&pool).await; // ignore "duplicate column"
         }
@@ -436,7 +437,7 @@ impl MetadataStore {
 
     pub async fn list_connections(&self) -> Result<Vec<ConnConfig>> {
         let rows = sqlx::query(
-            "SELECT id, nickname, kind, host, port, database, user, file_path, use_tls, color
+            "SELECT id, nickname, kind, host, port, database, user, file_path, use_tls, color, read_only
              FROM connections ORDER BY sort_order, created_at",
         )
         .fetch_all(&self.pool)
@@ -454,6 +455,7 @@ impl MetadataStore {
                 file_path: r.get("file_path"),
                 use_tls: r.get::<i64, _>("use_tls") != 0,
                 color: r.get("color"),
+                read_only: r.get::<i64, _>("read_only") != 0,
             })
             .collect())
     }
@@ -461,16 +463,17 @@ impl MetadataStore {
     pub async fn upsert_connection(&self, c: &ConnConfig) -> Result<()> {
         sqlx::query(
             "INSERT INTO connections
-                (id, nickname, kind, host, port, database, user, file_path, use_tls, color,
+                (id, nickname, kind, host, port, database, user, file_path, use_tls, color, read_only,
                  sort_order, created_at)
-             VALUES (?,?,?,?,?,?,?,?,?,?,
+             VALUES (?,?,?,?,?,?,?,?,?,?,?,
                  COALESCE((SELECT sort_order FROM connections WHERE id = ?),
                           (SELECT COALESCE(MAX(sort_order)+1,0) FROM connections)),
                  COALESCE((SELECT created_at FROM connections WHERE id = ?), ?))
              ON CONFLICT(id) DO UPDATE SET
                 nickname=excluded.nickname, kind=excluded.kind, host=excluded.host,
                 port=excluded.port, database=excluded.database, user=excluded.user,
-                file_path=excluded.file_path, use_tls=excluded.use_tls, color=excluded.color",
+                file_path=excluded.file_path, use_tls=excluded.use_tls, color=excluded.color,
+                read_only=excluded.read_only",
         )
         .bind(&c.id)
         .bind(&c.nickname)
@@ -482,6 +485,7 @@ impl MetadataStore {
         .bind(&c.file_path)
         .bind(c.use_tls as i64)
         .bind(&c.color)
+        .bind(c.read_only as i64)
         .bind(&c.id)
         .bind(&c.id)
         .bind(now())

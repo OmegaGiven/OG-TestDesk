@@ -23,7 +23,8 @@
         user: existing.user || '',
         file_path: existing.file_path || '',
         use_tls: !!existing.use_tls,
-        color: existing.color || DOT_COLORS[6]
+        color: existing.color || DOT_COLORS[6],
+        read_only: !!existing.read_only
       }
     : {
         id: '',
@@ -35,7 +36,8 @@
         user: '',
         file_path: '',
         use_tls: false,
-        color: DOT_COLORS[0]
+        color: DOT_COLORS[0],
+        read_only: false
       };
   let password = '';
   let testing = false;
@@ -62,7 +64,8 @@
       user: isSqlite ? null : form.user || null,
       file_path: isSqlite ? form.file_path || null : null,
       use_tls: isSqlite ? false : form.use_tls,
-      color: form.color
+      color: form.color,
+      read_only: form.read_only
     };
   }
 
@@ -172,6 +175,10 @@
       <input type="checkbox" bind:checked={form.use_tls} /> Require TLS
     </label>
   {/if}
+
+  <label class="tls" title="Blocks every write statement on this connection app-wide — the query editor, MCP, and the scheduler all refuse anything but SELECT/row-returning statements.">
+    <input type="checkbox" bind:checked={form.read_only} /> Read-only (block all writes)
+  </label>
 
   {#if testResult}
     <div class="test {testResult.ok ? 'ok' : 'bad'}">{testResult.text}</div>

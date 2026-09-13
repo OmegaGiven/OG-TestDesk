@@ -146,7 +146,7 @@ impl DbDriver for PostgresDriverImpl {
         sql: &str,
         opts: QueryOpts,
     ) -> Result<QueryResult> {
-        run_query_body!(pg_pool(&conn_url(cfg, password)).await?, sql, opts, pg_value)
+        run_query_body!(cfg, pg_pool(&conn_url(cfg, password)).await?, sql, opts, pg_value)
     }
 
     async fn list_foreign_keys(&self, cfg: &ConnConfig, password: Option<&str>) -> Result<Vec<ForeignKey>> {

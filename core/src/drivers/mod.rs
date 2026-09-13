@@ -41,6 +41,13 @@ pub struct ConnConfig {
     pub use_tls: bool,
     /// UI accent color for this connection (hex), used to tint its tabs.
     pub color: Option<String>,
+    /// Blocks every non-row-returning statement at the driver level —
+    /// UPDATE/INSERT/DELETE/DDL/etc. — regardless of caller (query editor,
+    /// MCP, scheduler). A human's own accident-proofing on a connection
+    /// they never intend to write through (e.g. a prod replica), distinct
+    /// from the per-connection MCP write ACL, which only governs AI access.
+    #[serde(default)]
+    pub read_only: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]

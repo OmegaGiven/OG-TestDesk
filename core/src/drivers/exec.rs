@@ -2,11 +2,11 @@
 //! per-cell decode fn, so the paging + counting + streaming logic lives
 //! here as a macro.
 
-/// `run_query_body!(pool_expr, sql, opts, value_fn)` — expands to the full
-/// body of a `DbDriver::run_query` impl. Uses `?` and early `return`, so
-/// call it as the last expression of the async fn.
+/// `run_query_body!(cfg_expr, pool_expr, sql, opts, value_fn)` — expands to
+/// the full body of a `DbDriver::run_query` impl. Uses `?` and early
+/// `return`, so call it as the last expression of the async fn.
 macro_rules! run_query_body {
-    ($pool:expr, $sql:expr, $opts:expr, $valfn:path) => {{
+    ($cfg:expr, $pool:expr, $sql:expr, $opts:expr, $valfn:path) => {{
         use futures_util::TryStreamExt;
         use sqlx::{Column as _, Row as _, TypeInfo as _};
         use std::time::{Duration, Instant};
@@ -15,10 +15,18 @@ macro_rules! run_query_body {
             QueryColumn, QueryResult,
         };
 
+        let cfg = $cfg;
         let pool = $pool;
         let sql: &str = $sql;
         let opts = $opts;
         let start = Instant::now();
+
+        if cfg.read_only && !stmt_returns_rows(sql) {
+            return Err(anyhow::anyhow!(
+                "connection '{}' is read-only — only row-returning statements are allowed",
+                cfg.nickname
+            ));
+        }
 
         if !stmt_returns_rows(sql) {
             let res = sqlx::query(sql).execute(&pool).await?;

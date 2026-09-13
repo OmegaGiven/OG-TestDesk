@@ -283,7 +283,7 @@
   let columnsCache = {}; // `${connId}:${schema}.${table}` -> Promise<Column[]>
   async function refreshEditableTable(t, conn, sql) {
     const parsed = parseSingleTable(sql);
-    if (!parsed) {
+    if (!parsed || conn.read_only) {
       touchSqlTab(t.id, { editableTable: null });
       return;
     }

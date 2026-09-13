@@ -131,6 +131,7 @@ impl DbDriver for MySqlDriverImpl {
         opts: QueryOpts,
     ) -> Result<QueryResult> {
         run_query_body!(
+            cfg,
             mysql_pool(&conn_url(cfg, password)).await?,
             sql,
             opts,

@@ -29,6 +29,7 @@ async fn seed_connection(db: &MetadataStore, id: &str) {
         file_path: Some("/tmp/does-not-matter.db".into()),
         use_tls: false,
         color: None,
+        read_only: false,
     })
     .await
     .unwrap();

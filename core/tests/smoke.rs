@@ -12,6 +12,7 @@ fn sqlite_cfg(path: &str) -> ConnConfig {
         file_path: Some(path.into()),
         use_tls: false,
         color: None,
+        read_only: false,
     }
 }
 
@@ -88,6 +89,36 @@ async fn metadata_crud() {
 
     store.delete_connection(&cfg.id).await.unwrap();
     assert_eq!(store.list_connections().await.unwrap().len(), 0);
+
+    let _ = std::fs::remove_file(&path);
+}
+
+#[tokio::test]
+async fn read_only_connection_blocks_writes_but_not_reads() {
+    let dir = std::env::temp_dir().join(format!("ogtd-ro-{}.db", uuid::Uuid::new_v4()));
+    let path = dir.to_string_lossy().to_string();
+    let drv = driver_for(DbKind::Sqlite);
+
+    // Set the table up while still writable.
+    let mut cfg = sqlite_cfg(&path);
+    drv.run_query(&cfg, None, "CREATE TABLE t (id INTEGER PRIMARY KEY, v TEXT)", og_testdesk_core::QueryOpts::full())
+        .await
+        .unwrap();
+
+    cfg.read_only = true;
+    let err = drv
+        .run_query(&cfg, None, "INSERT INTO t (v) VALUES ('x')", og_testdesk_core::QueryOpts::full())
+        .await
+        .unwrap_err();
+    assert!(err.to_string().contains("read-only"), "unexpected error: {err}");
+
+    // Reads still work on a read-only connection.
+    let res = drv
+        .run_query(&cfg, None, "SELECT * FROM t", og_testdesk_core::QueryOpts::full())
+        .await
+        .unwrap();
+    assert!(res.is_select);
+    assert_eq!(res.row_count, 0);
 
     let _ = std::fs::remove_file(&path);
 }

@@ -84,6 +84,7 @@
       <button class="open" on:click={() => open(c)} title="Open a query tab on {c.nickname}">
         <span class="dot" style="background:{c.color || 'var(--conn-slate)'}" />
         <span class="name">{c.nickname}</span>
+        {#if c.read_only}<span class="ro" title="Read-only — writes are blocked">RO</span>{/if}
         <span class="meta">
           {c.kind}{c.host ? ` · ${c.host}` : ''}{c.database ? `/${c.database}` : ''}
         </span>
@@ -162,6 +163,16 @@
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+  }
+  .ro {
+    font-size: 9px;
+    font-family: var(--font-mono);
+    font-weight: 700;
+    color: var(--warn);
+    border: 1px solid currentColor;
+    border-radius: 3px;
+    padding: 0 3px;
+    flex-shrink: 0;
   }
   .st {
     margin-left: auto;
