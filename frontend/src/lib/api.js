@@ -88,6 +88,8 @@ export const api = {
   errorLogClear: () => call('error_log_clear'),
   logClientError: (source, message) => call('log_client_error', { source, message }),
   debugStateSet: (json) => call('debug_state_set', { json }),
+  oauthStartListener: () => call('oauth_start_listener'),
+  oauthWaitCallback: (port, timeoutSecs) => call('oauth_wait_callback', { port, timeoutSecs }),
 
   // request globals (plain variables, applied under the active environment)
   globalsGet: () => call('state_get', { key: 'request_globals' }),

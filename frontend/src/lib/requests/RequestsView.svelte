@@ -6,6 +6,10 @@
   import { api } from '../api.js';
   import { parsePostman, toPostmanCollection } from './postman.js';
   import { runScript } from './ScriptSandbox.js';
+  import { randomToken, pkceChallengeFromVerifier } from './oauth2.js';
+  import { signAwsV4 } from './awsSigV4.js';
+  import { parseDigestChallenge, buildDigestHeader } from './digestAuth.js';
+  import { open as openExternal } from '@tauri-apps/plugin-shell';
   import { ICONS } from '../icons.js';
   import { downloadText, copyText, toCurl, rowsToDelimited } from '../export.js';
   import {
@@ -301,7 +305,7 @@
   // for API keys, a header or query param). Nothing new is persisted: this
   // just writes into the existing headers/params rows, so saved requests,
   // curl export, etc. all see it automatically.
-  let authType = 'none'; // none | bearer | basic | apikey
+  let authType = 'none'; // none | bearer | basic | apikey | oauth2 | digest | awsv4
   let authBearer = '';
   let authUser = '';
   let authPass = '';
@@ -311,6 +315,49 @@
   let prevApiKeyName = '';
   let authSyncedTab = null;
   let authApplying = false;
+
+  // OAuth2/Digest/AWS SigV4 configs have no header representation to
+  // round-trip through the way Bearer/Basic/API-key do (a client secret
+  // or AWS access key isn't reconstructible from an Authorization
+  // header), so — unlike the rest of the auth tab — this bit of config
+  // is persisted separately, per tab, in localStorage rather than in
+  // the backend. OAuth2's *result* (the fetched access token) still
+  // flows through the normal header mechanism once obtained.
+  let authOauth = { grantType: 'client_credentials', authUrl: '', tokenUrl: '', clientId: '', clientSecret: '', scope: '' };
+  let authDigest = { username: '', password: '' };
+  let authAws = { accessKeyId: '', secretAccessKey: '', sessionToken: '', region: 'us-east-1', service: 'execute-api' };
+  let oauthBusy = false;
+  let oauthStatus = '';
+
+  function authCfgKey(id) {
+    return `og_testdesk_authcfg_${id}`;
+  }
+  function loadAuthCfg(id) {
+    try {
+      const raw = localStorage.getItem(authCfgKey(id));
+      if (!raw) return;
+      const cfg = JSON.parse(raw);
+      if (cfg.authType) authType = cfg.authType;
+      if (cfg.oauth) authOauth = { ...authOauth, ...cfg.oauth };
+      if (cfg.digest) authDigest = { ...authDigest, ...cfg.digest };
+      if (cfg.aws) authAws = { ...authAws, ...cfg.aws };
+    } catch {}
+  }
+  function saveAuthCfg(id) {
+    if (!id) return;
+    // Only persist for the non-header-backed types — the rest already
+    // round-trip through headers, no need to duplicate that state.
+    if (!['oauth2', 'digest', 'awsv4'].includes(authType)) {
+      localStorage.removeItem(authCfgKey(id));
+      return;
+    }
+    try {
+      localStorage.setItem(
+        authCfgKey(id),
+        JSON.stringify({ authType, oauth: authOauth, digest: authDigest, aws: authAws })
+      );
+    } catch {}
+  }
 
   function findRow(rows, key) {
     const lower = key.toLowerCase();
@@ -337,6 +384,7 @@
   // each time the tab is opened (not while it stays open + you're typing).
   $: if (tab === 'auth' && authSyncedTab !== loadedTabId) {
     syncAuthFromHeaders();
+    loadAuthCfg(loadedTabId);
     authSyncedTab = loadedTabId;
   }
   function syncAuthFromHeaders() {
@@ -395,30 +443,134 @@
         }
       }
       prevApiKeyName = authKeyName;
+    } else if (authType === 'oauth2') {
+      // Nothing to write until a token's actually been fetched — see
+      // fetchOauthToken(), which writes the header itself once it has one.
+    } else if (authType === 'digest' || authType === 'awsv4') {
+      // Computed fresh per-send (the signature/response depends on the
+      // exact request being sent right now) — never a static header.
+      draft.headers = removeRow(draft.headers, 'authorization');
     }
+  }
+
+  // OAuth2: Client Credentials (server-to-server, no browser) and
+  // Authorization Code + PKCE (opens the system browser, catches the
+  // redirect on a loopback listener). Not implemented: Implicit and
+  // Password grants (both considered deprecated/discouraged by the OAuth
+  // spec itself now) and NTLM (Windows-domain auth — a different protocol
+  // family entirely, rare outside enterprise intranets, and not something
+  // reqwest/the browser fetch stack support out of the box).
+  async function fetchOauthToken() {
+    oauthBusy = true;
+    oauthStatus = '';
+    try {
+      let tokenResp;
+      if (authOauth.grantType === 'authorization_code') {
+        tokenResp = await runAuthorizationCodeFlow();
+      } else {
+        tokenResp = await requestToken({
+          grant_type: 'client_credentials',
+          client_id: authOauth.clientId,
+          client_secret: authOauth.clientSecret,
+          scope: authOauth.scope || undefined
+        });
+      }
+      const token = tokenResp.access_token;
+      if (!token) throw new Error('Response had no access_token');
+      authApplying = true;
+      draft.headers = upsertRow(draft.headers, 'Authorization', `${tokenResp.token_type || 'Bearer'} ${token}`);
+      setTimeout(() => (authApplying = false), 0);
+      const expiresIn = tokenResp.expires_in ? `, expires in ${tokenResp.expires_in}s` : '';
+      oauthStatus = `Token acquired${expiresIn}`;
+      toast('OAuth2 token acquired', 'success', 2500);
+    } catch (e) {
+      oauthStatus = `Error: ${e.message || e}`;
+      toastError(e);
+    } finally {
+      oauthBusy = false;
+    }
+  }
+
+  async function requestToken(params) {
+    const body = new URLSearchParams(Object.fromEntries(Object.entries(params).filter(([, v]) => v !== undefined)));
+    const resp = await fetch(authOauth.tokenUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: body.toString()
+    });
+    const text = await resp.text();
+    let json;
+    try {
+      json = JSON.parse(text);
+    } catch {
+      throw new Error(`Token endpoint returned non-JSON (${resp.status}): ${text.slice(0, 200)}`);
+    }
+    if (!resp.ok) throw new Error(json.error_description || json.error || `Token request failed (${resp.status})`);
+    return json;
+  }
+
+  async function runAuthorizationCodeFlow() {
+    const port = await api.oauthStartListener();
+    const redirectUri = `http://127.0.0.1:${port}/callback`;
+    const state = randomToken(16);
+    const verifier = randomToken(32);
+    const challenge = await pkceChallengeFromVerifier(verifier);
+
+    const authUrl = new URL(authOauth.authUrl);
+    authUrl.searchParams.set('response_type', 'code');
+    authUrl.searchParams.set('client_id', authOauth.clientId);
+    authUrl.searchParams.set('redirect_uri', redirectUri);
+    authUrl.searchParams.set('state', state);
+    authUrl.searchParams.set('code_challenge', challenge);
+    authUrl.searchParams.set('code_challenge_method', 'S256');
+    if (authOauth.scope) authUrl.searchParams.set('scope', authOauth.scope);
+
+    oauthStatus = 'Waiting for browser authorization…';
+    await openExternal(authUrl.toString());
+    const params = await api.oauthWaitCallback(port, 180);
+    if (params.error) throw new Error(params.error_description || params.error);
+    if (params.state !== state) throw new Error('state mismatch — possible CSRF, aborting');
+    if (!params.code) throw new Error('No authorization code in the redirect');
+
+    oauthStatus = 'Exchanging code for a token…';
+    return requestToken({
+      grant_type: 'authorization_code',
+      code: params.code,
+      redirect_uri: redirectUri,
+      client_id: authOauth.clientId,
+      client_secret: authOauth.clientSecret || undefined,
+      code_verifier: verifier
+    });
   }
   $: {
     // reactive dependency list — re-apply whenever any auth field changes
     authType, authBearer, authUser, authPass, authKeyName, authKeyValue, authKeyIn;
     if (!hydrating) applyAuth();
   }
+  $: {
+    // reactive dependency list for the localStorage-backed configs
+    authType, authOauth, authDigest, authAws;
+    if (!hydrating && loadedTabId) saveAuthCfg(loadedTabId);
+  }
 
-  // pm.globals aren't tied to any one environment (that's the point —
-  // they're the same across all of them), so there's no natural backend
-  // row for them yet. Kept in localStorage for now: per-viewer, but
-  // durable across restarts, and zero new backend surface for something
-  // this small. Revisit if it needs to sync via MCP/other surfaces.
-  const GLOBALS_KEY = 'og_testdesk_pm_globals';
-  function loadGlobals() {
+  // pm.globals uses the same request_globals store the backend already
+  // auto-applies during request_send for {{var}} substitution (api.js's
+  // globalsGet/globalsSet — plumbed server-side but with no UI yet before
+  // this) — not a separate localStorage copy, so a script's
+  // pm.globals.set(...) is visible to every other request's {{var}}
+  // substitution and vice versa, the same relationship pm.environment
+  // already has with the active environment.
+  async function loadGlobals() {
     try {
-      return JSON.parse(localStorage.getItem(GLOBALS_KEY) || '{}');
+      const raw = await api.globalsGet();
+      return raw ? JSON.parse(raw) : {};
     } catch {
       return {};
     }
   }
-  function saveGlobals(obj) {
+  async function saveGlobals(obj) {
     try {
-      localStorage.setItem(GLOBALS_KEY, JSON.stringify(obj));
+      await api.globalsSet(JSON.stringify(obj));
     } catch {}
   }
 
@@ -428,6 +580,40 @@
         await api.environmentSave({ ...env, variables_json: JSON.stringify(after) });
       } catch {}
     }
+  }
+
+  // AWS SigV4 and Digest can't be precomputed like Bearer/Basic — SigV4's
+  // signature depends on the exact request being sent right now
+  // (timestamp, headers, body hash); Digest's response hash depends on a
+  // nonce the server hasn't issued yet. Both are resolved here, right
+  // before the real send, rather than in the reactive header composer.
+  async function doSend(req) {
+    if (authType === 'awsv4' && authAws.accessKeyId) {
+      const extra = await signAwsV4({ method: req.method, url: req.url, headers: req.headers, body: req.body }, authAws);
+      return api.requestSend({ ...req, headers: { ...req.headers, ...extra } }, true, draft.id || null, draft.name || null);
+    }
+    if (authType === 'digest' && authDigest.username) {
+      const first = await api.requestSend(req, true, draft.id || null, draft.name || null);
+      if (first.status !== 401) return first;
+      const wwwAuth = first.headers.find(([k]) => k.toLowerCase() === 'www-authenticate');
+      const challenge = wwwAuth && parseDigestChallenge(wwwAuth[1]);
+      if (!challenge) return first; // not a Digest challenge — nothing we can do, show the 401 as-is
+      const u = new URL(req.url);
+      const digestHeader = buildDigestHeader({
+        username: authDigest.username,
+        password: authDigest.password,
+        method: req.method,
+        uri: u.pathname + u.search,
+        challenge
+      });
+      return api.requestSend(
+        { ...req, headers: { ...req.headers, Authorization: digestHeader } },
+        true,
+        draft.id || null,
+        draft.name || null
+      );
+    }
+    return api.requestSend(req, true, draft.id || null, draft.name || null);
   }
 
   async function send() {
@@ -451,7 +637,7 @@
     const env = $activeEnvironment;
     let envVars = env ? safeJson(env.variables_json) : {};
     const envVarsBefore = { ...envVars };
-    let globals = loadGlobals();
+    let globals = await loadGlobals();
 
     if (draft.pre_request_script?.trim()) {
       const out = await runScript('pre', draft.pre_request_script, {
@@ -476,11 +662,11 @@
       }
       envVars = out.vars.environment;
       globals = out.vars.globals;
-      saveGlobals(globals);
+      await saveGlobals(globals);
     }
 
     try {
-      const r = await api.requestSend(req, true, draft.id || null, draft.name || null);
+      const r = await doSend(req);
       let testResults = null;
       if (draft.test_script?.trim()) {
         const out = await runScript('test', draft.test_script, {
@@ -491,7 +677,7 @@
         testResults = out.error ? [{ name: 'Script error', passed: false, error: out.error }] : out.results;
         envVars = out.vars.environment;
         globals = out.vars.globals;
-        saveGlobals(globals);
+        await saveGlobals(globals);
       }
       await persistEnvIfChanged(env, envVarsBefore, envVars);
       response = { ...r, testResults };
@@ -961,6 +1147,9 @@
                 <option value="bearer">Bearer token</option>
                 <option value="basic">Basic auth</option>
                 <option value="apikey">API key</option>
+                <option value="oauth2">OAuth 2.0</option>
+                <option value="digest">Digest auth</option>
+                <option value="awsv4">AWS Signature v4</option>
               </select>
             </div>
             {#if authType === 'bearer'}
@@ -1000,6 +1189,90 @@
                 </select>
               </div>
               <p class="hint">Adds the key to your {authKeyIn === 'header' ? 'Headers' : 'Params'} tab.</p>
+            {:else if authType === 'oauth2'}
+              <div class="field">
+                <label for="oauthGrant">Grant type</label>
+                <select id="oauthGrant" class="select" bind:value={authOauth.grantType}>
+                  <option value="client_credentials">Client Credentials</option>
+                  <option value="authorization_code">Authorization Code (PKCE)</option>
+                </select>
+              </div>
+              {#if authOauth.grantType === 'authorization_code'}
+                <div class="field">
+                  <label for="oauthAuthUrl">Authorization URL</label>
+                  <input id="oauthAuthUrl" class="input mono" bind:value={authOauth.authUrl} placeholder="https://provider.com/oauth/authorize" />
+                </div>
+              {/if}
+              <div class="field">
+                <label for="oauthTokenUrl">Access token URL</label>
+                <input id="oauthTokenUrl" class="input mono" bind:value={authOauth.tokenUrl} placeholder="https://provider.com/oauth/token" />
+              </div>
+              <div class="row2">
+                <div class="field">
+                  <label for="oauthClientId">Client ID</label>
+                  <input id="oauthClientId" class="input mono" bind:value={authOauth.clientId} />
+                </div>
+                <div class="field">
+                  <label for="oauthClientSecret">Client secret{authOauth.grantType === 'authorization_code' ? ' (optional for public clients)' : ''}</label>
+                  <input id="oauthClientSecret" class="input mono" type="password" bind:value={authOauth.clientSecret} />
+                </div>
+              </div>
+              <div class="field">
+                <label for="oauthScope">Scope</label>
+                <input id="oauthScope" class="input mono" bind:value={authOauth.scope} placeholder="read write" />
+              </div>
+              <button class="btn primary sm" on:click={fetchOauthToken} disabled={oauthBusy}>
+                {oauthBusy ? 'Working…' : 'Get New Access Token'}
+              </button>
+              {#if oauthStatus}<p class="hint">{oauthStatus}</p>{/if}
+              <p class="hint">
+                {authOauth.grantType === 'authorization_code'
+                  ? 'Opens your system browser to authorize, then catches the redirect on a local loopback listener — register http://127.0.0.1:<port>/callback as an allowed redirect URI with your provider (many accept any 127.0.0.1 port).'
+                  : 'Server-to-server — no browser involved.'}
+                On success, sets <code>Authorization: Bearer &lt;token&gt;</code> like the Bearer type above.
+              </p>
+            {:else if authType === 'digest'}
+              <div class="row2">
+                <div class="field">
+                  <label for="digestUser">Username</label>
+                  <input id="digestUser" class="input" bind:value={authDigest.username} />
+                </div>
+                <div class="field">
+                  <label for="digestPass">Password</label>
+                  <input id="digestPass" class="input" type="password" bind:value={authDigest.password} />
+                </div>
+              </div>
+              <p class="hint">
+                Sends the request once, reads the server's 401 challenge, and resends with the computed
+                Digest response — MD5-based (RFC 2617), which is what almost every real Digest server still
+                speaks.
+              </p>
+            {:else if authType === 'awsv4'}
+              <div class="row2">
+                <div class="field">
+                  <label for="awsKeyId">Access key ID</label>
+                  <input id="awsKeyId" class="input mono" bind:value={authAws.accessKeyId} />
+                </div>
+                <div class="field">
+                  <label for="awsSecret">Secret access key</label>
+                  <input id="awsSecret" class="input mono" type="password" bind:value={authAws.secretAccessKey} />
+                </div>
+              </div>
+              <div class="row2">
+                <div class="field">
+                  <label for="awsRegion">Region</label>
+                  <input id="awsRegion" class="input mono" bind:value={authAws.region} placeholder="us-east-1" />
+                </div>
+                <div class="field">
+                  <label for="awsService">Service</label>
+                  <input id="awsService" class="input mono" bind:value={authAws.service} placeholder="execute-api, s3, ..." />
+                </div>
+              </div>
+              <div class="field">
+                <label for="awsToken">Session token <span class="muted">(optional, for temporary credentials)</span></label>
+                <input id="awsToken" class="input mono" bind:value={authAws.sessionToken} />
+              </div>
+              <p class="hint">Signs the request with SigV4 right before sending — verified against AWS's own documented signing example.</p>
             {:else}
               <p class="hint">No authorization header is sent.</p>
             {/if}

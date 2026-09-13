@@ -743,6 +743,104 @@ async fn error_log_clear() -> R<()> {
     Ok(())
 }
 
+// ---------------------------------------------------------- oauth2 loopback
+//
+// For the Authorization Code flow: the frontend opens the system browser to
+// the provider's /authorize URL with redirect_uri pointing at this loopback
+// listener; the provider redirects the browser back here with ?code=...
+// once the human approves. A tiny one-shot HTTP server, not a real one —
+// accepts exactly one connection, pulls the query string out of the
+// request line, and returns a "you can close this tab" page.
+
+static OAUTH_LISTENERS: OnceLock<AsyncMutex<HashMap<u16, tokio::net::TcpListener>>> = OnceLock::new();
+
+#[tauri::command]
+async fn oauth_start_listener() -> R<u16> {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+        .await
+        .map_err(err)?;
+    let port = listener.local_addr().map_err(err)?.port();
+    OAUTH_LISTENERS
+        .get_or_init(|| AsyncMutex::new(HashMap::new()))
+        .lock()
+        .await
+        .insert(port, listener);
+    Ok(port)
+}
+
+#[tauri::command]
+async fn oauth_wait_callback(port: u16, timeout_secs: u64) -> R<HashMap<String, String>> {
+    let listener = OAUTH_LISTENERS
+        .get_or_init(|| AsyncMutex::new(HashMap::new()))
+        .lock()
+        .await
+        .remove(&port)
+        .ok_or_else(|| "no listener on that port — call oauth_start_listener first".to_string())?;
+
+    let fut = async {
+        let (mut stream, _) = listener.accept().await?;
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        let mut buf = [0u8; 8192];
+        let n = stream.read(&mut buf).await?;
+        let req = String::from_utf8_lossy(&buf[..n]);
+        let first_line = req.lines().next().unwrap_or("");
+        let path_and_query = first_line.split_whitespace().nth(1).unwrap_or("/");
+        let query = path_and_query.splitn(2, '?').nth(1).unwrap_or("");
+        let mut params = HashMap::new();
+        for pair in query.split('&') {
+            if pair.is_empty() {
+                continue;
+            }
+            let mut it = pair.splitn(2, '=');
+            let k = oauth_urldecode(it.next().unwrap_or(""));
+            let v = oauth_urldecode(it.next().unwrap_or(""));
+            params.insert(k, v);
+        }
+        let body = "<html><body style=\"font-family:sans-serif;padding:40px;text-align:center\">\
+                     <h2>OG TestDesk</h2><p>Authorization complete \u{2014} you can close this tab.</p>\
+                     </body></html>";
+        let resp = format!(
+            "HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=utf-8\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+            body.len(),
+            body
+        );
+        stream.write_all(resp.as_bytes()).await?;
+        Ok::<_, std::io::Error>(params)
+    };
+    tokio::time::timeout(std::time::Duration::from_secs(timeout_secs), fut)
+        .await
+        .map_err(|_| "Timed out waiting for the OAuth redirect".to_string())?
+        .map_err(err)
+}
+
+fn oauth_urldecode(s: &str) -> String {
+    let bytes = s.as_bytes();
+    let mut out = Vec::with_capacity(bytes.len());
+    let mut i = 0;
+    while i < bytes.len() {
+        match bytes[i] {
+            b'%' if i + 2 < bytes.len() => {
+                if let Ok(byte) = u8::from_str_radix(&s[i + 1..i + 3], 16) {
+                    out.push(byte);
+                    i += 3;
+                    continue;
+                }
+                out.push(bytes[i]);
+                i += 1;
+            }
+            b'+' => {
+                out.push(b' ');
+                i += 1;
+            }
+            b => {
+                out.push(b);
+                i += 1;
+            }
+        }
+    }
+    String::from_utf8_lossy(&out).to_string()
+}
+
 /// So a frontend-only failure (a fetch that never reaches a Rust command,
 /// a JS exception) lands in the same log as backend errors, instead of
 /// only ever showing up as a toast the user has to remember and retype.
@@ -892,6 +990,8 @@ async fn main() {
             state_set,
             error_log_list,
             error_log_clear,
+            oauth_start_listener,
+            oauth_wait_callback,
             log_client_error,
             debug_state_set,
             debug_state_get,
