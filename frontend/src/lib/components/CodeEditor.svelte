@@ -6,6 +6,7 @@
   import { sql as sqlLang } from '@codemirror/lang-sql';
   import { json as jsonLang } from '@codemirror/lang-json';
   import { syntaxHighlighting, HighlightStyle, bracketMatching } from '@codemirror/language';
+  import { autocompletion, completionKeymap, closeBrackets, closeBracketsKeymap } from '@codemirror/autocomplete';
   import { tags as t } from '@lezer/highlight';
 
   // Theme-following highlight — colours are CSS vars, so they update live
@@ -25,6 +26,11 @@
   export let language = 'sql'; // 'sql' | 'json' | 'text'
   export let readonly = false;
   export let placeholder = '';
+  // { tableName: [columnName, ...] } — schema-aware completion for the
+  // active connection. Table-name-only (empty arrays) still gets you
+  // completion after FROM/JOIN; column arrays add per-table column
+  // completion. Optional — plain keyword completion works without it.
+  export let schema = null;
 
   const dispatch = createEventDispatcher();
   let el;
@@ -33,7 +39,7 @@
   const roComp = new Compartment();
 
   function langExt() {
-    if (language === 'sql') return sqlLang();
+    if (language === 'sql') return sqlLang(schema ? { schema, upperCaseKeywords: true } : { upperCaseKeywords: true });
     if (language === 'json') return jsonLang();
     return [];
   }
@@ -65,9 +71,11 @@
           lineNumbers(),
           history(),
           bracketMatching(),
+          closeBrackets(),
+          autocompletion(),
           highlightActiveLine(),
           syntaxHighlighting(appHighlight, { fallback: true }),
-          keymap.of([...defaultKeymap, ...historyKeymap, indentWithTab]),
+          keymap.of([...closeBracketsKeymap, ...completionKeymap, ...defaultKeymap, ...historyKeymap, indentWithTab]),
           runKey,
           langComp.of(langExt()),
           roComp.of(EditorState.readOnly.of(readonly)),
@@ -117,7 +125,7 @@
   $: if (view && value !== view.state.doc.toString()) {
     view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: value } });
   }
-  $: if (view) view.dispatch({ effects: langComp.reconfigure(langExt()) });
+  $: if (view && (language || schema)) view.dispatch({ effects: langComp.reconfigure(langExt()) });
   $: if (view) view.dispatch({ effects: roComp.reconfigure(EditorState.readOnly.of(readonly)) });
 
   export function focus() {

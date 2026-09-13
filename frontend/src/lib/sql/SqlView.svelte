@@ -8,6 +8,7 @@
   import SavedQueries from './SavedQueries.svelte';
   import ConnPicker from './ConnPicker.svelte';
   import { api } from '../api.js';
+  import { format as formatSqlText } from 'sql-formatter';
   import { downloadText } from '../export.js';
   import {
     connections,
@@ -386,6 +387,53 @@
     persistSqlTab(tab.id);
   }
 
+  const FORMATTER_LANG = { postgres: 'postgresql', mysql: 'mysql', sqlite: 'sqlite' };
+  function formatSql() {
+    const t = tab;
+    if (!t) return;
+    const src = selectionOrAll(t.sql_text);
+    if (!src.trim()) return;
+    try {
+      const language = FORMATTER_LANG[tabConn?.kind] || 'sql';
+      const formatted = formatSqlText(src, { language, keywordCase: 'upper' });
+      // Selection-only formatting isn't supported here — always
+      // reformats the whole statement, same as CodeMirror's own
+      // save/run shortcuts operate on the full tab text.
+      touchSqlTab(t.id, { sql_text: formatted, dirty: true });
+      persistSqlTab(t.id);
+    } catch (e) {
+      toast(`Couldn't format: ${e}`, 'error', 3000);
+    }
+  }
+
+  // Table-name completion for the SQL editor (`{ table: [] }` — no
+  // column-level data, which would mean eagerly fetching columns for
+  // every table in the schema). Cached per connection so switching
+  // between tabs on the same connection doesn't refetch.
+  let autocompleteSchema = null;
+  let autocompleteCache = {};
+  $: if (tabConn) loadAutocompleteSchema(tabConn);
+  async function loadAutocompleteSchema(conn) {
+    if (autocompleteCache[conn.id]) {
+      autocompleteSchema = autocompleteCache[conn.id];
+      return;
+    }
+    try {
+      const schemas = await api.schemasList(conn);
+      const map = {};
+      for (const s of schemas) {
+        for (const r of s.relations || []) {
+          map[r.name] = [];
+          map[`${s.name}.${r.name}`] = [];
+        }
+      }
+      autocompleteCache[conn.id] = map;
+      if (tabConn?.id === conn.id) autocompleteSchema = map;
+    } catch {
+      // Best-effort — plain keyword completion still works without this.
+    }
+  }
+
   // page < 0 → full result (no pagination wrapper, capped by max rows)
   async function run(page = 0) {
     const t = tab;
@@ -637,6 +685,7 @@
           {tab.running ? 'Running…' : '▶ Run'}
         </button>
         <button class="btn" on:click={saveQuery}>Save</button>
+        <button class="btn ghost sm" title="Format SQL (⇧⌥F)" on:click={formatSql}>Format</button>
         <button class="icon-btn big-glyph" title={ICONS.saveFile.label} on:click={saveToFile}
           >{ICONS.saveFile.glyph}</button
         >
@@ -698,6 +747,7 @@
           <CodeEditor
             value={tab.sql_text}
             language="sql"
+            schema={autocompleteSchema}
             on:change={(e) => onChange(e.detail)}
             on:run={() => run()}
             on:save={saveQuery}

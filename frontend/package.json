@@ -21,6 +21,7 @@
     "vite": "^5.2.0"
   },
   "dependencies": {
+    "@codemirror/autocomplete": "^6.20.3",
     "@codemirror/commands": "^6.6.0",
     "@codemirror/lang-json": "^6.0.1",
     "@codemirror/lang-sql": "^6.7.0",
@@ -32,9 +33,13 @@
     "@tauri-apps/cli": "^2.0.0",
     "@tauri-apps/plugin-shell": "^2.3.6",
     "chart.js": "^4.5.1",
-    "codemirror": "^6.0.1"
+    "codemirror": "^6.0.1",
+    "sql-formatter": "^15.8.2"
   },
   "pnpm": {
-    "onlyBuiltDependencies": ["esbuild", "svelte-preprocess"]
+    "onlyBuiltDependencies": [
+      "esbuild",
+      "svelte-preprocess"
+    ]
   }
 }
