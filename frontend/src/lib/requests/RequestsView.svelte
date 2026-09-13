@@ -5,6 +5,7 @@
   import CookieManagerModal from './CookieManagerModal.svelte';
   import NetworkSettingsModal from './NetworkSettingsModal.svelte';
   import MockServerModal from './MockServerModal.svelte';
+  import WebSocketPanel from './WebSocketPanel.svelte';
   import ConnPicker from '../sql/ConnPicker.svelte';
   import { api } from '../api.js';
   import { parsePostman, toPostmanCollection } from './postman.js';
@@ -55,6 +56,7 @@
   let cookieModal = false;
   let networkModal = false;
   let mockModal = false;
+  let wsModal = false;
   let splitPct = 50;
   let dragging = false;
 
@@ -1128,6 +1130,9 @@
       <button class="btn ghost sm" title="Local mock server — canned responses, no real backend" on:click={() => (mockModal = true)}>
         Mock
       </button>
+      <button class="btn ghost sm" title="WebSocket connection tester" on:click={() => (wsModal = true)}>
+        WS
+      </button>
     </div>
   </aside>
 
@@ -1540,6 +1545,9 @@
 {/if}
 {#if mockModal}
   <MockServerModal on:close={() => (mockModal = false)} />
+{/if}
+{#if wsModal}
+  <WebSocketPanel on:close={() => (wsModal = false)} />
 {/if}
 
 <script context="module">
