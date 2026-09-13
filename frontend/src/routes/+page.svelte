@@ -1,7 +1,8 @@
 <script>
   import { onMount } from 'svelte';
   import { get } from 'svelte/store';
-  import { sqlTabs, activeSqlTabId } from '../lib/stores.js';
+  import { listen } from '@tauri-apps/api/event';
+  import { sqlTabs, requestTabs, activeSqlTabId } from '../lib/stores.js';
   import { api } from '../lib/api.js';
   import TopNav from '../lib/components/TopNav.svelte';
   import Toasts from '../lib/components/Toasts.svelte';
@@ -30,7 +31,9 @@
     reloadSavedCharts,
     sendToInspector,
     connMenuOpen,
-    debugSnapshot
+    debugSnapshot,
+    ensureGroupOrder,
+    toast
   } from '../lib/stores.js';
 
   let settingsOpen = false;
@@ -89,6 +92,29 @@
     }, 400);
   }
 
+  // Live push from MCP tools, straight into the window (see mcp.rs's
+  // `ctx.app_handle.emit(...)` calls) — precise, additive updates
+  // instead of the reload-everything approach that kept resurrecting
+  // tabs. A tab an AI opens shows up in the top bar immediately,
+  // without switching your focus to it or touching anything else.
+  function mergeSqlTab(tab) {
+    sqlTabs.update((tabs) =>
+      tabs.some((t) => t.id === tab.id)
+        ? tabs
+        : [...tabs, { ...tab, dirty: false, result: null, error: null, running: false }]
+    );
+    ensureGroupOrder(tab.connection_id);
+    toast(`AI opened a SQL tab: ${tab.title}`, 'info', 3500);
+  }
+  function mergeRequestTab(tab) {
+    requestTabs.update((tabs) =>
+      tabs.some((t) => t.id === tab.id)
+        ? tabs
+        : [...tabs, { ...tab, response: null, error: null, sending: false, dirty: false }]
+    );
+    toast(`AI opened a request tab: ${tab.title}`, 'info', 3500);
+  }
+
   function onWindowError(e) {
     api.logClientError('window', e.message || String(e.error || e)).catch(() => {});
   }
@@ -102,6 +128,11 @@
     window.addEventListener('unhandledrejection', onUnhandledRejection);
     await reloadEverything();
     window.addEventListener('focus', reloadOnFocus);
+    listen('mcp:sql-tab-opened', (e) => mergeSqlTab(e.payload)).catch(() => {});
+    listen('mcp:request-tab-opened', (e) => mergeRequestTab(e.payload)).catch(() => {});
+    listen('mcp:saved-query-created', () => reloadSavedQueries()).catch(() => {});
+    listen('mcp:saved-request-created', () => reloadRequests()).catch(() => {});
+    listen('mcp:connection-created', () => reloadConnections()).catch(() => {});
 
     // Dev/demo helpers via query string (no effect in normal use):
     //   ?tool=requests|inspector   ?run  (auto-run the active SQL tab)

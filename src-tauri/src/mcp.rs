@@ -34,6 +34,16 @@
 //!     sensitive than "write some text into the app". A connection made
 //!     this way is not automatically exposed to MCP — the human still has
 //!     to flip that on in Settings before it's queryable.
+//!
+//! `open_sql_tab`/`open_request_tab`/`save_query`/`save_request`/
+//! `add_connection` each emit an `mcp:*` event into the window right
+//! after writing (see `ctx.app_handle.emit`) — the frontend merges just
+//! that one new thing in live (+page.svelte's `listen(...)` calls), so
+//! an AI opening a tab shows up on screen immediately instead of
+//! waiting for a reload. This is the actual point of the MCP server:
+//! not a headless API, but "watch the AI work and correct it" — the
+//! human always sees exactly what got opened, on the connection it was
+//! opened on, before anything runs.
 
 use std::collections::HashMap;
 use std::net::SocketAddr;
@@ -53,10 +63,11 @@ use axum::{
 use base64::Engine;
 use og_testdesk_core::{
     drivers, requests as http_requests, stmt_returns_rows, ConnConfig, DbKind, HttpRequest,
-    MetadataStore, QueryTab, SavedQuery, SavedRequest, SecretsStore,
+    MetadataStore, QueryTab, RequestTab, SavedQuery, SavedRequest, SecretsStore,
 };
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
+use tauri::Emitter;
 use tokio::sync::{mpsc, oneshot, Mutex};
 use tokio_stream::wrappers::ReceiverStream;
 use tokio_stream::StreamExt;
@@ -156,6 +167,11 @@ struct AppCtx {
     /// The frontend's last-reported `debugSnapshot` (raw JSON, opaque
     /// here) — see the `get_app_state` tool.
     debug_state: Arc<Mutex<String>>,
+    /// Used to emit `mcp:*` events straight into the window, so a tab
+    /// this server opens shows up live in the UI instead of waiting for
+    /// the next reload — the whole point of "watch the AI work" being
+    /// more than "reload occasionally and hope".
+    app_handle: tauri::AppHandle,
 }
 
 pub struct McpHandle {
@@ -176,10 +192,12 @@ pub async fn start(
     cfg: McpConfig,
     exports_dir: PathBuf,
     debug_state: Arc<Mutex<String>>,
+    app_handle: tauri::AppHandle,
 ) -> Result<McpHandle> {
     let ctx = AppCtx {
         metadata,
         cfg: cfg.clone(),
+        app_handle,
         sessions: Arc::new(Mutex::new(HashMap::new())),
         oauth: Arc::new(Mutex::new(OAuthState::default())),
         exports_dir,
@@ -726,6 +744,17 @@ fn tool_defs(cfg: &McpConfig) -> Vec<Value> {
             }, "required": ["connection", "sql"] }
         }));
         tools.push(json!({
+            "name": "open_request_tab",
+            "description": "Open a new HTTP request tab in the app (method/url/headers/body filled in), for the human to review and send themselves. Does not send anything.",
+            "inputSchema": { "type": "object", "properties": {
+                "method": { "type": "string" },
+                "url": { "type": "string" },
+                "headers": { "type": "object" },
+                "body": { "type": "string" },
+                "title": { "type": "string", "description": "tab title (default: \"MCP request\")" }
+            }, "required": ["url"] }
+        }));
+        tools.push(json!({
             "name": "save_query",
             "description": "Save a query into the app's Saved Queries tree (optionally into a named folder), for the human to find and run later.",
             "inputSchema": { "type": "object", "properties": {
@@ -946,10 +975,34 @@ async fn call_tool(ctx: &AppCtx, name: &str, args: Value) -> Result<String> {
                 is_active: false,
             };
             ctx.metadata.upsert_tab(&tab).await?;
+            let _ = ctx.app_handle.emit("mcp:sql-tab-opened", &tab);
             Ok(format!(
-                "Opened a SQL tab \"{}\" on {} — switch to the app to see it.",
+                "Opened a SQL tab \"{}\" on {} — it's live in the app now.",
                 tab.title, conn.nickname
             ))
+        }
+        "open_request_tab" if ctx.cfg.allow_populate => {
+            let url = s("url").ok_or_else(|| anyhow::anyhow!("missing 'url'"))?;
+            let headers: HashMap<String, String> = args
+                .get("headers")
+                .and_then(|h| serde_json::from_value(h.clone()).ok())
+                .unwrap_or_default();
+            let title = s("title").unwrap_or_else(|| "MCP request".to_string());
+            let position = ctx.metadata.list_request_tabs().await?.len() as i64;
+            let tab = RequestTab {
+                id: uuid::Uuid::new_v4().to_string(),
+                saved_request_id: None,
+                title,
+                method: s("method").unwrap_or_else(|| "GET".to_string()),
+                url,
+                headers_json: serde_json::to_string(&headers)?,
+                body: s("body"),
+                position,
+                is_active: false,
+            };
+            ctx.metadata.upsert_request_tab(&tab).await?;
+            let _ = ctx.app_handle.emit("mcp:request-tab-opened", &tab);
+            Ok(format!("Opened a request tab \"{}\" — it's live in the app now.", tab.title))
         }
         "save_query" if ctx.cfg.allow_populate => {
             let name = s("name").ok_or_else(|| anyhow::anyhow!("missing 'name'"))?;
@@ -980,6 +1033,7 @@ async fn call_tool(ctx: &AppCtx, name: &str, args: Value) -> Result<String> {
                 created_at: chrono::Utc::now().timestamp(),
             };
             ctx.metadata.upsert_saved_query(&q).await?;
+            let _ = ctx.app_handle.emit("mcp:saved-query-created", &q);
             Ok(format!("Saved query \"{name}\" — find it in Saved Queries."))
         }
         "save_sql_file" if ctx.cfg.allow_populate => {
@@ -1036,6 +1090,7 @@ async fn call_tool(ctx: &AppCtx, name: &str, args: Value) -> Result<String> {
                 created_at: chrono::Utc::now().timestamp(),
             };
             ctx.metadata.upsert_saved_request(&r).await?;
+            let _ = ctx.app_handle.emit("mcp:saved-request-created", &r);
             Ok(format!("Saved request \"{name}\" — find it in the Requests sidebar."))
         }
         "add_connection" if ctx.cfg.allow_manage_connections => {
@@ -1065,6 +1120,7 @@ async fn call_tool(ctx: &AppCtx, name: &str, args: Value) -> Result<String> {
                 color: s("color"),
             };
             ctx.metadata.upsert_connection(&conn).await?;
+            let _ = ctx.app_handle.emit("mcp:connection-created", &conn);
             Ok(format!(
                 "Created connection \"{nickname}\" — it is NOT yet exposed to MCP; turn that on in Settings if you want it queryable here."
             ))

@@ -4,7 +4,7 @@ mod mcp;
 mod scheduler;
 
 use std::collections::HashMap;
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 
 use mcp::{ConnAcl, McpConfig, McpHandle};
 use tokio::sync::Mutex as AsyncMutex;
@@ -25,6 +25,11 @@ struct AppState {
     /// opaque to the backend) — see `debug_state_set`/`debug_state_get`
     /// and the MCP `get_app_state` tool.
     debug_state: Arc<AsyncMutex<String>>,
+    /// Set once in `.setup()`, once an AppHandle actually exists — MCP
+    /// needs this to emit events (`mcp:sql-tab-opened` etc.) straight
+    /// into the window so an AI-opened tab shows up live instead of
+    /// waiting for a reload.
+    app_handle: OnceLock<tauri::AppHandle>,
 }
 
 async fn load_mcp_config(meta: &MetadataStore) -> McpConfig {
@@ -641,11 +646,17 @@ async fn start_mcp(state: &State<'_, AppState>) -> R<()> {
     if guard.is_some() {
         return Ok(());
     }
+    let app_handle = state
+        .app_handle
+        .get()
+        .cloned()
+        .ok_or_else(|| "app not fully started yet".to_string())?;
     let handle = mcp::start(
         state.metadata.clone(),
         cfg,
         state.exports_dir.clone(),
         state.debug_state.clone(),
+        app_handle,
     )
     .await
     .map_err(err)?;
@@ -772,18 +783,7 @@ async fn main() {
     let metadata = Arc::new(metadata);
     let exports_dir = app_data_dir.join("exports");
     let debug_state: Arc<AsyncMutex<String>> = Arc::new(AsyncMutex::new(String::new()));
-
-    // Auto-start the MCP server if it was left enabled.
     let mcp_slot: Arc<AsyncMutex<Option<McpHandle>>> = Arc::new(AsyncMutex::new(None));
-    {
-        let cfg = load_mcp_config(&metadata).await;
-        if cfg.enabled {
-            match mcp::start(metadata.clone(), cfg, exports_dir.clone(), debug_state.clone()).await {
-                Ok(h) => *mcp_slot.lock().await = Some(h),
-                Err(e) => eprintln!("[mcp] failed to auto-start: {e}"),
-            }
-        }
-    }
 
     if let Ok(Some(s)) = metadata.get_state("query_max_rows").await {
         if let Ok(n) = s.parse::<usize>() {
@@ -795,15 +795,36 @@ async fn main() {
 
     let managed = AppState {
         metadata: metadata.clone(),
-        mcp: mcp_slot,
-        exports_dir,
+        mcp: mcp_slot.clone(),
+        exports_dir: exports_dir.clone(),
         debug_state: debug_state.clone(),
+        app_handle: OnceLock::new(),
     };
 
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
         .setup(move |app| {
             app.manage(managed);
+            // MCP needs a real AppHandle (to emit `mcp:*` events into the
+            // window) which doesn't exist until right here — auto-start
+            // lives in this closure instead of before Builder::default()
+            // for exactly that reason. The closure itself is sync;
+            // spawn the actual (async) startup onto Tauri's runtime.
+            let handle = app.handle().clone();
+            let _ = app.state::<AppState>().app_handle.set(handle.clone());
+            let metadata2 = metadata.clone();
+            let exports_dir2 = exports_dir.clone();
+            let debug_state2 = debug_state.clone();
+            let mcp_slot2 = mcp_slot.clone();
+            tauri::async_runtime::spawn(async move {
+                let cfg = load_mcp_config(&metadata2).await;
+                if cfg.enabled {
+                    match mcp::start(metadata2, cfg, exports_dir2, debug_state2, handle).await {
+                        Ok(h) => *mcp_slot2.lock().await = Some(h),
+                        Err(e) => eprintln!("[mcp] failed to auto-start: {e}"),
+                    }
+                }
+            });
             // macOS keeps its overlaid traffic lights (tauri.conf titleBarStyle).
             // Everywhere else: frameless window, custom controls live in the top bar.
             #[cfg(not(target_os = "macos"))]
