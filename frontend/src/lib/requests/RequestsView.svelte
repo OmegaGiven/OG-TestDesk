@@ -9,9 +9,10 @@
   import { randomToken, pkceChallengeFromVerifier } from './oauth2.js';
   import { signAwsV4 } from './awsSigV4.js';
   import { parseDigestChallenge, buildDigestHeader } from './digestAuth.js';
+  import { CODE_GENERATORS } from './codegen.js';
   import { open as openExternal } from '@tauri-apps/plugin-shell';
   import { ICONS } from '../icons.js';
-  import { downloadText, copyText, toCurl, rowsToDelimited } from '../export.js';
+  import { downloadText, copyText, rowsToDelimited } from '../export.js';
   import {
     requestCollections,
     savedRequests,
@@ -941,11 +942,23 @@
     const csvRows = rows.map((r) => cols.map((c) => r[c.name]));
     downloadText(`${respFileBase()}.csv`, rowsToDelimited(cols, csvRows, ','), 'text/csv');
   }
-  async function copyCurl() {
-    const headers = headersObject();
-    const body = ['GET', 'HEAD'].includes(draft.method) ? null : draft.body || null;
-    const ok = await copyText(toCurl(draft.method, draft.url, headers, body));
-    toast(ok ? 'curl command copied' : 'Copy blocked', ok ? 'success' : 'error', 1500);
+  let showCodeMenu = false;
+  let codeLang = 'curl';
+  function codeSnippet() {
+    return CODE_GENERATORS[codeLang].generate({
+      method: draft.method,
+      url: draft.url,
+      headers: headersObject(),
+      bodyMode: draft.bodyMode,
+      body: ['GET', 'HEAD'].includes(draft.method) ? null : draft.body || null,
+      formFields: draft.formFields,
+      graphqlQuery: draft.graphqlQuery,
+      graphqlVariables: draft.graphqlVariables
+    });
+  }
+  async function copyCodeSnippet() {
+    const ok = await copyText(codeSnippet());
+    toast(ok ? `${CODE_GENERATORS[codeLang].label} snippet copied` : 'Copy blocked', ok ? 'success' : 'error', 1800);
   }
 
   function statusClass(s) {
@@ -1402,7 +1415,23 @@
             {/if}
             <button class="btn ghost sm" on:click={saveResponse}>{response.is_json ? 'Export JSON' : 'Save'}</button>
             <button class="btn ghost sm" title="Copy response body" on:click={copyResponse}>{ICONS.copy.glyph} Body</button>
-            <button class="btn ghost sm" title="Copy request as curl" on:click={copyCurl}>curl</button>
+            <span class="code-menu-wrap">
+              <button class="btn ghost sm" class:on={showCodeMenu} on:click={() => (showCodeMenu = !showCodeMenu)}>
+                {'</>'} Code
+              </button>
+              {#if showCodeMenu}
+                <div class="backdrop" on:click={() => (showCodeMenu = false)} role="presentation" />
+                <div class="code-menu">
+                  <div class="code-menu-head">
+                    {#each Object.entries(CODE_GENERATORS) as [key, g]}
+                      <button class:active={codeLang === key} on:click={() => (codeLang = key)}>{g.label}</button>
+                    {/each}
+                  </div>
+                  <pre class="code-snippet">{codeSnippet()}</pre>
+                  <button class="btn ghost sm" on:click={copyCodeSnippet}>{ICONS.copy.glyph} Copy</button>
+                </div>
+              {/if}
+            </span>
             <div class="subtabs sm">
               <button class:active={respTab === 'body'} on:click={() => (respTab = 'body')}>Body</button>
               <button class:active={respTab === 'headers'} on:click={() => (respTab = 'headers')}>
@@ -1731,6 +1760,65 @@
   .n.bad {
     background: color-mix(in srgb, var(--danger) 25%, transparent);
     color: var(--danger);
+  }
+  .code-menu-wrap {
+    position: relative;
+  }
+  .code-menu-wrap .backdrop {
+    position: fixed;
+    inset: 0;
+    z-index: 40;
+  }
+  .code-menu-wrap .btn.on {
+    background: var(--tool-requests-tint);
+    color: var(--tool-requests-text);
+  }
+  .code-menu {
+    position: absolute;
+    top: calc(100% + 4px);
+    right: 0;
+    z-index: 41;
+    width: 420px;
+    max-width: 80vw;
+    display: flex;
+    flex-direction: column;
+    background: var(--surface-1);
+    border: 1px solid var(--border-strong);
+    border-radius: var(--radius-sm);
+    box-shadow: var(--shadow-pop);
+    overflow: hidden;
+    padding: 8px;
+    gap: 6px;
+  }
+  .code-menu-head {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+  }
+  .code-menu-head button {
+    all: unset;
+    cursor: pointer;
+    font-size: 10.5px;
+    padding: 3px 8px;
+    border-radius: 4px;
+    color: var(--text-secondary);
+  }
+  .code-menu-head button.active {
+    background: var(--tool-requests-tint);
+    color: var(--tool-requests-text);
+  }
+  .code-snippet {
+    max-height: 280px;
+    overflow: auto;
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    border-radius: 5px;
+    padding: 8px;
+    font-family: var(--font-mono);
+    font-size: 11px;
+    white-space: pre-wrap;
+    word-break: break-word;
+    margin: 0;
   }
   .script-hint {
     padding: 8px 10px;
