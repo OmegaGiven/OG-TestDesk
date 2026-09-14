@@ -78,4 +78,7 @@ jobs:
           releaseName: 'OG TestDesk ${{ github.ref_name }}'
           releaseDraft: true
           prerelease: ${{ contains(github.ref_name, '-') }}
-          args: ${{ matrix.args }}
+          # WiX/MSI requires a numeric-only pre-release identifier
+          # ("beta.1" fails, "1" wouldn't); NSIS has no such rule, so
+          # pre-release tags (v*-*) skip the .msi and ship the .exe only.
+          args: ${{ matrix.args }}${{ (matrix.platform == 'windows-latest' && contains(github.ref_name, '-')) && ' --bundles nsis' || '' }}
