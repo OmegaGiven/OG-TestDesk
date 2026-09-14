@@ -5,6 +5,23 @@ versioning follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.2.0-beta.1] - 2026-09-14
+
+Beta. Full Postman/Postico-parity pass since 0.1.x:
+
+- **Requests**: OAuth 2.0 (Client Credentials + Auth Code/PKCE), Digest,
+  AWS SigV4 auth; pre-request & test scripts (`pm.*` sandbox); a real
+  cookie jar; multipart/binary/GraphQL body types; proxy/custom CA/
+  per-host client certs (mTLS); code snippet generation (cURL, Python,
+  JS, Node); a local mock server; a WebSocket tester; gRPC via server
+  reflection.
+- **SQL**: real row editing (UPDATE/INSERT/DELETE from a plain
+  `SELECT *`, with a preview), graphical table structure editor + DDL
+  view, CSV import wizard, foreign-key picker, scheduled queries.
+- **UI**: full icon system replaced with a clean, consistent Lucide-based
+  set across the entire app; new app icon.
+- Project site published at https://omegagiven.github.io/OG-TestDesk/.
+
 ## [0.1.0] - 2026-09-13
 
 Initial beta. SQL client (Postgres/MySQL/SQLite), HTTP request client,

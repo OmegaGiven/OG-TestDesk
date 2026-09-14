@@ -68,5 +68,5 @@ jobs:
           tagName: ${{ github.ref_name }}
           releaseName: 'OG TestDesk ${{ github.ref_name }}'
           releaseDraft: true
-          prerelease: false
+          prerelease: ${{ contains(github.ref_name, '-') }}
           args: ${{ matrix.args }}
