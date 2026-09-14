@@ -1,39 +1,124 @@
-# OG TestDesk
+<p align="center">
+  <img src="src-tauri/icons/icon.png" width="128" alt="OG TestDesk">
+</p>
 
-Native desktop dev desk — SQL workspace, HTTP request client, and a shared
-JSON inspector. Built with Tauri (Rust core + native webview) and Svelte.
+<h1 align="center">OG TestDesk</h1>
 
-Rewritten from the earlier iced-based prototype: `core/` was redesigned
-around a driver-abstraction trait (Postgres/MySQL/SQLite today, easy to
-add more), and the UI moved to a webview so styling iterates in CSS
-instead of Rust structs.
+<p align="center">
+  A free, open-source desktop dev desk — SQL client, HTTP request client,
+  and a shared JSON inspector, in one app, with an AI/MCP hook built in
+  from the ground up. Think Postico + Postman + a JSON viewer, unified.
+</p>
+
+Built with Tauri (Rust core + native webview) and Svelte. Color-coded
+navigation — SQL blue, Requests green, Inspector violet — so it's
+always obvious which tool, connection, and tab you're looking at.
+
+## Why this exists
+
+Most people juggle a SQL client, an HTTP client, and a JSON viewer as
+three separate paid tools that don't talk to each other. OG TestDesk is
+all three in one place, genuinely free (Apache 2.0, no paywall, no
+seat licenses), and — its actual headline feature — a local MCP server
+so an AI assistant can open tabs, run queries, send requests, and watch
+its own results land live in the UI, correcting course as it goes,
+instead of you copy-pasting between a terminal and a browser.
+
+## AI / MCP integration
+
+Point Claude, ChatGPT, or any MCP-capable client at the app's local
+server and it can, within limits you control per-connection and
+server-wide:
+
+- List schemas/columns, run queries, browse foreign keys
+- Send HTTP requests, run saved requests
+- Open a SQL or request tab, save a query/request/connection — so you
+  see exactly what it did, live, in the app itself
+- Read the app's own debug state and error log to help diagnose issues
+
+Every capability is behind an explicit flag (`allow_write`,
+`allow_http`, `allow_populate`, `allow_manage_connections`) and a
+per-connection "exposed" toggle — nothing is reachable by default.
+Supports both a static bearer token (for `claude mcp add` / local
+config) and a full OAuth 2.0 layer (discovery, dynamic client
+registration, PKCE) for clients like ChatGPT's connector framework that
+require it.
+
+## SQL
+
+- Connection manager: Postgres, MySQL, SQLite, with per-connection
+  accent colors, a **read-only** switch (blocks every write at the
+  driver level, everywhere — the editor, MCP, the scheduler), an
+  optional SSH tunnel (shells out to the system `ssh`), and a
+  pre-connect shell command for IAM-style short-lived credentials
+  (`aws rds generate-db-auth-token`, etc.)
+- Paste a `postgres://`/`mysql://`/`sqlite://` connection URL to fill
+  the form instead of typing each field
+- Lazy schema/column tree, foreign-key browser, functions/procedures tab
+- CodeMirror editor: run / run-selection, save, schema-aware
+  autocomplete, a formatter (per-dialect), history cycling
+  (Alt+↑/↓, like a shell), and **Run All** — splits a script on `;`
+  (respecting strings/comments) and runs each statement in sequence
+  with its own result tab
+- Sortable, filterable, virtualized-scroll result grid; CSV/TSV/JSON
+  export
+- **Real row editing** — edit cells on a plain `SELECT * FROM table`
+  (any table with a primary key) and save as actual UPDATE/INSERT/
+  DELETE statements, with a confirmation preview before anything runs
+- Graphical table structure editor (add/rename/drop columns, change
+  type/nullable/default) and a DDL view, both dialect-aware
+- CSV import wizard — new table (with inferred column types) or an
+  existing one
+- Foreign-key picker — jump straight to a referenced row
+- Query history and scheduled queries (run on an interval, unattended)
+
+## Requests
+
+- Collections, saved requests, `{{variable}}` environments with an
+  active-env switcher, Postman collection import/export
+- **Body types**: raw (JSON/text/XML), x-www-form-urlencoded,
+  multipart form-data (including file uploads), binary, GraphQL
+  (query + variables)
+- **Auth**: Bearer, Basic, API key, **OAuth 2.0** (Client Credentials
+  and Authorization Code + PKCE, opens your system browser and catches
+  the redirect locally), **Digest** (RFC 2617), **AWS Signature v4**
+- **Pre-request & test scripts** — a `pm.*` sandbox (environment/global
+  variables, a mutable request object, `pm.test(...)` assertions
+  against the response) running in a script-sandboxed iframe, not the
+  main app
+- Cookie manager — a real jar, collected from responses and replayed
+  automatically, viewable/editable
+- Response viewer with a **visualizer** tab for HTML/image/PDF
+  responses, not just raw text
+- **Code snippet generation** — cURL, Python, JavaScript, Node.js
+- Proxy / custom CA / per-host client certificates (mTLS)
+- A local **mock server** — canned status/headers/body per route,
+  start/stop on demand
+- **WebSocket** connection tester — connect, send, watch a live message
+  log
+- **gRPC** — server-reflection-based service/method discovery and
+  unary calls, no `.proto` file needed if the server supports
+  reflection
+
+## Inspector
+
+Tree / Table / Summary views over any JSON — fed automatically from
+SQL results and HTTP responses, or paste your own. Search with match
+count and auto-expand, a detail panel (path / type / size / pretty +
+copy), and per-node editing.
 
 ## Project layout
 
 ```
 core/         og_testdesk_core — persistence (SQLite via sqlx), DB driver
-              abstraction, HTTP request runner, OS keychain secrets.
+              abstraction (Postgres/MySQL/SQLite), HTTP request runner,
+              gRPC reflection client, cookie jar, OS keychain secrets.
               No UI code.
-src-tauri/    Tauri backend — thin command layer wrapping core/, window
-              config, packaging.
+src-tauri/    Tauri backend — command layer wrapping core/, the MCP
+              server, the local mock server, window config, packaging.
 frontend/     SvelteKit UI — SQL / Requests / Inspector modules, the
               color-coded top nav, shared JSON tree viewer.
 ```
-
-## Color system
-
-Each tool (SQL, Requests, Inspector) has a fixed hue used everywhere its
-content appears — top nav, buttons, selection state:
-
-| Tool      | Hue    |
-| --------- | ------ |
-| SQL       | Blue   |
-| Requests  | Green  |
-| Inspector | Violet |
-
-Within SQL, each saved connection gets its own accent dot color (user
-assignable), which tints that connection's query tabs — so which DB a
-tab belongs to is visible at a glance, not just on hover.
 
 ## Running from source
 
@@ -76,16 +161,7 @@ Pushing a `v*` tag triggers `.github/workflows/release.yml`, which
 builds and packages the app for macOS, Windows, and Linux and attaches
 the installers to a (draft) GitHub Release. See `CHANGELOG.md`.
 
-## Feature status
-
-| Feature   | Status                                                                 |
-| --------- | ----------------------------------------------------------------------- |
-| SQL       | Working. Connection manager (test + accent color), lazy schema/column browser, CodeMirror editor (⌘↵ run, run-selection, ⌘S save), sortable result grid, CSV/JSON export, per-connection query tabs persisted across restarts. Real row editing — a plain `SELECT * FROM <table>` on a table with a primary key can be edited in the grid and saved as actual UPDATE/INSERT/DELETE statements, with a confirmation prompt before anything runs. Postgres / MySQL / SQLite. |
-| Requests  | Working. Collections + saved requests, method/URL bar with Params⇄URL sync, headers, JSON body (beautify), response viewer (status/time/size, body + headers), `{{variable}}` environments with an active-env switcher. |
-| Inspector | Working. Tree / Table / Summary modes, search with match count + auto-expand, detail panel (path / type / size / pretty-print + copy). Fed by SQL results and HTTP responses, or paste raw JSON. |
-| Top nav   | Color-coded tool → connection → tab, live from app state. |
-
-Post-MVP polish is tracked in `docs/next-steps.md`.
+Post-MVP polish and known gaps are tracked in `docs/next-steps.md`.
 
 ## License
 
