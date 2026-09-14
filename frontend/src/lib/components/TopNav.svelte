@@ -248,7 +248,7 @@
 
 <svelte:window on:keydown={onWindowKey} />
 
-<nav class="topnav">
+<nav class="topnav" data-tauri-drag-region>
   <button
     class="icon-btn plus"
     title="New connection, request, or open Inspector"
@@ -264,7 +264,7 @@
     on:click={() => nudge(-1)}>‹</button
   >
 
-  <div class="scroller" bind:this={scroller} on:scroll={refresh} on:wheel={onWheel}>
+  <div class="scroller" data-tauri-drag-region bind:this={scroller} on:scroll={refresh} on:wheel={onWheel}>
     {#each renderGroups as g (g.key)}
       <div
         class="tool"

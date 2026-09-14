@@ -193,8 +193,8 @@
 
 <div class="app">
  <div class="shell">
-  <div class="chrome" class:mac={isMac}>
-    {#if isMac}<div class="tl-space"></div>{/if}
+  <div class="chrome" class:mac={isMac} data-tauri-drag-region>
+    {#if isMac}<div class="tl-space" data-tauri-drag-region></div>{/if}
     <TopNav />
     <button class="chrome-btn" on:click={() => (activityOpen = true)} title="History & schedules">{@html ICONS.history.svg}</button>
     <button class="chrome-btn" on:click={() => (helpOpen = true)} title="Help">{@html ICONS.help.svg}</button>
@@ -248,7 +248,10 @@
     border: none;
   }
   .tl-space {
-    width: 70px;
+    /* trafficLightPosition in tauri.conf.json is x:18 with a ~52px-wide
+       dot cluster, so 70px is the traffic lights' exact right edge —
+       zero breathing room before the "+" button. A bit of headroom. */
+    width: 82px;
     flex-shrink: 0;
     -webkit-app-region: drag;
   }
