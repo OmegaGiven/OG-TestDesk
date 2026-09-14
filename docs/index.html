@@ -1,0 +1,380 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>OG TestDesk — a free SQL client, HTTP client &amp; JSON inspector, unified</title>
+<meta name="description" content="OG TestDesk is a free, open-source desktop dev desk: SQL client, HTTP request client, and JSON inspector in one app — with a local MCP server so an AI assistant can drive it directly." />
+<link rel="icon" href="img/icon.png" />
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet" />
+<style>
+  :root {
+    --surface-0: #f1efe8;
+    --surface-1: #f9f8f4;
+    --surface-2: #ffffff;
+    --surface-3: #ecebe3;
+    --text-primary: #1a1a18;
+    --text-secondary: #5f5e5a;
+    --text-muted: #888780;
+    --border: rgba(0, 0, 0, 0.1);
+    --border-strong: rgba(0, 0, 0, 0.18);
+    --sql-tint: #e6f1fb;   --sql-text: #0c447c;
+    --req-tint: #eaf3de;   --req-text: #27500a;
+    --insp-tint: #eeedfe;  --insp-text: #3c3489;
+    --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    --font-mono: 'JetBrains Mono', 'SF Mono', Menlo, Consolas, monospace;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --surface-0: #17171a; --surface-1: #1e1e22; --surface-2: #26262b; --surface-3: #2f2f35;
+      --text-primary: #f1efe8; --text-secondary: #b4b2a9; --text-muted: #888780;
+      --border: rgba(255,255,255,0.1); --border-strong: rgba(255,255,255,0.2);
+      --sql-tint: #0c447c40;  --sql-text: #85b7eb;
+      --req-tint: #27500a44;  --req-text: #97c459;
+      --insp-tint: #3c348944; --insp-text: #afa9ec;
+    }
+  }
+  :root[data-theme="dark"] {
+    --surface-0: #17171a; --surface-1: #1e1e22; --surface-2: #26262b; --surface-3: #2f2f35;
+    --text-primary: #f1efe8; --text-secondary: #b4b2a9; --text-muted: #888780;
+    --border: rgba(255,255,255,0.1); --border-strong: rgba(255,255,255,0.2);
+    --sql-tint: #0c447c40;  --sql-text: #85b7eb;
+    --req-tint: #27500a44;  --req-text: #97c459;
+    --insp-tint: #3c348944; --insp-text: #afa9ec;
+  }
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  body {
+    margin: 0;
+    background: var(--surface-0);
+    color: var(--text-primary);
+    font-family: var(--font-sans);
+    -webkit-font-smoothing: antialiased;
+  }
+  a { color: inherit; }
+  .wrap { max-width: 1080px; margin: 0 auto; padding-inline: 20px; }
+
+  /* ---------- nav ---------- */
+  nav.top {
+    position: sticky; top: 0; z-index: 20;
+    background: color-mix(in srgb, var(--surface-0) 88%, transparent);
+    backdrop-filter: blur(8px);
+    border-bottom: 1px solid var(--border);
+  }
+  nav.top .wrap { display: flex; align-items: center; gap: 10px; padding-block: 10px; }
+  nav.top img { width: 26px; height: 26px; border-radius: 6px; }
+  nav.top .brand { font-weight: 800; font-size: 15px; }
+  nav.top .links { margin-left: auto; display: flex; gap: 18px; font-size: 13px; font-weight: 600; }
+  nav.top .links a { text-decoration: none; color: var(--text-secondary); }
+  nav.top .links a:hover { color: var(--text-primary); }
+  nav.top .gh-btn {
+    display: inline-flex; align-items: center; gap: 6px;
+    background: var(--text-primary); color: var(--surface-0);
+    padding: 6px 12px; border-radius: 999px; font-size: 12.5px; font-weight: 700;
+    text-decoration: none;
+  }
+
+  /* ---------- hero ---------- */
+  header.hero { padding-block: 72px 40px; text-align: center; position: relative; overflow: hidden; }
+  .bars {
+    position: absolute; inset: 0; z-index: -1; opacity: 0.5;
+    background:
+      radial-gradient(700px 320px at 15% -10%, var(--sql-tint), transparent 60%),
+      radial-gradient(700px 320px at 50% -10%, var(--req-tint), transparent 60%),
+      radial-gradient(700px 320px at 85% -10%, var(--insp-tint), transparent 60%);
+  }
+  .hero img.icon {
+    width: 104px; height: 104px; border-radius: 22px;
+    box-shadow: 0 12px 40px rgba(0,0,0,0.18);
+    animation: float 5s ease-in-out infinite;
+  }
+  @keyframes float { 0%,100% { transform: translateY(0); } 50% { transform: translateY(-10px); } }
+  .hero h1 { font-size: clamp(30px, 5vw, 48px); font-weight: 800; margin: 22px 0 10px; letter-spacing: -0.02em; }
+  .hero p.tag { max-width: 640px; margin: 0 auto; color: var(--text-secondary); font-size: 17px; line-height: 1.55; }
+  .hero .pillrow { display: flex; justify-content: center; gap: 10px; margin-top: 22px; flex-wrap: wrap; }
+  .pill { font-size: 12px; font-weight: 700; padding: 5px 12px; border-radius: 999px; }
+  .pill.sql { background: var(--sql-tint); color: var(--sql-text); }
+  .pill.req { background: var(--req-tint); color: var(--req-text); }
+  .pill.insp { background: var(--insp-tint); color: var(--insp-text); }
+  .cta-row { display: flex; justify-content: center; gap: 12px; margin-top: 32px; flex-wrap: wrap; }
+  .btn {
+    display: inline-flex; align-items: center; gap: 8px;
+    padding: 12px 22px; border-radius: 10px; font-weight: 700; font-size: 14.5px;
+    text-decoration: none; border: 1px solid transparent; cursor: pointer;
+  }
+  .btn.primary { background: var(--text-primary); color: var(--surface-0); }
+  .btn.primary:hover { opacity: 0.88; }
+  .btn.ghost { background: var(--surface-2); border-color: var(--border-strong); color: var(--text-primary); }
+  .btn.ghost:hover { background: var(--surface-3); }
+  .free-note { margin-top: 14px; font-size: 12.5px; color: var(--text-muted); }
+
+  /* ---------- browser frame around screenshots ---------- */
+  .frame {
+    margin-top: 46px; border-radius: 14px; overflow: hidden;
+    border: 1px solid var(--border-strong);
+    box-shadow: 0 30px 80px -20px rgba(0,0,0,0.35);
+    background: var(--surface-2);
+  }
+  .frame .bar { display: flex; gap: 6px; padding: 10px 12px; background: var(--surface-3); }
+  .frame .dot { width: 10px; height: 10px; border-radius: 50%; background: var(--border-strong); }
+  .frame img { display: block; width: 100%; }
+
+  /* ---------- feature sections ---------- */
+  section.feature { padding-block: 70px; border-top: 1px solid var(--border); }
+  section.feature .grid {
+    display: grid; grid-template-columns: 1fr 1fr; gap: 44px; align-items: center;
+  }
+  section.feature.rev .grid { direction: rtl; }
+  section.feature.rev .grid > * { direction: ltr; }
+  .feature .kicker {
+    display: inline-block; font-size: 11.5px; font-weight: 800; text-transform: uppercase;
+    letter-spacing: 0.06em; padding: 4px 10px; border-radius: 999px; margin-bottom: 14px;
+  }
+  .feature.sql .kicker { background: var(--sql-tint); color: var(--sql-text); }
+  .feature.req .kicker { background: var(--req-tint); color: var(--req-text); }
+  .feature.insp .kicker { background: var(--insp-tint); color: var(--insp-text); }
+  .feature h2 { font-size: 28px; font-weight: 800; margin: 0 0 12px; letter-spacing: -0.01em; }
+  .feature p.lead { color: var(--text-secondary); font-size: 15.5px; line-height: 1.6; margin-bottom: 18px; }
+  .feature ul { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 10px; }
+  .feature li { display: flex; gap: 10px; font-size: 14px; color: var(--text-primary); align-items: flex-start; }
+  .feature li svg { flex-shrink: 0; margin-top: 2px; }
+  .feature.sql li svg { color: var(--sql-text); }
+  .feature.req li svg { color: var(--req-text); }
+  .feature.insp li svg { color: var(--insp-text); }
+  .shot {
+    border-radius: 12px; overflow: hidden; border: 1px solid var(--border-strong);
+    box-shadow: 0 20px 50px -20px rgba(0,0,0,0.3);
+    transition: transform 0.35s ease;
+  }
+  .shot:hover { transform: translateY(-4px); }
+  .shot img { display: block; width: 100%; }
+
+  /* ---------- also-in-the-box strip ---------- */
+  section.more { padding-block: 60px; border-top: 1px solid var(--border); text-align: center; }
+  section.more h2 { font-size: 24px; font-weight: 800; margin-bottom: 8px; }
+  section.more p.lead { color: var(--text-secondary); margin-bottom: 36px; }
+  .chip-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 14px; text-align: left; }
+  .chip {
+    background: var(--surface-2); border: 1px solid var(--border); border-radius: 12px;
+    padding: 16px; transition: border-color 0.2s, transform 0.2s;
+  }
+  .chip:hover { border-color: var(--border-strong); transform: translateY(-2px); }
+  .chip .t { font-weight: 700; font-size: 13.5px; margin-bottom: 4px; }
+  .chip .d { font-size: 12.5px; color: var(--text-muted); line-height: 1.5; }
+
+  /* ---------- AI/MCP banner ---------- */
+  section.mcp {
+    margin: 60px auto; max-width: 1040px; border-radius: 18px;
+    background: linear-gradient(135deg, var(--sql-tint), var(--insp-tint));
+    padding: 46px 40px; text-align: center;
+  }
+  section.mcp h2 { font-size: 26px; font-weight: 800; margin-bottom: 10px; }
+  section.mcp p { max-width: 620px; margin: 0 auto; color: var(--text-secondary); font-size: 15px; line-height: 1.6; }
+  section.mcp code {
+    display: inline-block; margin-top: 18px; font-family: var(--font-mono); font-size: 12.5px;
+    background: var(--surface-2); border: 1px solid var(--border-strong); border-radius: 8px;
+    padding: 8px 14px;
+  }
+
+  /* ---------- support ---------- */
+  section.support { padding-block: 70px; border-top: 1px solid var(--border); text-align: center; }
+  section.support h2 { font-size: 28px; font-weight: 800; margin-bottom: 10px; }
+  section.support p { max-width: 560px; margin: 0 auto 30px; color: var(--text-secondary); font-size: 15px; line-height: 1.6; }
+  .support-row { display: flex; justify-content: center; gap: 14px; flex-wrap: wrap; }
+  .support-card {
+    width: 260px; background: var(--surface-2); border: 1px solid var(--border);
+    border-radius: 14px; padding: 26px 20px; transition: transform 0.2s, border-color 0.2s;
+    text-decoration: none; color: var(--text-primary);
+  }
+  .support-card:hover { transform: translateY(-4px); border-color: var(--border-strong); }
+  .support-card svg { margin-bottom: 12px; }
+  .support-card .t { font-weight: 700; font-size: 15px; margin-bottom: 6px; }
+  .support-card .d { font-size: 12.5px; color: var(--text-muted); line-height: 1.5; }
+
+  footer { padding-block: 34px; text-align: center; font-size: 12.5px; color: var(--text-muted); border-top: 1px solid var(--border); }
+  footer a { color: var(--text-secondary); text-decoration: none; font-weight: 600; }
+
+  @media (max-width: 760px) {
+    section.feature .grid, section.feature.rev .grid { grid-template-columns: 1fr; direction: ltr; }
+    section.feature .grid > *:first-child { order: 1; }
+  }
+</style>
+</head>
+<body>
+
+<nav class="top">
+  <div class="wrap">
+    <img src="img/icon.png" alt="" />
+    <span class="brand">OG TestDesk</span>
+    <div class="links">
+      <a href="#features">Features</a>
+      <a href="#mcp">AI / MCP</a>
+      <a href="#support">Support</a>
+    </div>
+    <a class="gh-btn" href="https://github.com/OmegaGiven/OG-TestDesk" target="_blank" rel="noopener">
+      ★ Star on GitHub
+    </a>
+  </div>
+</nav>
+
+<header class="hero">
+  <div class="bars"></div>
+  <div class="wrap">
+    <img class="icon" src="img/icon.png" alt="OG TestDesk icon" />
+    <h1>Your SQL client, HTTP client,<br />and JSON inspector — finally one app.</h1>
+    <p class="tag">
+      Free and open-source. Think TablePlus + Postman + a JSON viewer, unified,
+      with a local MCP server built in so an AI assistant can run queries,
+      send requests, and watch its own results land live in the UI.
+    </p>
+    <div class="pillrow">
+      <span class="pill sql">SQL</span>
+      <span class="pill req">Requests</span>
+      <span class="pill insp">Inspector</span>
+    </div>
+    <div class="cta-row">
+      <a class="btn primary" href="https://github.com/OmegaGiven/OG-TestDesk/releases/latest" target="_blank" rel="noopener">
+        ⬇ Download for macOS / Windows / Linux
+      </a>
+      <a class="btn ghost" href="https://github.com/OmegaGiven/OG-TestDesk" target="_blank" rel="noopener">
+        View source on GitHub
+      </a>
+    </div>
+    <p class="free-note">Apache 2.0 · no paywall · no seat licenses · no account required</p>
+
+    <div class="frame">
+      <div class="bar"><span class="dot"></span><span class="dot"></span><span class="dot"></span></div>
+      <img src="img/sql-results.png" alt="OG TestDesk SQL editor with a query result grid" />
+    </div>
+  </div>
+</header>
+
+<div id="features">
+  <section class="feature sql">
+    <div class="wrap grid">
+      <div>
+        <span class="kicker">SQL</span>
+        <h2>A real SQL client, not a query box</h2>
+        <p class="lead">
+          Postgres, MySQL, SQLite — connect with SSH tunnels or an IAM
+          token command, browse the schema tree, and edit results as
+          real UPDATE/INSERT/DELETE statements with a preview before
+          anything runs.
+        </p>
+        <ul>
+          <li><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg> CodeMirror editor — autocomplete, formatter, Run All splits scripts on <code>;</code></li>
+          <li><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg> Edit cells on a plain <code>SELECT *</code> and save real writes, with a diff preview</li>
+          <li><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg> Graphical table structure editor + dialect-aware DDL view</li>
+          <li><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg> CSV import wizard, foreign-key picker, scheduled queries</li>
+        </ul>
+      </div>
+      <div class="shot"><img src="img/sql-results.png" alt="Query results grid" /></div>
+    </div>
+  </section>
+
+  <section class="feature req rev">
+    <div class="wrap grid">
+      <div>
+        <span class="kicker">Requests</span>
+        <h2>Everything Postman has, none of the account wall</h2>
+        <p class="lead">
+          Collections, environments, Postman import/export, OAuth 2.0 /
+          Digest / AWS SigV4 auth, pre-request &amp; test scripts, a
+          cookie jar, a mock server, WebSocket and gRPC testing — all
+          running locally, nothing phoned home.
+        </p>
+        <ul>
+          <li><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg> pm.* test scripts in a sandboxed iframe, not the main app</li>
+          <li><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg> Code snippet generation — cURL, Python, JS, Node.js</li>
+          <li><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg> Proxy, custom CA, per-host client certs (mTLS)</li>
+          <li><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg> gRPC via server reflection — no <code>.proto</code> file needed</li>
+        </ul>
+      </div>
+      <div class="shot"><img src="img/requests-view.png" alt="HTTP request builder with a live JSON response" /></div>
+    </div>
+  </section>
+
+  <section class="feature insp">
+    <div class="wrap grid">
+      <div>
+        <span class="kicker">Inspector</span>
+        <h2>One JSON viewer, fed by everything else</h2>
+        <p class="lead">
+          Every SQL result and every HTTP response can be sent straight
+          into the same Tree / Table / Summary inspector — search with
+          match counts, per-node editing, and a detail panel with path,
+          type, size, and one-click copy.
+        </p>
+        <ul>
+          <li><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg> Paste-your-own-JSON standalone mode</li>
+          <li><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg> Tree, Table, and Summary views over the same data</li>
+          <li><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg> CSV / JSON export straight from the tree</li>
+        </ul>
+      </div>
+      <div class="shot"><img src="img/inspector-view.png" alt="JSON inspector tree view" /></div>
+    </div>
+  </section>
+</div>
+
+<section id="mcp" class="mcp-wrap">
+  <div class="wrap">
+    <section class="mcp">
+      <h2>Built for AI from the ground up</h2>
+      <p>
+        Point Claude, ChatGPT, or any MCP-capable client at the app's
+        local server and it can list schemas, run queries, send
+        requests, and open tabs — behind flags you control per
+        connection and server-wide. Nothing reachable by default.
+      </p>
+      <code>claude mcp add og-testdesk http://127.0.0.1:7788/sse</code>
+    </section>
+  </div>
+</section>
+
+<section class="more">
+  <div class="wrap">
+    <h2>Also in the box</h2>
+    <p class="lead">Small, real features that add up.</p>
+    <div class="chip-grid">
+      <div class="chip"><div class="t">Read-only connections</div><div class="d">Blocked at the driver level — the editor, MCP, the scheduler, everywhere.</div></div>
+      <div class="chip"><div class="t">SSH tunnels &amp; IAM tokens</div><div class="d">Shells out to system ssh; run a pre-connect command for short-lived creds.</div></div>
+      <div class="chip"><div class="t">OS keychain secrets</div><div class="d">Passwords never touch the metadata SQLite file.</div></div>
+      <div class="chip"><div class="t">Custom themes</div><div class="d">System / light / dark, plus color-coded tool navigation throughout.</div></div>
+      <div class="chip"><div class="t">Query history</div><div class="d">Auto-trimmed, cycle with Alt+↑/↓ like a shell history.</div></div>
+      <div class="chip"><div class="t">Local mock server</div><div class="d">Canned status/headers/body per route, start/stop on demand.</div></div>
+    </div>
+  </div>
+</section>
+
+<section id="support" class="support">
+  <div class="wrap">
+    <h2>Support the project</h2>
+    <p>
+      OG TestDesk is genuinely free — Apache 2.0, no paywall, no seat
+      licenses. If it's replaced Postman, TablePlus, pgAdmin, or a
+      handful of troubleshooting tools in your day-to-day, here's how
+      to help keep it moving.
+    </p>
+    <div class="support-row">
+      <a class="support-card" href="https://github.com/OmegaGiven/OG-TestDesk" target="_blank" rel="noopener">
+        <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M11.9 1.4c-5.9 0-10.6 4.8-10.6 10.6 0 4.7 3 8.6 7.3 10 .5.1.7-.2.7-.5v-1.8c-3 .6-3.6-1.4-3.6-1.4-.5-1.2-1.2-1.6-1.2-1.6-1-.6.1-.6.1-.6 1.1.1 1.6 1.1 1.6 1.1 1 1.6 2.5 1.2 3.1.9.1-.7.4-1.2.6-1.5-2.4-.3-4.9-1.2-4.9-5.3 0-1.2.4-2.1 1.1-2.9-.1-.3-.5-1.4.1-2.9 0 0 .9-.3 3 1.1a10.3 10.3 0 0 1 5.5 0c2.1-1.4 3-1.1 3-1.1.6 1.5.2 2.6.1 2.9.7.8 1.1 1.7 1.1 2.9 0 4.1-2.5 5-4.9 5.3.4.3.7.9.7 1.9v2.9c0 .3.2.6.7.5 4.3-1.4 7.3-5.4 7.3-10C22.5 6.2 17.8 1.4 11.9 1.4z"/></svg>
+        <div class="t">Star on GitHub</div>
+        <div class="d">The cheapest, fastest way to help — it's how new users find the project.</div>
+      </a>
+      <a class="support-card" href="https://github.com/sponsors/OmegaGiven" target="_blank" rel="noopener">
+        <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M20.8 4.6a5.5 5.5 0 0 0-7.8 0L12 5.6l-1-1a5.5 5.5 0 0 0-7.8 7.8l1 1L12 21l7.8-7.6 1-1a5.5 5.5 0 0 0 0-7.8Z"/></svg>
+        <div class="t">GitHub Sponsors</div>
+        <div class="d">Nothing is gated behind it — just the most direct way to fund development time.</div>
+      </a>
+    </div>
+  </div>
+</section>
+
+<footer>
+  <div class="wrap">
+    Apache 2.0 · <a href="https://github.com/OmegaGiven/OG-TestDesk" target="_blank" rel="noopener">github.com/OmegaGiven/OG-TestDesk</a>
+  </div>
+</footer>
+
+</body>
+</html>
