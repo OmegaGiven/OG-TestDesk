@@ -826,7 +826,7 @@
         </button>
         {#if sqOpen}
           <div class="sq-body">
-            <SavedQueries on:open={openSavedQuery} />
+            <SavedQueries conn={sidebarConn} on:open={openSavedQuery} />
           </div>
         {/if}
       </div>

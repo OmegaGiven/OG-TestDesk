@@ -17,21 +17,53 @@
 
   const dispatch = createEventDispatcher();
 
+  // Which connection's schema tree is showing next to this panel — a
+  // saved query is almost always specific to the DB it was written
+  // against (table/column names won't even exist elsewhere), so by
+  // default this list only shows queries saved for that connection
+  // (plus ones saved with no connection at all — "New query" starts
+  // that way until you run/save it against something). "Show all" opts
+  // back into the old unfiltered view; remembered per-browser like the
+  // sidebar width.
+  export let conn = null;
+
+  const SHOW_ALL_KEY = 'ogtestdesk.sql.savedQueriesShowAll';
+  let showAll = (() => {
+    try {
+      return localStorage.getItem(SHOW_ALL_KEY) === '1';
+    } catch {
+      return false;
+    }
+  })();
+  function toggleShowAll() {
+    showAll = !showAll;
+    try {
+      localStorage.setItem(SHOW_ALL_KEY, showAll ? '1' : '0');
+    } catch {}
+  }
+
   let filter = '';
   const collapsed = writable(new Set());
   const dragOver = writable(null);
   let drag = null; // { kind: 'q'|'f', id }
 
+  // The store handed into FolderNode's context — visible queries only.
+  const visibleQueries = writable([]);
+  $: visibleQueries.set(
+    showAll || !conn ? $savedQueries : $savedQueries.filter((q) => !q.connection_id || q.connection_id === conn.id)
+  );
+  $: hiddenCount = conn && !showAll ? $savedQueries.length - $visibleQueries.length : 0;
+
   $: rootFolders = $savedQueryFolders
     .filter((f) => !f.parent_id)
     .sort((a, b) => a.sort_order - b.sort_order || a.name.localeCompare(b.name));
-  $: rootQueries = $savedQueries
+  $: rootQueries = $visibleQueries
     .filter((q) => !q.folder_id)
     .sort((a, b) => a.sort_order - b.sort_order || a.name.localeCompare(b.name));
 
   // flat filtered view
   $: matches = filter.trim()
-    ? $savedQueries.filter((s) =>
+    ? $visibleQueries.filter((s) =>
         `${folderPath(s.folder_id)} ${s.name} ${s.sql_text}`
           .toLowerCase()
           .includes(filter.trim().toLowerCase())
@@ -197,7 +229,7 @@
 
   setContext('sqtree', {
     folders: savedQueryFolders,
-    queries: savedQueries,
+    queries: visibleQueries,
     collapsed,
     dragOver,
     toggle,
@@ -222,6 +254,13 @@
     <button class="icon-btn" title="New folder" on:click={() => newFolder(null)}>{@html ICONS.newFolder.svg}</button>
     <button class="icon-btn" title="Refresh" on:click={reload}>{@html ICONS.refresh.svg}</button>
   </div>
+  {#if conn && hiddenCount > 0}
+    <button class="hidden-hint" on:click={toggleShowAll}>
+      {hiddenCount} hidden from other connections — show all
+    </button>
+  {:else if conn && showAll}
+    <button class="hidden-hint" on:click={toggleShowAll}> Showing all connections — show {connName(conn.id) || 'this one'} only </button>
+  {/if}
 
   <div
     class="sq-scroll"
@@ -280,6 +319,22 @@
     flex: 1;
     padding: 6px 8px;
     font-size: 11.5px;
+  }
+  .hidden-hint {
+    display: block;
+    width: 100%;
+    text-align: left;
+    background: none;
+    border: none;
+    border-bottom: 1px solid var(--border);
+    cursor: pointer;
+    padding: 5px 8px;
+    font-size: 10.5px;
+    color: var(--text-muted);
+  }
+  .hidden-hint:hover {
+    background: var(--surface-3);
+    color: var(--text-secondary);
   }
   .sq-scroll {
     overflow: auto;
