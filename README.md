@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="src-tauri/icons/icon.png" width="128" alt="OG TestDesk">
+ <img width="512" height="512" alt="icon" src="https://github.com/user-attachments/assets/600a2945-c450-4729-b170-db097dbd173b" />
 </p>
 
 <h1 align="center">OG TestDesk</h1>
