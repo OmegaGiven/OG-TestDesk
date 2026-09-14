@@ -268,7 +268,7 @@
                 <div class="rel-row">
                   <button class="node rel" on:click={() => toggleRel(schema.name, rel.name)}>
                     <span class="chev"
-                      >{openRels.has(`${schema.name}.${rel.name}`)
+                      >{@html openRels.has(`${schema.name}.${rel.name}`)
                         ? ICONS.expandOpen.svg
                         : ICONS.expandClosed.svg}</span
                     >
