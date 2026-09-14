@@ -1049,6 +1049,7 @@
 />
 
 <div class="rq">
+  {#if $requestTabs.length}
   <aside class="sidebar" style="width:{sidebarW}px">
     <div class="sec-head">
       <span>Collections</span>
@@ -1142,6 +1143,7 @@
   </aside>
 
   <div class="sidebar-resizer" on:mousedown={startSidebarDrag} role="separator" tabindex="-1"></div>
+  {/if}
 
   <section class="main">
     {#if $requestTabs.length === 0}
