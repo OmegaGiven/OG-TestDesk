@@ -58,12 +58,21 @@ jobs:
       - working-directory: frontend
         run: pnpm install --frozen-lockfile
 
-      # No code-signing/notarization secrets configured yet — these
-      # builds are unsigned (macOS Gatekeeper / Windows SmartScreen will
-      # warn). See docs/next-steps.md.
+      # macOS signing/notarization: only active once the 5 APPLE_* repo
+      # secrets below are set (Settings > Secrets and variables > Actions).
+      # Until then these env vars are empty and tauri-action silently
+      # skips signing — Windows/Linux builds are unaffected either way.
+      # Windows: still unsigned (no code-signing cert configured); build
+      # will warn via SmartScreen. See docs/next-steps.md.
       - uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         with:
           tagName: ${{ github.ref_name }}
           releaseName: 'OG TestDesk ${{ github.ref_name }}'
