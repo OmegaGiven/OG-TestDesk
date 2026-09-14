@@ -574,10 +574,18 @@
     touchSqlTab(t.id, { sql_text: text, dirty: true });
   }
 
-  // Table-name completion for the SQL editor (`{ table: [] }` — no
-  // column-level data, which would mean eagerly fetching columns for
-  // every table in the schema). Cached per connection so switching
-  // between tabs on the same connection doesn't refetch.
+  // Table-name + column completion for the SQL editor: `{ table: [cols] }`
+  // and `{ "schema.table": [cols] }`, which CodeMirror's SQL completion
+  // uses both for `FROM`/`JOIN` table names and for `alias.<col>` /
+  // `table.<col>` completion after a dot. Table names show up
+  // immediately; column lists backfill a moment later once fetched (a
+  // second, distinct object is assigned so CodeEditor's reactive
+  // `schema` prop actually picks up the change — mutating the map in
+  // place wouldn't). Cached per connection so switching between tabs on
+  // the same connection doesn't refetch. Column fetch is skipped above
+  // a sane relation count so a huge schema doesn't fire hundreds of
+  // requests at once — table-name-only completion still works either way.
+  const MAX_RELATIONS_FOR_COLUMN_COMPLETION = 300;
   let autocompleteSchema = null;
   let autocompleteCache = {};
   $: if (tabConn) loadAutocompleteSchema(tabConn);
@@ -589,14 +597,32 @@
     try {
       const schemas = await api.schemasList(conn);
       const map = {};
+      const rels = [];
       for (const s of schemas) {
         for (const r of s.relations || []) {
           map[r.name] = [];
           map[`${s.name}.${r.name}`] = [];
+          rels.push({ schemaName: s.name, relName: r.name });
         }
       }
       autocompleteCache[conn.id] = map;
       if (tabConn?.id === conn.id) autocompleteSchema = map;
+
+      if (rels.length > 0 && rels.length <= MAX_RELATIONS_FOR_COLUMN_COMPLETION) {
+        const results = await Promise.allSettled(
+          rels.map((r) => api.columnsList(conn, r.schemaName, r.relName))
+        );
+        results.forEach((res, i) => {
+          if (res.status !== 'fulfilled') return;
+          const cols = res.value.map((c) => c.name);
+          const { schemaName, relName } = rels[i];
+          map[relName] = cols;
+          map[`${schemaName}.${relName}`] = cols;
+        });
+        const filled = { ...map };
+        autocompleteCache[conn.id] = filled;
+        if (tabConn?.id === conn.id) autocompleteSchema = filled;
+      }
     } catch {
       // Best-effort — plain keyword completion still works without this.
     }
