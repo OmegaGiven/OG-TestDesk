@@ -1,7 +1,7 @@
 <script>
   import JsonNode from './JsonNode.svelte';
   import ChartView from './ChartView.svelte';
-  import { inspectorPayload, toast } from '../stores.js';
+  import { inspectorPayload, toast, sendToInspector } from '../stores.js';
   import { ICONS } from '../icons.js';
   import { downloadText, copyText, rowsToDelimited } from '../export.js';
 
@@ -86,6 +86,32 @@
       return null;
     }
   }
+  // ---- open a local .json file, same idea as Paste JSON but from disk.
+  // Loads through the normal `inspectorPayload` path (not rawMode) so it
+  // behaves exactly like a SQL result or HTTP response sent here —
+  // works in every mode (Tree/Table/Summary/Chart), not just Raw.
+  let fileInputEl;
+  function openFilePicker() {
+    fileInputEl?.click();
+  }
+  function onFileChosen(e) {
+    const file = e.target.files?.[0];
+    e.target.value = ''; // so choosing the same file again still fires 'change'
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      try {
+        const parsed = JSON.parse(String(reader.result));
+        sendToInspector('file', file.name, parsed);
+        rawMode = false;
+      } catch (err) {
+        toast(`${file.name} isn't valid JSON: ${err.message}`, 'error');
+      }
+    };
+    reader.onerror = () => toast(`Couldn't read ${file.name}`, 'error');
+    reader.readAsText(file);
+  }
+
   function prettify() {
     try {
       rawText = JSON.stringify(JSON.parse(rawText), null, 2);
@@ -372,6 +398,14 @@
         <button class="btn ghost sm" title="Copy pretty JSON" on:click={() => doExport('copy')}>{@html ICONS.copy.svg}</button>
       </span>
     {/if}
+    <button class="btn ghost sm" on:click={openFilePicker}>Open file…</button>
+    <input
+      type="file"
+      accept=".json,application/json"
+      bind:this={fileInputEl}
+      on:change={onFileChosen}
+      style="display:none"
+    />
     <button class="btn ghost sm" class:active={rawMode} on:click={() => (rawMode = !rawMode)}>
       {rawMode ? '← Loaded data' : 'Paste JSON'}
     </button>
@@ -394,7 +428,7 @@
         {#if !rawMode}
           <div class="empty">
             Run a SQL query or send a request, then choose <b>→ Inspector</b>.<br />
-            Or use <b>Paste JSON</b> above.
+            Or <b>Open file…</b> / <b>Paste JSON</b> above.
           </div>
         {/if}
       {:else if mode === 'tree'}
