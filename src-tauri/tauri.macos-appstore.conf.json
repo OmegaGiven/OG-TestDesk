@@ -5,7 +5,10 @@
     "targets": ["app"],
     "macOS": {
       "entitlements": "entitlements-appstore.plist",
-      "signingIdentity": "Apple Distribution: Nathan Johnson (FGFW7ZAJUC)"
+      "signingIdentity": "Apple Distribution: Nathan Johnson (FGFW7ZAJUC)",
+      "files": {
+        "embedded.provisionprofile": "AppStore.provisionprofile"
+      }
     }
   }
 }

@@ -26,3 +26,6 @@ src-tauri/*.json
 !src-tauri/tauri.conf.json
 !src-tauri/tauri.macos-appstore.conf.json
 !src-tauri/capabilities/*.json
+
+# Written at CI time by appstore.yml — never committed
+src-tauri/AppStore.provisionprofile

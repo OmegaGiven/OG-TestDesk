@@ -78,6 +78,13 @@ jobs:
           mkdir -p "$HOME/Library/MobileDevice/Provisioning Profiles"
           echo "$APPLE_PROVISIONING_PROFILE" | base64 --decode \
             > "$HOME/Library/MobileDevice/Provisioning Profiles/og-testdesk.provisionprofile"
+          # Also drop a copy where tauri.macos-appstore.conf.json's
+          # bundle.macOS.files expects it, so the bundler actually embeds
+          # it as Contents/embedded.provisionprofile — installing it to
+          # the OS's profile directory alone isn't enough; Apple's own
+          # validation rejects an upload missing the embedded copy.
+          echo "$APPLE_PROVISIONING_PROFILE" | base64 --decode \
+            > src-tauri/AppStore.provisionprofile
 
       - name: Build the sandboxed .app
         env:
