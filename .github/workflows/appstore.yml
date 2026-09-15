@@ -45,6 +45,8 @@ jobs:
       - working-directory: frontend
         run: pnpm install --frozen-lockfile && pnpm build
 
+      - run: cargo install tauri-cli --version "^2" --locked
+
       - name: Import signing certs into a temporary keychain
         env:
           APPLE_DIST_CERTIFICATE: ${{ secrets.APPLE_DIST_CERTIFICATE }}
