@@ -1,17 +1,12 @@
 name: Mac App Store build
 
-# Manual for now — there's no App Store Connect listing yet, so this
-# just produces a signed, submittable .pkg as a downloadable workflow
-# artifact (Actions tab → this run → Artifacts). Once there's an app
-# record in App Store Connect, add an upload step (Transporter /
-# `xcrun altool --upload-app`) and wire this to run on `v*` tags too.
-#
-# Needs a provisioning profile too (not set up yet — see
-# docs/next-steps.md): codesign will likely still succeed without one
-# (App Sandbox entitlements embed directly), but real App Store
-# submission validation will reject the .pkg until one's added as the
-# APPLE_PROVISIONING_PROFILE secret (base64 of the .provisionprofile
-# file) and installed below.
+# Manual for now (workflow_dispatch) — builds, signs, wraps into a .pkg,
+# and (once HAS_APPSTORE_UPLOAD is set) uploads straight to App Store
+# Connect via `xcrun altool`, using an API key (APPLE_API_KEY /
+# APPLE_API_KEY_ID / APPLE_API_ISSUER repo secrets) — no Mac hardware
+# needed anywhere, GitHub's macos-latest runner is a real Mac. Once
+# there's an app record in App Store Connect this can be wired to run
+# on `v*` tags too, same as release.yml.
 on:
   workflow_dispatch:
 
@@ -114,3 +109,19 @@ jobs:
           name: OGTestDesk-appstore-pkg
           path: OGTestDesk-appstore.pkg
           retention-days: 14
+
+      - name: Upload to App Store Connect
+        if: ${{ vars.HAS_APPSTORE_UPLOAD == 'true' }}
+        env:
+          APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
+          APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+        run: |
+          set -euo pipefail
+          mkdir -p "$HOME/.appstoreconnect/private_keys"
+          echo "$APPLE_API_KEY" > "$HOME/.appstoreconnect/private_keys/AuthKey_${APPLE_API_KEY_ID}.p8"
+          xcrun altool --upload-app \
+            -f OGTestDesk-appstore.pkg \
+            -t macos \
+            --apiKey "$APPLE_API_KEY_ID" \
+            --apiIssuer "$APPLE_API_ISSUER"
