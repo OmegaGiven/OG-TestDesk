@@ -66,20 +66,43 @@ release, roughly in priority order.
         the Apple Distribution signing identity, and `bundle.targets:
         ["app"]` (no dmg/updater for this target). Build with:
         `cargo tauri build --config tauri.macos-appstore.conf.json --features app-store`.
-      Still needed before actual submission:
-      - **Mac Installer Distribution cert** (separate from Apple
-        Distribution — signs the `.pkg`, not the `.app`) + wrapping the
-        signed `.app` with `productbuild` (Tauri doesn't produce an
-        App-Store-ready `.pkg` itself).
-      - A provisioning profile tied to the App ID.
-      - App Store Connect: app record, screenshots, privacy nutrition
-        label, export-compliance questionnaire (app uses
-        XChaCha20-Poly1305 + TLS — likely exempt but must be declared),
-        and the actual upload (Transporter or `xcrun altool`).
-      - Review-notes heads-up: a reviewer will likely ask about the
-        local MCP server binding a port — have a plain-English answer
-        ready (single-user local app, off by default, explicit
-        per-connection ACLs).
+      - [x] **Mac Installer Distribution cert** — set (`APPLE_INSTALLER_*`
+        secrets), `productbuild` wraps the signed `.app` into a `.pkg`.
+      - [x] **Provisioning profile** — `OG TestDesk Mac App Store`,
+        embedded via `bundle.macOS.files` (`embedded.provisionprofile`
+        inside `Contents/`, not just installed to the OS profile dir —
+        that alone wasn't enough, Apple's validation rejected it).
+      - [x] `bundle.category: "DeveloperTool"` in the base
+        `tauri.conf.json` — Apple's server-side validation rejected the
+        first real upload attempt over a missing
+        `LSApplicationCategoryType` in Info.plist.
+      - [x] `.github/workflows/appstore.yml` now uploads straight to App
+        Store Connect via `xcrun altool --upload-app`, authenticated
+        with an API key (`APPLE_API_KEY`/`_ID`/`_ISSUER` secrets) — runs
+        entirely on GitHub's macOS runner, no Mac hardware anywhere.
+        `HAS_APPSTORE_UPLOAD` repo variable gates it on.
+      - [x] The MAS build's `version` is overridden to a plain `0.2.0`
+        in `tauri.macos-appstore.conf.json` — `CFBundleShortVersionString`
+        can't carry a semver pre-release suffix; the real workspace
+        version (GitHub releases, changelog) is untouched.
+      - [x] `docs/img/appstore/icon-1024.png` — the 1024×1024, no-alpha
+        App Store icon (Apple's separate requirement from the in-app
+        icon set; flattened from the same source, no code change).
+      - [x] `docs/privacy.html` — privacy policy page (no telemetry, no
+        account, nothing leaves the machine except what the user
+        explicitly configures), linked from the landing page footer;
+        URL: https://omegagiven.github.io/OG-TestDesk/privacy.html
+      - [x] Export compliance: answered "uses standard encryption
+        algorithms" (TLS + XChaCha20-Poly1305, not proprietary, not
+        solely Apple's OS crypto) — qualifies for the standard
+        exemption, no CCATS/self-classification report needed.
+      - **Submitted for App Review 2026-09-15.** First real build
+        (`0.2.0`) uploaded clean — `UPLOAD SUCCEEDED with no errors,
+        1 warning` (the one warning is TestFlight-only, doesn't block
+        App Store review). Watch for a reviewer question about the
+        local MCP server binding a port — answer ready: single-user
+        local app, off by default, explicit per-connection ACLs, binds
+        127.0.0.1 only (not reachable from the network).
 - [ ] `cargo fmt` / `cargo clippy` are wired into CI as informational
       only (`continue-on-error`) since the codebase isn't currently
       clean under either — decide whether to actually run
