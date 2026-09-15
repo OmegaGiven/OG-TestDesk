@@ -106,6 +106,17 @@ fn window_environment() -> serde_json::Value {
     })
 }
 
+/// Build-time capability flags the frontend can't otherwise detect — right
+/// now just whether this is the Mac App Store build (App Sandbox), where
+/// the pre-connect-command field is unavailable (arbitrary shell exec).
+/// Hiding the field there beats showing one that just errors when used.
+#[tauri::command]
+fn app_capabilities() -> serde_json::Value {
+    serde_json::json!({
+        "preConnectCmd": !cfg!(feature = "app-store"),
+    })
+}
+
 // ----------------------------------------------------------------- connections
 
 #[tauri::command]
@@ -1080,6 +1091,7 @@ async fn main() {
         })
         .invoke_handler(tauri::generate_handler![
             window_environment,
+            app_capabilities,
             connections_list,
             connection_save,
             connection_delete,

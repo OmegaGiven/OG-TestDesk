@@ -7,6 +7,9 @@ const call = (cmd, args) => invoke(cmd, args);
 export const api = {
   // window / environment
   windowEnvironment: () => call('window_environment'),
+  // Build-time capability flags (e.g. { preConnectCmd: false } in the Mac
+  // App Store build, where arbitrary shell exec is sandboxed out).
+  appCapabilities: () => call('app_capabilities'),
 
   // connections
   connectionsList: () => call('connections_list'),

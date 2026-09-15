@@ -24,4 +24,5 @@ src-tauri/*.csv
 src-tauri/*.tsv
 src-tauri/*.json
 !src-tauri/tauri.conf.json
+!src-tauri/tauri.macos-appstore.conf.json
 !src-tauri/capabilities/*.json

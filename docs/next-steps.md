@@ -33,20 +33,49 @@ release, roughly in priority order.
       exec for IAM-style tokens) is a separate, deliberate feature and
       is still not sandbox-compatible — disable it in the MAS build
       rather than trying to sandbox arbitrary shell exec.
-- [ ] Mac App Store submission — remaining work, now that the SSH
-      blocker is gone:
-      - **Apple Distribution cert** (not Developer ID) + an **App ID**
-        with App Sandbox capability + a provisioning profile.
-      - **Entitlements**: `com.apple.security.network.server` for the
-        local MCP server's port; sandboxed file access (native file
-        picker + security-scoped bookmarks) in place of the mock
-        server's/CSV import's arbitrary paths; disable
-        `pre_connect_cmd` (see above) for this build target.
-      - A second Tauri bundle target (entitlements.plist wired in) —
-        the direct-download build stays full-featured/unsandboxed.
-      - App Store Connect: app record, bundle ID, screenshots, privacy
-        nutrition label, export-compliance questionnaire (app uses
-        XChaCha20-Poly1305 + TLS — likely exempt but must be declared).
+- [x] Mac App Store: cert + App ID + entitlements + build config — done.
+      - **Apple Distribution cert**: `APPLE_DIST_CERTIFICATE`,
+        `APPLE_DIST_CERTIFICATE_PASSWORD`, `APPLE_DIST_SIGNING_IDENTITY`
+        repo secrets set (not wired into `release.yml` yet — that's a
+        manual/local build for now, see below).
+      - **App ID** registered: `com.omegagiven.ogtestdesk` (matches
+        `tauri.conf.json`'s `identifier`), Team `FGFW7ZAJUC`.
+      - Re-audited the actual sandbox concerns instead of assuming: CSV
+        import already uses a native `<input type="file">` (sandbox-safe
+        by construction — the OS grants access to whatever the user
+        picks), the MCP server's `save_sql_file` is already confined to
+        `app_data_dir/exports` (sandbox-safe automatically, no code
+        change needed), and the mock server has **no filesystem access
+        at all** — canned responses live in the metadata DB. The only
+        real blocker was `pre_connect_cmd`'s shell exec (SSH tunnel was
+        the other one, already fixed above).
+      - `core`'s new `app-store` Cargo feature (`src-tauri` passes it
+        through) disables `pre_connect_cmd` at compile time with a clear
+        runtime error if a connection still has one configured; a new
+        `app_capabilities` command + `ConnectionModal.svelte` check
+        hides that form field in that build instead of showing one that
+        errors. Verified both feature states (`cargo check` with and
+        without `--features app-store`) compile clean.
+      - `src-tauri/entitlements-appstore.plist`: `app-sandbox`,
+        `network.client` (outbound DB/HTTP/SSH/gRPC),
+        `network.server` (MCP + mock server's local ports),
+        `files.user-selected.read-write` + `files.downloads.read-write`
+        (CSV import's file picker, "Save .sql file"'s blob download).
+      - `src-tauri/tauri.macos-appstore.conf.json`: a config override
+        (deep-merges over the base config) wiring the entitlements file,
+        the Apple Distribution signing identity, and `bundle.targets:
+        ["app"]` (no dmg/updater for this target). Build with:
+        `cargo tauri build --config tauri.macos-appstore.conf.json --features app-store`.
+      Still needed before actual submission:
+      - **Mac Installer Distribution cert** (separate from Apple
+        Distribution — signs the `.pkg`, not the `.app`) + wrapping the
+        signed `.app` with `productbuild` (Tauri doesn't produce an
+        App-Store-ready `.pkg` itself).
+      - A provisioning profile tied to the App ID.
+      - App Store Connect: app record, screenshots, privacy nutrition
+        label, export-compliance questionnaire (app uses
+        XChaCha20-Poly1305 + TLS — likely exempt but must be declared),
+        and the actual upload (Transporter or `xcrun altool`).
       - Review-notes heads-up: a reviewer will likely ask about the
         local MCP server binding a port — have a plain-English answer
         ready (single-user local app, off by default, explicit

@@ -4,6 +4,14 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 
+[features]
+# Built for Mac App Store distribution, under App Sandbox: disables the
+# one feature that's fundamentally incompatible with it — pre_connect_cmd's
+# arbitrary shell exec (IAM-style short-lived credential fetches). Every
+# other sandbox concern (SSH tunnel, file access, the MCP server's local
+# port) is already sandbox-safe; see docs/next-steps.md.
+app-store = []
+
 [dependencies]
 tokio.workspace = true
 serde.workspace = true

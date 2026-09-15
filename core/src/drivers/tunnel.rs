@@ -22,11 +22,14 @@ use russh_keys::{check_known_hosts_path, learn_known_hosts_path, load_secret_key
 use std::collections::HashMap;
 use std::net::TcpListener as StdTcpListener;
 use std::path::PathBuf;
+#[cfg(not(feature = "app-store"))]
 use std::process::Stdio;
 use std::sync::{Arc, Mutex};
+#[cfg(not(feature = "app-store"))]
 use std::time::Duration;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
+#[cfg(not(feature = "app-store"))]
 use tokio::process::Command;
 use tokio::sync::oneshot;
 
@@ -272,8 +275,22 @@ pub async fn effective_host_port(cfg: &ConnConfig) -> Result<(String, u16)> {
 /// shell access, for IAM-style short-lived credential fetches) — not the
 /// same sandboxing concern as the SSH tunnel above, and stays as a plain
 /// `Command`. It's still incompatible with App Sandbox, same as the old
-/// SSH exec was; the Mac App Store build disables this feature (see
-/// docs/next-steps.md) rather than trying to sandbox arbitrary shell exec.
+/// SSH exec was; the `app-store` feature disables it outright (arbitrary
+/// shell exec isn't something to sandbox around, it's just unavailable
+/// in that build) rather than trying to sandbox arbitrary shell exec.
+#[cfg(feature = "app-store")]
+pub async fn resolve_password(cfg: &ConnConfig, stored: Option<&str>) -> Result<Option<String>> {
+    if cfg.pre_connect_cmd.as_deref().is_some_and(|c| !c.trim().is_empty()) {
+        bail!(
+            "this connection uses a pre-connect command, which isn't available in the \
+             Mac App Store build (App Sandbox forbids arbitrary shell exec) — \
+             clear it in Edit connection, or use the direct-download build instead"
+        );
+    }
+    Ok(stored.map(|s| s.to_string()))
+}
+
+#[cfg(not(feature = "app-store"))]
 pub async fn resolve_password(cfg: &ConnConfig, stored: Option<&str>) -> Result<Option<String>> {
     let Some(cmd_text) = cfg.pre_connect_cmd.as_deref().filter(|c| !c.trim().is_empty()) else {
         return Ok(stored.map(|s| s.to_string()));

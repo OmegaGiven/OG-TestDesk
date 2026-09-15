@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <!-- Required for any Mac App Store submission. -->
+  <key>com.apple.security.app-sandbox</key>
+  <true/>
+
+  <!-- Outbound connections: Postgres/MySQL drivers, HTTP requests,
+       OAuth flows, the SSH tunnel (pure-Rust, russh — see
+       core/src/drivers/tunnel.rs), gRPC reflection. -->
+  <key>com.apple.security.network.client</key>
+  <true/>
+
+  <!-- Inbound: the local MCP server and the local mock server both
+       bind 127.0.0.1 ports. -->
+  <key>com.apple.security.network.server</key>
+  <true/>
+
+  <!-- CSV import already uses a native <input type="file"> (WKWebView's
+       own picker) — sandbox-safe by construction, the OS grants access
+       to whatever the user picks. This entitlement covers that grant
+       plus any other user-initiated open/save panel. -->
+  <key>com.apple.security.files.user-selected.read-write</key>
+  <true/>
+
+  <!-- "Save this query to a .sql file" and CSV export both go through a
+       plain browser blob download (export.js's downloadText) rather
+       than a native save panel — this is what lets a sandboxed WKWebView
+       download land in ~/Downloads without a broader files entitlement. -->
+  <key>com.apple.security.files.downloads.read-write</key>
+  <true/>
+</dict>
+</plist>

@@ -7,6 +7,11 @@ license.workspace = true
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
 
+[features]
+# Passed through to og_testdesk_core for the Mac App Store build:
+# `cargo tauri build --features app-store` (see docs/next-steps.md).
+app-store = ["og_testdesk_core/app-store"]
+
 [dependencies]
 tauri = { version = "2", features = [] }
 tauri-plugin-shell = "2"

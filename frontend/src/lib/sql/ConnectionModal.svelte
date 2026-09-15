@@ -2,10 +2,20 @@
   import Modal from '../components/Modal.svelte';
   import { api } from '../api.js';
   import { reloadConnections, toast, toastError, confirmDialog } from '../stores.js';
-  import { createEventDispatcher } from 'svelte';
+  import { createEventDispatcher, onMount } from 'svelte';
 
   export let existing = null;
   const dispatch = createEventDispatcher();
+
+  // Mac App Store build sandboxes out arbitrary shell exec — hide the
+  // field rather than show one that just errors when used.
+  let preConnectCmdAvailable = true;
+  onMount(async () => {
+    try {
+      const caps = await api.appCapabilities();
+      preConnectCmdAvailable = caps.preConnectCmd !== false;
+    } catch {}
+  });
 
   const DOT_COLORS = [
     'var(--conn-red)', 'var(--conn-amber)', 'var(--conn-teal)', 'var(--conn-pink)',
@@ -251,15 +261,17 @@
   </button>
   {#if showAdvanced}
     <div class="adv">
-      <div class="field">
-        <label for="precmd">Pre-connect command <span class="muted">(stdout becomes the password)</span></label>
-        <input
-          id="precmd"
-          class="input mono"
-          bind:value={form.pre_connect_cmd}
-          placeholder="aws rds generate-db-auth-token --hostname ... --username ..."
-        />
-      </div>
+      {#if preConnectCmdAvailable}
+        <div class="field">
+          <label for="precmd">Pre-connect command <span class="muted">(stdout becomes the password)</span></label>
+          <input
+            id="precmd"
+            class="input mono"
+            bind:value={form.pre_connect_cmd}
+            placeholder="aws rds generate-db-auth-token --hostname ... --username ..."
+          />
+        </div>
+      {/if}
       {#if !isSqlite}
         <div class="row">
           <div class="field" style="flex:2">

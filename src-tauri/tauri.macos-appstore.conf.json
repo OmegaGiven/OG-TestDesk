@@ -1,0 +1,10 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "bundle": {
+    "targets": ["app"],
+    "macOS": {
+      "entitlements": "entitlements-appstore.plist",
+      "signingIdentity": "Apple Distribution: Nathan Johnson (FGFW7ZAJUC)"
+    }
+  }
+}
