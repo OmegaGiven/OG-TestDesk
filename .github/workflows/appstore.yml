@@ -1,0 +1,114 @@
+name: Mac App Store build
+
+# Manual for now — there's no App Store Connect listing yet, so this
+# just produces a signed, submittable .pkg as a downloadable workflow
+# artifact (Actions tab → this run → Artifacts). Once there's an app
+# record in App Store Connect, add an upload step (Transporter /
+# `xcrun altool --upload-app`) and wire this to run on `v*` tags too.
+#
+# Needs a provisioning profile too (not set up yet — see
+# docs/next-steps.md): codesign will likely still succeed without one
+# (App Sandbox entitlements embed directly), but real App Store
+# submission validation will reject the .pkg until one's added as the
+# APPLE_PROVISIONING_PROFILE secret (base64 of the .provisionprofile
+# file) and installed below.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-darwin,x86_64-apple-darwin
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: '. -> target'
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 12
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+          cache-dependency-path: frontend/pnpm-lock.yaml
+
+      - working-directory: frontend
+        run: pnpm install --frozen-lockfile && pnpm build
+
+      - name: Import signing certs into a temporary keychain
+        env:
+          APPLE_DIST_CERTIFICATE: ${{ secrets.APPLE_DIST_CERTIFICATE }}
+          APPLE_DIST_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_DIST_CERTIFICATE_PASSWORD }}
+          APPLE_INSTALLER_CERTIFICATE: ${{ secrets.APPLE_INSTALLER_CERTIFICATE }}
+          APPLE_INSTALLER_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_INSTALLER_CERTIFICATE_PASSWORD }}
+          KEYCHAIN_PASSWORD: ${{ github.run_id }}${{ github.run_attempt }}
+        run: |
+          set -euo pipefail
+          security create-keychain -p "$KEYCHAIN_PASSWORD" build.keychain
+          security default-keychain -s build.keychain
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" build.keychain
+          security set-keychain-settings -t 3600 -u build.keychain
+
+          echo "$APPLE_DIST_CERTIFICATE" | base64 --decode > dist.p12
+          security import dist.p12 -k build.keychain -P "$APPLE_DIST_CERTIFICATE_PASSWORD" \
+            -T /usr/bin/codesign -T /usr/bin/productbuild
+          rm dist.p12
+
+          echo "$APPLE_INSTALLER_CERTIFICATE" | base64 --decode > installer.p12
+          security import installer.p12 -k build.keychain -P "$APPLE_INSTALLER_CERTIFICATE_PASSWORD" \
+            -T /usr/bin/codesign -T /usr/bin/productbuild
+          rm installer.p12
+
+          security set-key-partition-list -S apple-tool:,apple:,codesign:,productbuild: \
+            -s -k "$KEYCHAIN_PASSWORD" build.keychain
+
+      - name: Install provisioning profile
+        if: ${{ vars.HAS_PROVISIONING_PROFILE == 'true' }}
+        env:
+          APPLE_PROVISIONING_PROFILE: ${{ secrets.APPLE_PROVISIONING_PROFILE }}
+        run: |
+          set -euo pipefail
+          mkdir -p "$HOME/Library/MobileDevice/Provisioning Profiles"
+          echo "$APPLE_PROVISIONING_PROFILE" | base64 --decode \
+            > "$HOME/Library/MobileDevice/Provisioning Profiles/og-testdesk.provisionprofile"
+
+      - name: Build the sandboxed .app
+        env:
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_DIST_SIGNING_IDENTITY }}
+        run: |
+          cargo tauri build \
+            --target universal-apple-darwin \
+            --config src-tauri/tauri.macos-appstore.conf.json \
+            --features app-store \
+            --bundles app
+
+      - name: Wrap into a signed .pkg (productbuild)
+        env:
+          APPLE_INSTALLER_SIGNING_IDENTITY: ${{ secrets.APPLE_INSTALLER_SIGNING_IDENTITY }}
+        run: |
+          set -euo pipefail
+          app_path=$(find target/universal-apple-darwin/release/bundle/macos -maxdepth 1 -name '*.app' | head -1)
+          if [ -z "$app_path" ]; then
+            echo "::error::no .app bundle found under target/universal-apple-darwin/release/bundle/macos"
+            exit 1
+          fi
+          echo "Found: $app_path"
+          productbuild --component "$app_path" /Applications \
+            --sign "$APPLE_INSTALLER_SIGNING_IDENTITY" \
+            OGTestDesk-appstore.pkg
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: OGTestDesk-appstore-pkg
+          path: OGTestDesk-appstore.pkg
+          retention-days: 14
