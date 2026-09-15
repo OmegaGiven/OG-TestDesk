@@ -1,0 +1,156 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Privacy Policy — OG TestDesk</title>
+<meta name="description" content="OG TestDesk's privacy policy: no telemetry, no analytics, no account, nothing leaves your machine except the connections and requests you explicitly make." />
+<link rel="icon" href="img/icon.png" />
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&display=swap" rel="stylesheet" />
+<style>
+  :root {
+    --surface-0: #f1efe8;
+    --surface-1: #f9f8f4;
+    --surface-2: #ffffff;
+    --surface-3: #ecebe3;
+    --text-primary: #1a1a18;
+    --text-secondary: #5f5e5a;
+    --text-muted: #888780;
+    --border: rgba(0, 0, 0, 0.1);
+    --border-strong: rgba(0, 0, 0, 0.18);
+    --sql-text: #0c447c;
+    --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --surface-0: #17171a; --surface-1: #1e1e22; --surface-2: #26262b; --surface-3: #2f2f35;
+      --text-primary: #f1efe8; --text-secondary: #b4b2a9; --text-muted: #888780;
+      --border: rgba(255,255,255,0.1); --border-strong: rgba(255,255,255,0.2);
+      --sql-text: #85b7eb;
+    }
+  }
+  :root[data-theme="dark"] {
+    --surface-0: #17171a; --surface-1: #1e1e22; --surface-2: #26262b; --surface-3: #2f2f35;
+    --text-primary: #f1efe8; --text-secondary: #b4b2a9; --text-muted: #888780;
+    --border: rgba(255,255,255,0.1); --border-strong: rgba(255,255,255,0.2);
+    --sql-text: #85b7eb;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--surface-0);
+    color: var(--text-primary);
+    font-family: var(--font-sans);
+    -webkit-font-smoothing: antialiased;
+    line-height: 1.6;
+  }
+  a { color: var(--sql-text); }
+  .wrap { max-width: 720px; margin: 0 auto; padding: 20px; }
+  nav.top {
+    border-bottom: 1px solid var(--border);
+  }
+  nav.top .wrap { display: flex; align-items: center; gap: 10px; padding-block: 10px; }
+  nav.top img { width: 24px; height: 24px; border-radius: 6px; }
+  nav.top .brand { font-weight: 800; font-size: 14px; }
+  nav.top a.back { margin-left: auto; font-size: 13px; font-weight: 600; text-decoration: none; color: var(--text-secondary); }
+  main { padding-block: 40px 80px; }
+  h1 { font-size: 30px; font-weight: 800; letter-spacing: -0.01em; margin-bottom: 4px; }
+  .updated { color: var(--text-muted); font-size: 13px; margin-bottom: 32px; }
+  h2 { font-size: 18px; font-weight: 700; margin-top: 36px; margin-bottom: 10px; }
+  p, li { color: var(--text-secondary); font-size: 15px; }
+  ul { padding-left: 20px; }
+  li { margin-bottom: 6px; }
+  code {
+    font-family: 'JetBrains Mono', 'SF Mono', Menlo, Consolas, monospace;
+    background: var(--surface-3); border-radius: 4px; padding: 1px 5px; font-size: 13px;
+    color: var(--text-primary);
+  }
+  .callout {
+    background: var(--surface-2); border: 1px solid var(--border);
+    border-radius: 12px; padding: 18px 20px; margin-top: 28px;
+  }
+</style>
+</head>
+<body>
+
+<nav class="top">
+  <div class="wrap">
+    <img src="img/icon.png" alt="" />
+    <span class="brand">OG TestDesk</span>
+    <a class="back" href="index.html">← Back to site</a>
+  </div>
+</nav>
+
+<main class="wrap">
+  <h1>Privacy Policy</h1>
+  <p class="updated">Last updated: September 2026</p>
+
+  <p>
+    OG TestDesk is a local desktop application. The short version: it
+    doesn't collect, transmit, or sell any of your data, because there's
+    nowhere for it to go — there's no OG TestDesk server, no account, no
+    analytics, no telemetry. Everything the app does happens on your own
+    machine, talking directly to the databases, APIs, and AI tools <em>you</em>
+    configure it to talk to.
+  </p>
+
+  <h2>What the app stores, and where</h2>
+  <ul>
+    <li><strong>Connection metadata</strong> (nicknames, hosts, saved
+      queries/requests, environments) — a local SQLite file in your OS's
+      standard app-data directory. Never uploaded anywhere.</li>
+    <li><strong>Passwords / secrets</strong> — your OS keychain (macOS
+      Keychain, Windows Credential Manager, Linux Secret Service), or an
+      encrypted local file as a fallback if no OS keychain is available.
+      Never stored in plain text, never included in the metadata file
+      above.</li>
+    <li><strong>Cookies collected by the Requests tool</strong> — kept
+      locally, exactly like a browser's cookie jar, only replayed to the
+      same host that set them.</li>
+  </ul>
+
+  <h2>Network connections the app makes</h2>
+  <p>The app only connects to hosts you explicitly configure:</p>
+  <ul>
+    <li>The databases you add as connections (Postgres/MySQL/SQLite, optionally through an SSH tunnel you configure)</li>
+    <li>The APIs/URLs you send HTTP requests to</li>
+    <li>An optional local MCP server (off by default) that only listens on
+      <code>127.0.0.1</code> — reachable only from your own machine, not
+      the internet, for local AI-assistant integration you explicitly enable</li>
+  </ul>
+  <p>
+    OG TestDesk itself never phones home. There is no update-checker,
+    analytics beacon, or crash reporter that sends data off your machine.
+  </p>
+
+  <h2>Third parties</h2>
+  <p>
+    None. The app doesn't integrate any third-party analytics, advertising,
+    or tracking SDKs. Any data that leaves your machine only does so
+    because you configured the app to talk to a specific database or API
+    — the app is a client for services you choose, not a service itself.
+  </p>
+
+  <h2>Children's privacy</h2>
+  <p>
+    OG TestDesk is a developer tool with no content rating concerns and
+    doesn't knowingly collect information from anyone, including children,
+    since it doesn't collect information at all.
+  </p>
+
+  <h2>Changes to this policy</h2>
+  <p>
+    If this policy ever changes, the updated version will be posted at
+    this same URL with a new "last updated" date.
+  </p>
+
+  <div class="callout">
+    <strong>Questions?</strong> OG TestDesk is open source — you can read
+    exactly what the code does at
+    <a href="https://github.com/OmegaGiven/OG-TestDesk" target="_blank" rel="noopener">github.com/OmegaGiven/OG-TestDesk</a>,
+    or open an issue there for anything not covered above.
+  </div>
+</main>
+
+</body>
+</html>
