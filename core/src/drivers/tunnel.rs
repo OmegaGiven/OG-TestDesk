@@ -1,34 +1,134 @@
-//! SSH tunnels (shells out to the system `ssh` binary — not an embedded
-//! client, so it picks up the user's own `~/.ssh/config`, known_hosts, and
-//! agent) and pre-connect shell commands (a configured command whose
+//! SSH tunnels — a pure-Rust client (`russh`), not a shelled-out `ssh`
+//! process. The old implementation spawned the system `ssh` binary, which
+//! is exactly the kind of arbitrary-process-exec that macOS App Sandbox
+//! (required for Mac App Store distribution) forbids; this reimplements
+//! the same behavior — key or ssh-agent auth, known_hosts TOFU matching
+//! `StrictHostKeyChecking=accept-new`, one SSH session multiplexing many
+//! local connections like `ssh -L` does — without ever spawning a process.
+//!
+//! Also handles pre-connect shell commands (a configured command whose
 //! stdout becomes the password for that connect, for IAM-style short-lived
-//! tokens). Both spawn a process on the user's behalf using a connection
-//! profile the user themselves configured — the same shell access the
-//! human already has, not a new trust boundary.
+//! tokens) — that one's a deliberate, user-configured shell invocation
+//! (the same shell access the human already has), unrelated to this file's
+//! sandboxing concern, and stays as a plain `Command`.
 
 use super::ConnConfig;
-use anyhow::{bail, Context, Result};
+use anyhow::{anyhow, bail, Context, Result};
+use russh::client;
+use russh::{ChannelMsg, Disconnect};
+use russh_keys::agent::client::AgentClient;
+use russh_keys::key::PublicKey;
+use russh_keys::{check_known_hosts_path, learn_known_hosts_path, load_secret_key};
 use std::collections::HashMap;
-use std::net::TcpListener;
+use std::net::TcpListener as StdTcpListener;
+use std::path::PathBuf;
 use std::process::Stdio;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
-use tokio::process::{Child, Command};
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::net::TcpListener;
+use tokio::process::Command;
+use tokio::sync::oneshot;
 
 struct TunnelHandle {
-    child: Child,
     local_port: u16,
+    stop_tx: oneshot::Sender<()>,
 }
 
 static TUNNELS: Mutex<Option<HashMap<String, TunnelHandle>>> = Mutex::new(None);
 
 fn pick_free_port() -> Result<u16> {
-    let l = TcpListener::bind(("127.0.0.1", 0)).context("couldn't allocate a local port")?;
+    let l = StdTcpListener::bind(("127.0.0.1", 0)).context("couldn't allocate a local port")?;
     Ok(l.local_addr()?.port())
 }
 
-async fn port_is_open(port: u16) -> bool {
-    tokio::net::TcpStream::connect(("127.0.0.1", port)).await.is_ok()
+fn known_hosts_path() -> Result<PathBuf> {
+    Ok(dirs::home_dir()
+        .ok_or_else(|| anyhow!("no home directory"))?
+        .join(".ssh")
+        .join("known_hosts"))
+}
+
+/// TOFU host-key check, matching the old `StrictHostKeyChecking=accept-new`:
+/// a key that matches an existing known_hosts entry is trusted; a host with
+/// no entry at all gets its key recorded and trusted; a host whose recorded
+/// key doesn't match (a real MITM signal) is refused.
+struct Client {
+    host: String,
+    port: u16,
+}
+
+#[async_trait::async_trait]
+impl client::Handler for Client {
+    type Error = russh::Error;
+
+    async fn check_server_key(&mut self, pk: &PublicKey) -> Result<bool, Self::Error> {
+        let Ok(path) = known_hosts_path() else {
+            return Ok(false);
+        };
+        match check_known_hosts_path(&self.host, self.port, pk, &path) {
+            Ok(true) => Ok(true),
+            Ok(false) => {
+                // No entry yet — learn it (accept-new) and trust it now.
+                let _ = learn_known_hosts_path(&self.host, self.port, pk, &path);
+                Ok(true)
+            }
+            // Err(KeyChanged { .. }) or a parse error — never silently
+            // downgrade this to a trust decision.
+            Err(_) => Ok(false),
+        }
+    }
+}
+
+/// Tries the configured key path, then the usual default key files, then
+/// falls back to ssh-agent — same order a plain `ssh` invocation would
+/// effectively land on for a host with no `~/.ssh/config` entry.
+async fn authenticate(
+    session: &mut client::Handle<Client>,
+    user: &str,
+    key_path: Option<&str>,
+) -> Result<()> {
+    let mut candidates: Vec<PathBuf> = Vec::new();
+    if let Some(k) = key_path {
+        candidates.push(PathBuf::from(k));
+    } else if let Some(home) = dirs::home_dir() {
+        for name in ["id_ed25519", "id_ecdsa", "id_rsa"] {
+            candidates.push(home.join(".ssh").join(name));
+        }
+    }
+
+    for path in &candidates {
+        if !path.exists() {
+            continue;
+        }
+        let Ok(key_pair) = load_secret_key(path, None) else {
+            // Wrong/no passphrase, unsupported format, etc. — try the next
+            // candidate instead of failing the whole connect outright.
+            continue;
+        };
+        if let Ok(true) = session.authenticate_publickey(user, Arc::new(key_pair)).await {
+            return Ok(());
+        }
+    }
+
+    // ssh-agent fallback — covers passphrase-protected keys transparently,
+    // same as a plain `ssh` invocation would.
+    if let Ok(mut agent) = AgentClient::connect_env().await {
+        if let Ok(identities) = agent.request_identities().await {
+            for pubkey in identities {
+                let (returned_agent, res) = session.authenticate_future(user, pubkey, agent).await;
+                agent = returned_agent;
+                if matches!(res, Ok(true)) {
+                    return Ok(());
+                }
+            }
+        }
+    }
+
+    bail!(
+        "no SSH key worked for {user} — checked {} key file(s) and ssh-agent",
+        candidates.len()
+    );
 }
 
 /// Ensures a live SSH tunnel exists for this connection, starting one if
@@ -41,76 +141,101 @@ pub async fn ensure_tunnel(cfg: &ConnConfig) -> Result<u16> {
     let Some(ssh_host) = ssh_host else {
         bail!("ensure_tunnel called without ssh_host set");
     };
-    let real_host = cfg.host.as_deref().unwrap_or("localhost");
+    let real_host = cfg.host.as_deref().unwrap_or("localhost").to_string();
     let real_port = cfg.port.unwrap_or(5432);
 
     {
         let mut guard = TUNNELS.lock().unwrap();
         let map = guard.get_or_insert_with(HashMap::new);
-        if let Some(handle) = map.get_mut(&cfg.id) {
-            if handle.child.try_wait().ok().flatten().is_none() {
+        if let Some(handle) = map.get(&cfg.id) {
+            if !handle.stop_tx.is_closed() {
                 return Ok(handle.local_port);
             }
-            map.remove(&cfg.id); // died — fall through and restart it
+            map.remove(&cfg.id); // the tunnel task died — fall through and restart it
         }
     }
 
     let local_port = pick_free_port()?;
     let ssh_port = cfg.ssh_port.unwrap_or(22);
-    let ssh_user = cfg.ssh_user.as_deref().unwrap_or("root");
+    let ssh_user = cfg.ssh_user.as_deref().unwrap_or("root").to_string();
+    let ssh_key_path = cfg.ssh_key_path.clone();
+    let ssh_host_owned = ssh_host.to_string();
 
-    let mut cmd = Command::new("ssh");
-    cmd.arg("-N")
-        .arg("-o")
-        .arg("StrictHostKeyChecking=accept-new")
-        .arg("-o")
-        .arg("ExitOnForwardFailure=yes")
-        .arg("-o")
-        .arg("ServerAliveInterval=15")
-        .arg("-p")
-        .arg(ssh_port.to_string())
-        .arg("-L")
-        .arg(format!("{local_port}:{real_host}:{real_port}"));
-    if let Some(key) = cfg.ssh_key_path.as_deref().filter(|k| !k.is_empty()) {
-        cmd.arg("-i").arg(key);
-    }
-    cmd.arg(format!("{ssh_user}@{ssh_host}"))
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::piped())
-        .kill_on_drop(true);
+    let config = Arc::new(client::Config::default());
+    let handler = Client {
+        host: ssh_host_owned.clone(),
+        port: ssh_port,
+    };
+    let mut session = client::connect(config, (ssh_host_owned.as_str(), ssh_port), handler)
+        .await
+        .with_context(|| format!("couldn't connect to SSH host {ssh_host_owned}:{ssh_port}"))?;
+    authenticate(&mut session, &ssh_user, ssh_key_path.as_deref()).await?;
 
-    let mut child = cmd
-        .spawn()
-        .context("couldn't start `ssh` — is it installed and on PATH?")?;
+    let listener = TcpListener::bind(("127.0.0.1", local_port))
+        .await
+        .context("couldn't bind local tunnel port")?;
+    let (stop_tx, mut stop_rx) = oneshot::channel::<()>();
 
-    // Give it a few seconds to establish the forward before trusting it.
-    let mut up = false;
-    for _ in 0..50 {
-        if let Some(status) = child.try_wait()? {
-            let mut stderr = String::new();
-            if let Some(mut e) = child.stderr.take() {
-                use tokio::io::AsyncReadExt;
-                let _ = e.read_to_string(&mut stderr).await;
+    tokio::spawn(async move {
+        loop {
+            tokio::select! {
+                _ = &mut stop_rx => break,
+                accepted = listener.accept() => {
+                    let Ok((stream, peer)) = accepted else { continue };
+                    let channel = session
+                        .channel_open_direct_tcpip(
+                            real_host.clone(),
+                            real_port as u32,
+                            peer.ip().to_string(),
+                            peer.port() as u32,
+                        )
+                        .await;
+                    let Ok(channel) = channel else { continue };
+                    tokio::spawn(pump(stream, channel));
+                }
             }
-            bail!("ssh tunnel exited immediately ({status}): {}", stderr.trim());
         }
-        if port_is_open(local_port).await {
-            up = true;
-            break;
-        }
-        tokio::time::sleep(Duration::from_millis(100)).await;
-    }
-    if !up {
-        let _ = child.kill().await;
-        bail!("ssh tunnel to {ssh_host} didn't come up within 5s");
-    }
+        let _ = session.disconnect(Disconnect::ByApplication, "", "English").await;
+    });
 
     let mut guard = TUNNELS.lock().unwrap();
     guard
         .get_or_insert_with(HashMap::new)
-        .insert(cfg.id.clone(), TunnelHandle { child, local_port });
+        .insert(cfg.id.clone(), TunnelHandle { local_port, stop_tx });
     Ok(local_port)
+}
+
+/// Bidirectionally pumps bytes between a locally-accepted TCP connection
+/// and its SSH direct-tcpip channel, same shape as the upstream `russh`
+/// port-forwarding example.
+async fn pump(mut stream: tokio::net::TcpStream, mut channel: russh::Channel<client::Msg>) {
+    let mut buf = vec![0u8; 65536];
+    let mut stream_closed = false;
+    loop {
+        tokio::select! {
+            r = stream.read(&mut buf), if !stream_closed => {
+                match r {
+                    Ok(0) => {
+                        stream_closed = true;
+                        if channel.eof().await.is_err() { break; }
+                    }
+                    Ok(n) => {
+                        if channel.data(&buf[..n]).await.is_err() { break; }
+                    }
+                    Err(_) => break,
+                }
+            }
+            msg = channel.wait() => {
+                match msg {
+                    Some(ChannelMsg::Data { data }) => {
+                        if stream.write_all(&data).await.is_err() { break; }
+                    }
+                    Some(ChannelMsg::Eof) | None => break,
+                    _ => {}
+                }
+            }
+        }
+    }
 }
 
 /// Stops a connection's tunnel, if any — call when a connection is
@@ -118,8 +243,8 @@ pub async fn ensure_tunnel(cfg: &ConnConfig) -> Result<u16> {
 /// running (or a new one silently keeps using an old port assignment).
 pub fn stop_tunnel(conn_id: &str) {
     if let Some(map) = TUNNELS.lock().unwrap().as_mut() {
-        if let Some(mut handle) = map.remove(conn_id) {
-            let _ = handle.child.start_kill();
+        if let Some(handle) = map.remove(conn_id) {
+            let _ = handle.stop_tx.send(());
         }
     }
 }
@@ -142,6 +267,13 @@ pub async fn effective_host_port(cfg: &ConnConfig) -> Result<(String, u16)> {
 /// Runs `cfg.pre_connect_cmd` (if set) and returns its trimmed stdout as
 /// the password to use, overriding `stored`. Times out after 15s so a
 /// misbehaving command can't hang a connect indefinitely.
+///
+/// This is a deliberate, user-configured shell command (the human's own
+/// shell access, for IAM-style short-lived credential fetches) — not the
+/// same sandboxing concern as the SSH tunnel above, and stays as a plain
+/// `Command`. It's still incompatible with App Sandbox, same as the old
+/// SSH exec was; the Mac App Store build disables this feature (see
+/// docs/next-steps.md) rather than trying to sandbox arbitrary shell exec.
 pub async fn resolve_password(cfg: &ConnConfig, stored: Option<&str>) -> Result<Option<String>> {
     let Some(cmd_text) = cfg.pre_connect_cmd.as_deref().filter(|c| !c.trim().is_empty()) else {
         return Ok(stored.map(|s| s.to_string()));
@@ -150,7 +282,7 @@ pub async fn resolve_password(cfg: &ConnConfig, stored: Option<&str>) -> Result<
         #[cfg(windows)]
         let out = Command::new("cmd").arg("/C").arg(cmd_text).output().await?;
         #[cfg(not(windows))]
-        let out = Command::new("sh").arg("-c").arg(cmd_text).output().await?;
+        let out = Command::new("sh").arg("-c").arg(cmd_text).stdin(Stdio::null()).output().await?;
         anyhow::Ok(out)
     };
     let out = tokio::time::timeout(Duration::from_secs(15), fut)

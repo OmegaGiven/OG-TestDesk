@@ -13,40 +13,44 @@ release, roughly in priority order.
 - [ ] `docs/design-decisions.md` — reread and update against what
       actually shipped; some early decisions (e.g. the old tool-group
       top-bar design) have since been superseded.
-- [ ] macOS code signing / notarization — `release.yml`'s macOS job
-      already reads 5 repo secrets (`APPLE_CERTIFICATE`,
-      `APPLE_CERTIFICATE_PASSWORD`, `APPLE_SIGNING_IDENTITY`,
-      `APPLE_ID`, `APPLE_PASSWORD`, `APPLE_TEAM_ID` — `tauri-action`'s
-      standard names) but they aren't set yet, so the build stays
-      unsigned and Gatekeeper calls it "damaged". To set up (needs a
-      paid Apple Developer account, which is available):
-      1. In Xcode (or Keychain Access), create a **Developer ID
-         Application** certificate for the team, then export it as a
-         `.p12` with a password.
-      2. `base64 -i cert.p12 | pbcopy` → repo secret `APPLE_CERTIFICATE`.
-         The export password → `APPLE_CERTIFICATE_PASSWORD`.
-      3. `APPLE_SIGNING_IDENTITY` = the cert's common name, e.g.
-         `Developer ID Application: Name (TEAMID)`.
-      4. `APPLE_TEAM_ID` = the 10-char Team ID (Apple Developer
-         account → Membership).
-      5. `APPLE_ID` = the Apple ID email on that account;
-         `APPLE_PASSWORD` = an **app-specific password** for it
-         (appleid.apple.com → Sign-In and Security → App-Specific
-         Passwords) — not the account password.
-      Once all 5 secrets exist, the next `v*` tag push signs + notarizes
-      automatically — no workflow change needed.
+- [x] macOS code signing / notarization — all 6 `APPLE_*` repo secrets
+      are set (`APPLE_CERTIFICATE`, `APPLE_CERTIFICATE_PASSWORD`,
+      `APPLE_SIGNING_IDENTITY`, `APPLE_ID`, `APPLE_PASSWORD`,
+      `APPLE_TEAM_ID`); `v0.2.0-beta.1`+ ship signed and notarized.
+      Note if regenerating the cert: export the `.p12` with
+      `openssl pkcs12 -export -legacy ...` — OpenSSL 3.x's default
+      cipher isn't one macOS's `security import` can read.
 - [ ] Windows code signing — no cert configured; SmartScreen will warn.
       Needs a code-signing cert (or Azure Trusted Signing) wired into
       `release.yml` the same way.
-- [ ] Mac App Store submission — a separate track from the above:
-      requires an **App Store Distribution** cert (not Developer ID),
-      App Sandbox entitlements enabled (review which features — the
-      system-`ssh` tunnel shell-out, arbitrary file paths for the mock
-      server/CSV import — need sandboxed alternatives or user-selected
-      file access under sandboxing), an App Store Connect API key for
-      upload, and an App Store Connect listing + screenshots. Do the
-      Developer ID signing/notarization above first; this is follow-up
-      work, not blocking the direct-download release.
+- [x] SSH tunnel is no longer a Mac App Store sandbox blocker —
+      `core/src/drivers/tunnel.rs` reimplemented on `russh`/`russh-keys`
+      (pure Rust, no `Command::spawn`), same behavior as before (key or
+      ssh-agent auth, known_hosts TOFU matching
+      `StrictHostKeyChecking=accept-new`, one session multiplexing many
+      local connections like `ssh -L`). Verified end-to-end against a
+      real local sshd. The `pre_connect_cmd` feature (arbitrary shell
+      exec for IAM-style tokens) is a separate, deliberate feature and
+      is still not sandbox-compatible — disable it in the MAS build
+      rather than trying to sandbox arbitrary shell exec.
+- [ ] Mac App Store submission — remaining work, now that the SSH
+      blocker is gone:
+      - **Apple Distribution cert** (not Developer ID) + an **App ID**
+        with App Sandbox capability + a provisioning profile.
+      - **Entitlements**: `com.apple.security.network.server` for the
+        local MCP server's port; sandboxed file access (native file
+        picker + security-scoped bookmarks) in place of the mock
+        server's/CSV import's arbitrary paths; disable
+        `pre_connect_cmd` (see above) for this build target.
+      - A second Tauri bundle target (entitlements.plist wired in) —
+        the direct-download build stays full-featured/unsandboxed.
+      - App Store Connect: app record, bundle ID, screenshots, privacy
+        nutrition label, export-compliance questionnaire (app uses
+        XChaCha20-Poly1305 + TLS — likely exempt but must be declared).
+      - Review-notes heads-up: a reviewer will likely ask about the
+        local MCP server binding a port — have a plain-English answer
+        ready (single-user local app, off by default, explicit
+        per-connection ACLs).
 - [ ] `cargo fmt` / `cargo clippy` are wired into CI as informational
       only (`continue-on-error`) since the codebase isn't currently
       clean under either — decide whether to actually run
