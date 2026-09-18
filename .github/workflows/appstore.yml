@@ -90,9 +90,15 @@ jobs:
         env:
           APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_DIST_SIGNING_IDENTITY }}
         run: |
+          # CFBundleVersion (the internal build number, distinct from the
+          # 0.2.0 marketing version) must strictly increase on every
+          # upload, even a resubmission of the same version — Apple
+          # rejects a duplicate outright. github.run_number is a simple,
+          # always-incrementing value for exactly this.
           cargo tauri build \
             --target universal-apple-darwin \
             --config src-tauri/tauri.macos-appstore.conf.json \
+            --config "{\"bundle\":{\"macOS\":{\"bundleVersion\":\"${{ github.run_number }}\"}}}" \
             --features app-store \
             --bundles app
 
