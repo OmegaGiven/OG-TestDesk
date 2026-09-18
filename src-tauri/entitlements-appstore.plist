@@ -23,12 +23,5 @@
        plus any other user-initiated open/save panel. -->
   <key>com.apple.security.files.user-selected.read-write</key>
   <true/>
-
-  <!-- "Save this query to a .sql file" and CSV export both go through a
-       plain browser blob download (export.js's downloadText) rather
-       than a native save panel — this is what lets a sandboxed WKWebView
-       download land in ~/Downloads without a broader files entitlement. -->
-  <key>com.apple.security.files.downloads.read-write</key>
-  <true/>
 </dict>
 </plist>

@@ -26,9 +26,8 @@ instead of you copy-pasting between a terminal and a browser.
 
 ## AI / MCP integration
 
-Point Claude, ChatGPT, or any MCP-capable client at the app's local
-server and it can, within limits you control per-connection and
-server-wide:
+Point any MCP-capable AI client at the app's local server and it can,
+within limits you control per-connection and server-wide:
 
 - List schemas/columns, run queries, browse foreign keys
 - Send HTTP requests, run saved requests
@@ -39,10 +38,9 @@ server-wide:
 Every capability is behind an explicit flag (`allow_write`,
 `allow_http`, `allow_populate`, `allow_manage_connections`) and a
 per-connection "exposed" toggle — nothing is reachable by default.
-Supports both a static bearer token (for `claude mcp add` / local
-config) and a full OAuth 2.0 layer (discovery, dynamic client
-registration, PKCE) for clients like ChatGPT's connector framework that
-require it.
+Supports both a static bearer token (for local CLI config) and a full
+OAuth 2.0 layer (discovery, dynamic client registration, PKCE) for
+clients whose connector framework requires it.
 
 ## SQL
 
