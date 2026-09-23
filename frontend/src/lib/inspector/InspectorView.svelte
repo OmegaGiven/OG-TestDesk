@@ -264,14 +264,27 @@
         : typeof selectedValue
     : null;
 
-  function subtreePretty() {
+  // Svelte's `$:` dependency tracking is purely textual — it scans the
+  // reactive statement's own source for variable references, it doesn't
+  // look inside a separately-declared function that the statement merely
+  // *calls*. A plain `function subtreePretty() { ...reads selectedValue... }`
+  // invoked as `{subtreePretty()}` in the template therefore had no
+  // dependency Svelte could see (the call expression itself references
+  // nothing reactive), so it was never re-run after the node's first
+  // render: Path/Type/Size all reference `selected`/`selectedValue`
+  // directly in their own expressions and updated correctly on every
+  // click, but the value pane silently kept showing whatever was
+  // selected first. Inlining the body into the `$:` statement itself
+  // (rather than calling out to it) puts `selected`/`selectedValue`
+  // back in view of the dependency scanner.
+  $: subtreePrettyText = (() => {
     if (!selected) return '';
     try {
       return JSON.stringify(selectedValue, null, 2);
     } catch {
       return String(selectedValue);
     }
-  }
+  })();
   function sizeOf(v) {
     if (v === null || typeof v !== 'object') return String(v ?? '').length + ' chars';
     return Array.isArray(v) ? `${v.length} items` : `${Object.keys(v).length} keys`;
@@ -282,7 +295,7 @@
   let nodeEditText = '';
   let nodeEditError = '';
   function startNodeEdit() {
-    nodeEditText = subtreePretty();
+    nodeEditText = subtreePrettyText;
     nodeEditError = '';
     editingNode = true;
   }
@@ -553,12 +566,12 @@
               <button class="btn sm" on:click={cancelNodeEdit}>Cancel</button>
             </div>
           {:else}
-            <pre class="d-json">{subtreePretty()}</pre>
+            <pre class="d-json">{subtreePrettyText}</pre>
             <div class="d-actions">
               <button class="btn sm" on:click={startNodeEdit}>{@html ICONS.editCells.svg} Edit</button>
               <button class="btn sm" on:click={() => copy(selected.path)}>Copy path</button>
               <button class="btn sm" on:click={() => copy(String(selectedValue))}>Copy value</button>
-              <button class="btn sm" on:click={() => copy(subtreePretty())}>Copy pretty</button>
+              <button class="btn sm" on:click={() => copy(subtreePrettyText)}>Copy pretty</button>
             </div>
           {/if}
         {/if}
