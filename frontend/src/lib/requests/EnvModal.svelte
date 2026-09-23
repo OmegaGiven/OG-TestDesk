@@ -112,11 +112,11 @@
       toastError(e);
     }
   }
-  function exportEnv(name, variables) {
+  async function exportEnv(name, variables) {
     const pm = toPostmanEnvironment(name, variables);
     const file = (name || 'environment').replace(/[^\w.-]+/g, '_').slice(0, 60) || 'environment';
-    downloadText(`${file}.postman_environment.json`, JSON.stringify(pm, null, 2), 'application/json');
-    toast('Exported as a Postman environment', 'success', 2000);
+    const saved = await downloadText(`${file}.postman_environment.json`, JSON.stringify(pm, null, 2), 'application/json');
+    if (saved) toast('Exported as a Postman environment', 'success', 2000);
   }
 </script>
 

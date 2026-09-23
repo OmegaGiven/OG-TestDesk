@@ -852,10 +852,10 @@
     }
   }
 
-  function exportPostman() {
+  async function exportPostman() {
     const pm = toPostmanCollection('OG TestDesk export', $requestCollections, $savedRequests);
-    downloadText('og-testdesk-collection.json', JSON.stringify(pm, null, 2), 'application/json');
-    toast('Exported as a Postman v2.1 collection', 'success', 2000);
+    const saved = await downloadText('og-testdesk-collection.json', JSON.stringify(pm, null, 2), 'application/json');
+    if (saved) toast('Exported as a Postman v2.1 collection', 'success', 2000);
   }
 
   let fileInput;
@@ -944,15 +944,16 @@
   function respFileBase() {
     return (draft.name || 'response').replace(/[^\w.-]+/g, '_').slice(0, 60) || 'response';
   }
-  function saveResponse() {
+  async function saveResponse() {
     if (!response) return;
     const json = response.is_json;
     const text = json ? tryPretty(response.body) : response.body;
-    downloadText(
+    const saved = await downloadText(
       `${respFileBase()}.${json ? 'json' : 'txt'}`,
       text,
       json ? 'application/json' : 'text/plain'
     );
+    if (saved) toast('Response saved', 'success', 1800);
   }
   async function copyResponse() {
     if (!response) return;
@@ -976,7 +977,7 @@
     }
     return null;
   }
-  function exportResponseCsv() {
+  async function exportResponseCsv() {
     const rows = responseRows();
     if (!rows) {
       toast('CSV needs a JSON array of objects in the response body', 'error', 3000);
@@ -984,7 +985,8 @@
     }
     const cols = [...new Set(rows.flatMap((r) => Object.keys(r)))].map((name) => ({ name }));
     const csvRows = rows.map((r) => cols.map((c) => r[c.name]));
-    downloadText(`${respFileBase()}.csv`, rowsToDelimited(cols, csvRows, ','), 'text/csv');
+    const saved = await downloadText(`${respFileBase()}.csv`, rowsToDelimited(cols, csvRows, ','), 'text/csv');
+    if (saved) toast('CSV saved', 'success', 1800);
   }
   let showCodeMenu = false;
   let codeLang = 'curl';

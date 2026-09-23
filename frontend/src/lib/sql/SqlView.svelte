@@ -767,10 +767,11 @@
     }
   }
 
-  function saveToFile() {
+  async function saveToFile() {
     if (!tab) return;
     const base = (tab.title || 'query').replace(/[^\w.-]+/g, '_').slice(0, 60) || 'query';
-    downloadText(`${base}.sql`, tab.sql_text, 'application/sql');
+    const saved = await downloadText(`${base}.sql`, tab.sql_text, 'application/sql');
+    if (saved) toast('Saved .sql file', 'success', 1800);
   }
 
   async function openSavedQuery(e) {
