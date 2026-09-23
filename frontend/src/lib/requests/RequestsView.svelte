@@ -13,6 +13,7 @@
   import { runScript } from './ScriptSandbox.js';
   import { randomToken, pkceChallengeFromVerifier } from './oauth2.js';
   import { signAwsV4 } from './awsSigV4.js';
+  import VarInput from './VarInput.svelte';
   import { parseDigestChallenge, buildDigestHeader } from './digestAuth.js';
   import { CODE_GENERATORS } from './codegen.js';
   import { open as openExternal } from '@tauri-apps/plugin-shell';
@@ -231,6 +232,16 @@
     if (!file) return;
     draft.binaryFile = { filename: file.name, base64: await readFileAsBase64(file), size: file.size };
   }
+
+  // Variable names offered by VarInput's "{{" dropdown — active
+  // environment vars (reactive) + pm.globals (loaded once, refreshed
+  // after each send since a script can add new ones there).
+  let globalVarNames = [];
+  onMount(async () => {
+    globalVarNames = Object.keys(await loadGlobals());
+  });
+  $: envVarNames = $activeEnvironment ? Object.keys(safeJson($activeEnvironment.variables_json)) : [];
+  $: availableVars = [...new Set([...envVarNames, ...globalVarNames])].sort();
 
   function safeJson(s) {
     try {
@@ -700,6 +711,7 @@
       touchRequestTab(tabId, { error: String(e), sending: false });
     } finally {
       sending = false;
+      globalVarNames = Object.keys(globals);
     }
   }
 
@@ -1241,12 +1253,13 @@
       <select class="method" bind:value={draft.method} style="color:{methodColor}">
         {#each METHODS as m}<option value={m}>{m}</option>{/each}
       </select>
-      <input
-        class="url input mono"
+      <VarInput
+        cls="url input mono"
         placeholder="https://api.example.com/v1/resource  —  {'{{baseUrl}}'} allowed"
         bind:value={draft.url}
+        vars={availableVars}
         on:change={urlToParams}
-        on:keydown={(e) => e.key === 'Enter' && send()}
+        on:keydown={(e) => e.detail.key === 'Enter' && send()}
       />
       <button class="btn primary send" on:click={send} disabled={sending}>
         {sending ? '…' : 'Send'}
@@ -1424,10 +1437,11 @@
                   bind:value={row.k}
                   on:input={tab === 'params' ? onParamInput : onHeaderInput}
                 />
-                <input
-                  class="input mono"
+                <VarInput
+                  cls="input mono"
                   placeholder="value"
                   bind:value={row.v}
+                  vars={availableVars}
                   on:input={tab === 'params' ? onParamInput : onHeaderInput}
                 />
               </div>
