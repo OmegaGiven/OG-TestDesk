@@ -313,6 +313,13 @@
           <input type="range" min="100" max="5000" step="100" bind:value={$appearance.pageSize} />
           <span class="v" style="width:auto">{($appearance.pageSize ?? 500).toLocaleString()}</span>
         </div>
+        <div class="field">
+          <label for="pgmode">Loading more rows</label>
+          <select id="pgmode" class="select" bind:value={$appearance.paginationMode}>
+            <option value="scroll">Infinite scroll (auto-load near the bottom)</option>
+            <option value="paged">Paged (Prev / Next buttons)</option>
+          </select>
+        </div>
         <div class="slider">
           <label>Hard row cap</label>
           <input

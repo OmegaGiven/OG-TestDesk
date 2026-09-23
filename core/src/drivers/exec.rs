@@ -92,7 +92,10 @@ macro_rules! run_query_body {
                 None
             }
         };
-        let count_boxed = tokio::time::timeout(Duration::from_millis(3000), count_fut);
+        let count_boxed = tokio::time::timeout(
+            Duration::from_millis(opts.count_timeout_ms.unwrap_or(3000)),
+            count_fut,
+        );
 
         let (page_res, count_res) = tokio::join!(page_fut, count_boxed);
         let (columns, data, truncated) = page_res?;

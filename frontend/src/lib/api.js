@@ -28,6 +28,8 @@ export const api = {
   // query — page/pageSize omitted = full result (capped by max rows)
   queryRun: (config, sql, page = null, pageSize = null, count = null) =>
     call('query_run', { config, sql, page, pageSize, count }),
+  // Background "what's the real total" fetch — long timeout, 0 rows.
+  queryCount: (config, sql) => call('query_count', { config, sql }),
 
   // tabs
   tabsListAll: () => call('tabs_list_all'),

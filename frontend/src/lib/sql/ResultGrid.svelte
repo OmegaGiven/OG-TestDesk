@@ -18,6 +18,9 @@
   // { colName: { schema, table, column } } — columns in this result that
   // are a foreign key, for the "jump to referenced row" affordance.
   export let foreignKeys = null;
+  // false in "paged" pagination mode — the next chunk only loads on an
+  // explicit Prev/Next click (handled by the parent), not on scroll.
+  export let autoLoadMore = true;
   const dispatch = createEventDispatcher();
 
   let sortCol = -1;
@@ -186,7 +189,7 @@
   $: padBottom = Math.max(0, (total - endIdx) * ROW_H);
 
   function maybeLoadMore() {
-    if (!scrollEl || loadingMore || !result?.has_more) return;
+    if (!autoLoadMore || !scrollEl || loadingMore || !result?.has_more) return;
     const remaining = scrollEl.scrollHeight - scrollEl.scrollTop - scrollEl.clientHeight;
     if (remaining < 400) dispatch('loadmore');
   }

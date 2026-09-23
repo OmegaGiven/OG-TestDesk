@@ -264,6 +264,19 @@ async fn query_run(
     result.map_err(err)
 }
 
+/// Fetches only the total row count for a statement (LIMIT 0 + COUNT(*),
+/// long time budget) — the frontend calls this in the background to fill
+/// in a total that the initial `query_run`'s fast, time-boxed count
+/// gave up on.
+#[tauri::command]
+async fn query_count(config: ConnConfig, sql: String) -> R<QueryResult> {
+    let pw = drivers::tunnel::resolve_password_for(&config).await.map_err(err)?;
+    drivers::driver_for(config.kind)
+        .run_query(&config, pw.as_deref(), &sql, og_testdesk_core::QueryOpts::count_only())
+        .await
+        .map_err(err)
+}
+
 #[tauri::command]
 async fn history_result(state: State<'_, AppState>, id: String) -> R<Option<String>> {
     state.metadata.history_result(&id).await.map_err(err)
@@ -1105,6 +1118,7 @@ async fn main() {
             functions_list,
             db_time,
             query_run,
+            query_count,
             tabs_list_all,
             tab_save,
             tab_delete,

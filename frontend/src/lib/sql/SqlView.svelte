@@ -660,16 +660,48 @@
         full ? null : size,
         !full && page === 0
       );
+      // Paging (page > 0) doesn't re-run COUNT(*) — carry the total we
+      // already know (from page 0, possibly filled in by the background
+      // fetch below) forward instead of losing it on every Next click.
+      if (result.total == null && page > 0 && t.result?.total != null) {
+        result.total = t.result.total;
+        result.count_ms = t.result.count_ms;
+      }
       touchSqlTab(t.id, { result, running: false });
       if (result.is_select) {
         const shown = result.total != null ? ` of ${result.total.toLocaleString()}` : '';
         toast(`${result.row_count.toLocaleString()} rows${shown} · ${result.duration_ms} ms`, 'success', 2500);
         refreshEditableTable(t, conn, sql);
+        // The inline count is time-boxed (fast, but gives up on slow
+        // tables) — if it didn't land, keep trying in the background so
+        // the total shows up once it's known, instead of never at all.
+        if (!full && page === 0 && result.total == null) fetchTotalInBackground(t.id, conn, sql);
       } else {
         touchSqlTab(t.id, { editableTable: null, foreignKeys: null });
       }
     } catch (e) {
       touchSqlTab(t.id, { error: String(e), running: false });
+    }
+  }
+
+  async function fetchTotalInBackground(tabId, conn, sql) {
+    touchSqlTab(tabId, { countPending: true });
+    let total = null;
+    let count_ms = null;
+    try {
+      const r = await api.queryCount(conn, sql);
+      total = r.total ?? null;
+      count_ms = r.count_ms ?? null;
+    } catch {
+      // best-effort — leave total unknown
+    }
+    const cur = get(sqlTabs).find((x) => x.id === tabId);
+    if (!cur) return;
+    touchSqlTab(tabId, { countPending: false });
+    // Only patch the total in — the tab may have run a different
+    // statement (or paged further) while this was in flight.
+    if (cur.execSql === sql && cur.result) {
+      touchSqlTab(tabId, { result: { ...cur.result, total, count_ms } });
     }
   }
 
@@ -917,12 +949,28 @@
                   ? '+'
                   : ''} rows loaded
             </span>
+            {#if tab.countPending}
+              <span class="pg-count-spin" title="Still counting the total…">{@html ICONS.refresh?.svg ?? '↻'}</span>
+            {/if}
             {#if r.has_more}<span class="pg-hint">— scroll for more</span>{/if}
             {#if r.count_ms != null}<span class="pg-ct">count {r.count_ms}ms</span>{/if}
           </span>
         {/if}
         <span style="flex:1" />
         {#if tab.result?.is_select && tab.result.page_size > 0 && (tab.result.has_more || tab.result.page > 0)}
+          {#if $appearance.paginationMode === 'paged'}
+            <button
+              class="btn ghost sm"
+              disabled={tab.result.page === 0 || tab.running}
+              on:click={() => run(tab.result.page - 1)}
+            >‹ Prev</button>
+            <span class="pg-info">Page {tab.result.page + 1}</span>
+            <button
+              class="btn ghost sm"
+              disabled={!tab.result.has_more || tab.running}
+              on:click={() => run(tab.result.page + 1)}
+            >Next ›</button>
+          {/if}
           <button class="btn ghost sm" on:click={() => run(-1)}>Load all</button>
         {/if}
       </div>
@@ -988,6 +1036,7 @@
               appending={appendFlag}
               editableTable={tab.multiResults?.length > 1 ? null : tab.editableTable}
               foreignKeys={tab.multiResults?.length > 1 ? null : tab.foreignKeys}
+              autoLoadMore={$appearance.paginationMode !== 'paged'}
               on:loadmore={loadMore}
               on:inspect={inspectResult}
               on:save={onSaveEdits}
@@ -1412,6 +1461,20 @@
   .pg-ct {
     color: var(--text-muted);
     font-size: 10px;
+  }
+  .pg-count-spin {
+    display: inline-flex;
+    color: var(--text-muted);
+    animation: pg-spin 1s linear infinite;
+  }
+  .pg-count-spin :global(svg) {
+    width: 11px;
+    height: 11px;
+  }
+  @keyframes pg-spin {
+    to {
+      transform: rotate(360deg);
+    }
   }
   .statusbar {
     padding: 4px 10px;

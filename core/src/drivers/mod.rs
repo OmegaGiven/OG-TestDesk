@@ -172,6 +172,12 @@ pub struct QueryOpts {
     /// query editor, which respects whatever risk the human chose for
     /// their own foreground query.
     pub row_cap_override: Option<usize>,
+    /// How long the COUNT(*) is allowed to run before `total` gives up and
+    /// comes back `None`. Defaults to 3000ms (see `exec.rs`) when unset —
+    /// long enough not to stall the initial page fetch, but callers that
+    /// explicitly want the total (the frontend's background "still
+    /// counting…" fetch) can pass a much longer budget here.
+    pub count_timeout_ms: Option<u64>,
 }
 
 impl QueryOpts {
@@ -182,6 +188,7 @@ impl QueryOpts {
             offset: 0,
             count: false,
             row_cap_override: None,
+            count_timeout_ms: None,
         }
     }
     pub fn page(page: usize, size: usize, count: bool) -> Self {
@@ -190,6 +197,20 @@ impl QueryOpts {
             offset: page.saturating_mul(size),
             count,
             row_cap_override: None,
+            count_timeout_ms: None,
+        }
+    }
+    /// Fetches zero rows (LIMIT 0) and just the total count, given a much
+    /// longer time budget than the inline page-fetch count gets. Used by
+    /// the frontend to fill in `total` in the background when the initial
+    /// run's fast count timed out.
+    pub fn count_only() -> Self {
+        Self {
+            limit: Some(0),
+            offset: 0,
+            count: true,
+            row_cap_override: None,
+            count_timeout_ms: Some(60_000),
         }
     }
     /// Like `full()`, but never subject to the human's UI row-limit
@@ -202,6 +223,7 @@ impl QueryOpts {
             offset: 0,
             count: false,
             row_cap_override: Some(n),
+            count_timeout_ms: None,
         }
     }
 }

@@ -16,7 +16,10 @@ export const APPEARANCE_DEFAULT = {
   fontScale: 1,
   colorTheme: 'default',
   customTheme: { light: {}, dark: {} },
-  pageSize: 500
+  pageSize: 500,
+  // 'scroll' = infinite scroll (auto-load the next chunk near the
+  // bottom); 'paged' = explicit Prev/Next page buttons, no auto-load.
+  paginationMode: 'scroll'
 };
 
 function initialAppearance() {
