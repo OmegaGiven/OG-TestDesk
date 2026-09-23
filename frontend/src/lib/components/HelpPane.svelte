@@ -5,6 +5,24 @@
   let searchEl;
   onMount(() => searchEl?.focus());
 
+  // A paragraph can reference a live icon with `{icon:key}` (key = an
+  // ICONS registry entry) instead of hand-typing a glyph that stays
+  // accurate for exactly as long as nobody changes the real button —
+  // this renders the actual current SVG inline, so it can't drift.
+  function renderP(text) {
+    const re = /\{icon:(\w+)\}/g;
+    const parts = [];
+    let last = 0;
+    let m;
+    while ((m = re.exec(text))) {
+      if (m.index > last) parts.push(text.slice(last, m.index));
+      parts.push({ icon: m[1] });
+      last = m.index + m[0].length;
+    }
+    if (last < text.length) parts.push(text.slice(last));
+    return parts;
+  }
+
   // Each section: plain text `body` lines (rendered as <p>), `code` blocks,
   // and `steps` (ordered). Searchable over title + keywords + all text.
   const SECTIONS = [
@@ -68,7 +86,7 @@
       title: 'Importing from Postman',
       keywords: 'postman import collection environment json export migrate',
       blocks: [
-        { p: 'Click the ⇩ button in the Collections header of the Requests sidebar and choose a Postman export file (.json).' },
+        { p: 'Click the {icon:importPostman} button in the Collections header of the Requests sidebar and choose a Postman export file (.json).' },
         { p: 'Collection exports (v2.0 / v2.1) become a collection of saved requests — folders are flattened into the request name. Environment exports become an environment. Postman already uses {{var}} syntax, so variables carry over unchanged.' }
       ]
     },
@@ -190,7 +208,13 @@
     <h2>{active.title}</h2>
     {#each active.blocks as b}
       {#if b.p}
-        <p>{b.p}</p>
+        <p>
+          {#each renderP(b.p) as part}
+            {#if typeof part === 'string'}{part}{:else if ICONS[part.icon]}<span class="inline-icon" title={ICONS[part.icon].label}
+                >{@html ICONS[part.icon].svg}</span
+              >{/if}
+          {/each}
+        </p>
       {:else if b.code}
         <pre>{b.code}</pre>
       {:else if b.steps}
@@ -284,6 +308,15 @@
   .content p {
     margin: 0 0 10px;
     color: var(--text-secondary);
+  }
+  .inline-icon {
+    display: inline-flex;
+    vertical-align: -0.2em;
+    color: var(--text-primary);
+  }
+  .inline-icon :global(svg) {
+    width: 1.1em;
+    height: 1.1em;
   }
   .content ol {
     margin: 0 0 12px;
