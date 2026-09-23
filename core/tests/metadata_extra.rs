@@ -282,6 +282,7 @@ async fn sql_and_request_history_keep_blobs_off_the_list() {
         result_json: Some("{\"rows\":[1,2,3]}".into()),
         has_result: false,
         ran_at: 1000,
+        via_mcp: false,
     };
     db.add_history(&h).await.unwrap();
 
@@ -308,6 +309,7 @@ async fn sql_and_request_history_keep_blobs_off_the_list() {
         response_json: Some("{\"status\":200}".into()),
         has_response: false,
         sent_at: 2000,
+        via_mcp: false,
     };
     db.add_request_history(&rh).await.unwrap();
     let rlist = db.recent_request_history(10).await.unwrap();

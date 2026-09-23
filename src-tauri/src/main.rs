@@ -257,6 +257,7 @@ async fn query_run(
             result_json: result.as_ref().ok().and_then(scheduler::cache_result_json),
             has_result: false,
             ran_at: now(),
+            via_mcp: false,
         };
         let _ = state.metadata.add_history(&entry).await;
     }
@@ -582,6 +583,7 @@ async fn request_send(
         response_json: result.as_ref().ok().and_then(scheduler::cache_response_json),
         has_response: false,
         sent_at: now(),
+        via_mcp: false,
     };
     let _ = state.metadata.add_request_history(&entry).await;
 

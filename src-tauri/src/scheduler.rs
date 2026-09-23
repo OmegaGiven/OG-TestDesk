@@ -131,6 +131,7 @@ pub async fn run_one(metadata: &MetadataStore, s: &Schedule) -> String {
                     result_json: cache_result_json(r),
                     has_result: false,
                     ran_at: now,
+                    via_mcp: false,
                 },
                 Err(e) => HistoryEntry {
                     id: uuid::Uuid::new_v4().to_string(),
@@ -143,6 +144,7 @@ pub async fn run_one(metadata: &MetadataStore, s: &Schedule) -> String {
                     result_json: None,
                     has_result: false,
                     ran_at: now,
+                    via_mcp: false,
                 },
             };
             let _ = metadata.add_history(&entry).await;
@@ -176,6 +178,7 @@ pub async fn run_one(metadata: &MetadataStore, s: &Schedule) -> String {
                     response_json: cache_response_json(r),
                     has_response: false,
                     sent_at: now,
+                    via_mcp: false,
                 },
                 Err(e) => RequestHistoryEntry {
                     id: uuid::Uuid::new_v4().to_string(),
@@ -193,6 +196,7 @@ pub async fn run_one(metadata: &MetadataStore, s: &Schedule) -> String {
                     response_json: None,
                     has_response: false,
                     sent_at: now,
+                    via_mcp: false,
                 },
             };
             let _ = metadata.add_request_history(&entry).await;

@@ -1,6 +1,6 @@
 <script>
   import Modal from './Modal.svelte';
-  import { onMount, createEventDispatcher } from 'svelte';
+  import { onMount, onDestroy, createEventDispatcher } from 'svelte';
   import { api } from '../api.js';
   import { ICONS } from '../icons.js';
   import {
@@ -27,6 +27,7 @@
   let editing = null;
   let errors = [];
 
+  let unlistenMcpHistory;
   onMount(() => {
     const q = new URLSearchParams(location.search);
     const at = q.get('atab');
@@ -40,7 +41,14 @@
       newSchedule();
     }
     reload();
+    // Live-refresh while this modal is open, so an MCP-driven query/request
+    // shows up right away instead of only on the next time it's reopened.
+    import('@tauri-apps/api/event')
+      .then(({ listen }) => listen('mcp:history-added', () => reload()))
+      .then((un) => (unlistenMcpHistory = un))
+      .catch(() => {});
   });
+  onDestroy(() => unlistenMcpHistory?.());
   async function reload() {
     try {
       [sqlHist, reqHist, schedules, errors] = await Promise.all([
@@ -248,6 +256,7 @@
         {#each sqlHist as e (e.id)}
           <button class="row" on:click={() => openSql(e)}>
             <span class="when">{ago(e.ran_at)}</span>
+            {#if e.via_mcp}<span class="mcp-badge" title="Run via MCP (AI tool call), not from this app's UI">MCP</span>{/if}
             <span class="tag">{connName(e.connection_id)}</span>
             <code class="sql">{e.sql_text.replace(/\s+/g, ' ').slice(0, 90)}</code>
             <span class="right {e.success ? '' : 'err'}">
@@ -261,6 +270,7 @@
         {#each reqHist as e (e.id)}
           <button class="row" on:click={() => openReq(e)}>
             <span class="when">{ago(e.sent_at)}</span>
+            {#if e.via_mcp}<span class="mcp-badge" title="Sent via MCP (AI tool call), not from this app's UI">MCP</span>{/if}
             <span class="method m-{e.method.toLowerCase()}">{e.method}</span>
             <code class="sql">{e.url.slice(0, 80)}</code>
             <span class="right {e.success ? '' : 'err'}">
@@ -556,6 +566,16 @@
     padding: 1px 5px;
     border-radius: 3px;
     color: var(--text-secondary);
+    flex-shrink: 0;
+  }
+  .mcp-badge {
+    font-size: 9px;
+    font-weight: 800;
+    letter-spacing: 0.03em;
+    background: color-mix(in srgb, var(--tool-sql-text) 20%, transparent);
+    color: var(--tool-sql-text);
+    padding: 1px 5px;
+    border-radius: 3px;
     flex-shrink: 0;
   }
   .method {

@@ -62,8 +62,9 @@ use axum::{
 };
 use base64::Engine;
 use og_testdesk_core::{
-    drivers, requests as http_requests, stmt_returns_rows, ConnConfig, DbKind, HttpRequest,
-    MetadataStore, QueryTab, RequestTab, SavedQuery, SavedRequest, SecretsStore,
+    drivers, requests as http_requests, stmt_returns_rows, ConnConfig, DbKind, HistoryEntry,
+    HttpRequest, MetadataStore, QueryTab, RequestHistoryEntry, RequestTab, SavedQuery,
+    SavedRequest, SecretsStore,
 };
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
@@ -94,6 +95,19 @@ pub struct McpConfig {
     /// keychain. Separate from `allow_populate` since it's more sensitive.
     #[serde(default)]
     pub allow_manage_connections: bool,
+    /// When true, `run_query` / `send_request` / `run_saved_request` calls
+    /// get written to the same query/request history the human's own UI
+    /// actions do (tagged `via_mcp`), so they show up in the History panel
+    /// like a human ran them. When false, MCP actions execute silently —
+    /// no history row, nothing for the human to see — for AI-only,
+    /// backend-driven use. Defaults on: silent-by-default MCP execution
+    /// against a human's own data is the surprising choice.
+    #[serde(default = "default_true")]
+    pub visible_in_history: bool,
+}
+
+fn default_true() -> bool {
+    true
 }
 
 impl Default for McpConfig {
@@ -106,6 +120,7 @@ impl Default for McpConfig {
             allow_http: false,
             allow_populate: false,
             allow_manage_connections: false,
+            visible_in_history: true,
         }
     }
 }
@@ -930,7 +945,25 @@ async fn call_tool(ctx: &AppCtx, name: &str, args: Value) -> Result<String> {
                     &sql,
                     og_testdesk_core::QueryOpts::full_capped(10_000),
                 )
-                .await?;
+                .await;
+            if ctx.cfg.visible_in_history {
+                let entry = HistoryEntry {
+                    id: uuid::Uuid::new_v4().to_string(),
+                    connection_id: Some(conn.id.clone()),
+                    sql_text: sql.clone(),
+                    duration_ms: result.as_ref().ok().map(|r| r.duration_ms as i64),
+                    row_count: result.as_ref().ok().map(|r| r.row_count as i64),
+                    success: result.is_ok(),
+                    error: result.as_ref().err().map(|e| e.to_string()),
+                    result_json: None,
+                    has_result: false,
+                    ran_at: chrono::Utc::now().timestamp(),
+                    via_mcp: true,
+                };
+                let _ = ctx.metadata.add_history(&entry).await;
+                let _ = ctx.app_handle.emit("mcp:history-added", "sql");
+            }
+            let result = result?;
             Ok(serde_json::to_string_pretty(&result)?)
         }
         "list_saved_requests" if ctx.cfg.allow_http => {
@@ -962,8 +995,12 @@ async fn call_tool(ctx: &AppCtx, name: &str, args: Value) -> Result<String> {
             };
             apply_vars(&ctx.metadata, &mut http).await;
             let net = crate::load_network_settings(&ctx.metadata).await;
-            let resp = http_requests::send_with(&http, &net).await?;
-            Ok(serde_json::to_string_pretty(&resp)?)
+            let resp = http_requests::send_with(&http, &net).await;
+            if ctx.cfg.visible_in_history {
+                record_mcp_request_history(ctx, Some(req.id.clone()), Some(req.name.clone()), &http, &resp)
+                    .await;
+            }
+            Ok(serde_json::to_string_pretty(&resp?)?)
         }
         "send_request" if ctx.cfg.allow_http => {
             let headers: HashMap<String, String> = args
@@ -980,8 +1017,11 @@ async fn call_tool(ctx: &AppCtx, name: &str, args: Value) -> Result<String> {
             };
             apply_vars(&ctx.metadata, &mut http).await;
             let net = crate::load_network_settings(&ctx.metadata).await;
-            let resp = http_requests::send_with(&http, &net).await?;
-            Ok(serde_json::to_string_pretty(&resp)?)
+            let resp = http_requests::send_with(&http, &net).await;
+            if ctx.cfg.visible_in_history {
+                record_mcp_request_history(ctx, None, None, &http, &resp).await;
+            }
+            Ok(serde_json::to_string_pretty(&resp?)?)
         }
         "open_sql_tab" if ctx.cfg.allow_populate => {
             let conn = resolve_any(ctx, &s("connection").unwrap_or_default()).await?;
@@ -1161,6 +1201,38 @@ async fn call_tool(ctx: &AppCtx, name: &str, args: Value) -> Result<String> {
         }
         _ => Err(anyhow::anyhow!("unknown or disabled tool: {name}")),
     }
+}
+
+/// Records an MCP-driven HTTP call into the same request history the
+/// human's own "Send" button writes to, tagged `via_mcp` — see
+/// `McpConfig::visible_in_history`.
+async fn record_mcp_request_history(
+    ctx: &AppCtx,
+    saved_request_id: Option<String>,
+    name: Option<String>,
+    req: &HttpRequest,
+    resp: &Result<og_testdesk_core::requests::HttpResponse>,
+) {
+    let entry = RequestHistoryEntry {
+        id: uuid::Uuid::new_v4().to_string(),
+        saved_request_id,
+        name,
+        method: req.method.clone(),
+        url: req.url.clone(),
+        headers_json: serde_json::to_string(&req.headers).unwrap_or_default(),
+        body: req.body.clone(),
+        status: resp.as_ref().ok().map(|r| r.status as i64),
+        duration_ms: resp.as_ref().ok().map(|r| r.duration_ms as i64),
+        size_bytes: resp.as_ref().ok().map(|r| r.size_bytes as i64),
+        success: resp.as_ref().map(|r| r.status < 400).unwrap_or(false),
+        error: resp.as_ref().err().map(|e| e.to_string()),
+        response_json: None,
+        has_response: false,
+        sent_at: chrono::Utc::now().timestamp(),
+        via_mcp: true,
+    };
+    let _ = ctx.metadata.add_request_history(&entry).await;
+    let _ = ctx.app_handle.emit("mcp:history-added", "request");
 }
 
 async fn apply_vars(meta: &MetadataStore, req: &mut HttpRequest) {

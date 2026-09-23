@@ -391,6 +391,14 @@
               still turn that on per-connection in the Access tab.
             </span>
           </label>
+          <label class="toggle">
+            <input type="checkbox" bind:checked={cfg.visible_in_history} />
+            <span>
+              Show MCP-run queries/requests in History, tagged <code>MCP</code> — same as if you'd
+              run them yourself. Turn off to let the AI use <code>run_query</code>/<code
+              >send_request</code> silently, with no record in the app.
+            </span>
+          </label>
 
           <button class="btn primary" on:click={apply} disabled={busy} style="margin-top:8px">
             {busy ? 'Applying…' : 'Apply & restart'}

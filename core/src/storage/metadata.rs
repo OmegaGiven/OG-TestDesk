@@ -64,7 +64,8 @@ CREATE TABLE IF NOT EXISTS query_history (
     success       INTEGER NOT NULL DEFAULT 1,
     error         TEXT,
     result_json   TEXT,          -- serialized QueryResult, only when small
-    ran_at        INTEGER NOT NULL
+    ran_at        INTEGER NOT NULL,
+    via_mcp       INTEGER NOT NULL DEFAULT 0
 );
 
 CREATE TABLE IF NOT EXISTS request_history (
@@ -81,7 +82,8 @@ CREATE TABLE IF NOT EXISTS request_history (
     success          INTEGER NOT NULL DEFAULT 1,
     error            TEXT,
     response_json    TEXT,        -- serialized HttpResponse, only when small
-    sent_at          INTEGER NOT NULL
+    sent_at          INTEGER NOT NULL,
+    via_mcp          INTEGER NOT NULL DEFAULT 0
 );
 
 CREATE TABLE IF NOT EXISTS schedules (
@@ -283,6 +285,9 @@ pub struct HistoryEntry {
     #[serde(default)]
     pub has_result: bool,
     pub ran_at: i64,
+    /// True when an MCP tool call (not a human, in the app's UI) ran this.
+    #[serde(default)]
+    pub via_mcp: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -309,6 +314,9 @@ pub struct RequestHistoryEntry {
     #[serde(default)]
     pub has_response: bool,
     pub sent_at: i64,
+    /// True when an MCP tool call (not a human, in the app's UI) sent this.
+    #[serde(default)]
+    pub via_mcp: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -450,6 +458,8 @@ impl MetadataStore {
             "ALTER TABLE saved_requests ADD COLUMN test_script TEXT",
             "ALTER TABLE request_tabs ADD COLUMN body_mode_json TEXT",
             "ALTER TABLE saved_requests ADD COLUMN body_mode_json TEXT",
+            "ALTER TABLE query_history ADD COLUMN via_mcp INTEGER NOT NULL DEFAULT 0",
+            "ALTER TABLE request_history ADD COLUMN via_mcp INTEGER NOT NULL DEFAULT 0",
         ] {
             let _ = sqlx::query(stmt).execute(&pool).await; // ignore "duplicate column"
         }
@@ -643,8 +653,8 @@ impl MetadataStore {
         sqlx::query(
             "INSERT INTO query_history
                 (id, connection_id, sql_text, duration_ms, row_count, success, error,
-                 result_json, ran_at)
-             VALUES (?,?,?,?,?,?,?,?,?)",
+                 result_json, ran_at, via_mcp)
+             VALUES (?,?,?,?,?,?,?,?,?,?)",
         )
         .bind(&e.id)
         .bind(&e.connection_id)
@@ -655,6 +665,7 @@ impl MetadataStore {
         .bind(&e.error)
         .bind(&e.result_json)
         .bind(e.ran_at)
+        .bind(e.via_mcp as i64)
         .execute(&self.pool)
         .await?;
         sqlx::query(
@@ -669,7 +680,7 @@ impl MetadataStore {
     pub async fn recent_history(&self, limit: i64) -> Result<Vec<HistoryEntry>> {
         let rows = sqlx::query(
             "SELECT id, connection_id, sql_text, duration_ms, row_count, success, error,
-                    (result_json IS NOT NULL) AS has_result, ran_at
+                    (result_json IS NOT NULL) AS has_result, ran_at, via_mcp
              FROM query_history ORDER BY ran_at DESC LIMIT ?",
         )
         .bind(limit)
@@ -688,6 +699,7 @@ impl MetadataStore {
                 result_json: None,
                 has_result: r.get::<i64, _>("has_result") != 0,
                 ran_at: r.get("ran_at"),
+                via_mcp: r.get::<i64, _>("via_mcp") != 0,
             })
             .collect())
     }
@@ -709,8 +721,8 @@ impl MetadataStore {
         sqlx::query(
             "INSERT INTO request_history
                 (id, saved_request_id, name, method, url, headers_json, body, status,
-                 duration_ms, size_bytes, success, error, response_json, sent_at)
-             VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                 duration_ms, size_bytes, success, error, response_json, sent_at, via_mcp)
+             VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
         )
         .bind(&e.id)
         .bind(&e.saved_request_id)
@@ -726,6 +738,7 @@ impl MetadataStore {
         .bind(&e.error)
         .bind(&e.response_json)
         .bind(e.sent_at)
+        .bind(e.via_mcp as i64)
         .execute(&self.pool)
         .await?;
         sqlx::query(
@@ -741,7 +754,7 @@ impl MetadataStore {
         let rows = sqlx::query(
             "SELECT id, saved_request_id, name, method, url, headers_json, body, status,
                     duration_ms, size_bytes, success, error,
-                    (response_json IS NOT NULL) AS has_response, sent_at
+                    (response_json IS NOT NULL) AS has_response, sent_at, via_mcp
              FROM request_history ORDER BY sent_at DESC LIMIT ?",
         )
         .bind(limit)
@@ -765,6 +778,7 @@ impl MetadataStore {
                 response_json: None,
                 has_response: r.get::<i64, _>("has_response") != 0,
                 sent_at: r.get("sent_at"),
+                via_mcp: r.get::<i64, _>("via_mcp") != 0,
             })
             .collect())
     }
