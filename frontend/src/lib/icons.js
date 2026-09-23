@@ -73,6 +73,7 @@ export const ICONS = {
 
   importPostman: { svg: svg('<path d="M12 15V3"/><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="m7 10 5 5 5-5"/>'), label: 'Import a Postman collection / environment', where: 'Requests sidebar' },
   exportPostman: { svg: svg('<path d="M12 3v12"/><path d="m17 8-5-5-5 5"/><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>'), label: 'Export everything as a Postman collection', where: 'Requests sidebar' },
+  moveToCollection: { svg: svg('<path d="M2 9V5a2 2 0 0 1 2-2h3.9a2 2 0 0 1 1.69.9l.81 1.2a2 2 0 0 0 1.67.9H20a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2v-1"/><path d="M2 13h10"/><path d="m9 16 3-3-3-3"/>'), label: 'Move selected requests to a collection', where: 'Requests sidebar, multi-select' },
 
   code: { svg: svg('<path d="m16 18 6-6-6-6"/><path d="m8 6-6 6 6 6"/>'), label: 'Generate a code snippet (curl, Python, JS, ...)', where: 'Response panel toolbar' },
   cookie: { svg: svg('<path d="M11 17h.01"/><path d="M11.496 2c.324-.016.558.292.529.615a4 4 0 0 0 4.235 4.368.713.713 0 0 1 .758.757 4 4 0 0 0 4.366 4.237c.323-.03.63.204.614.527a10 10 0 0 1-2.915 6.566A1 1 0 1 1 4.93 4.918 10 10 0 0 1 11.496 2"/><path d="M12 12h.01"/><path d="M16 16h.01"/><path d="M16 3h.01"/><path d="M21 4h.01"/><path d="M21 8h.01"/><path d="M7 14h.01"/><path d="M9 8h.01"/>'), label: 'Cookie manager', where: 'Requests sidebar' },

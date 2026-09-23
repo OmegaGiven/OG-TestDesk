@@ -840,6 +840,47 @@
     }
   }
 
+  let moveMenuOpen = false;
+  async function moveSelectedToCollection(collectionId) {
+    moveMenuOpen = false;
+    const ids = [...selectedReqIds];
+    if (!ids.length) return;
+    try {
+      for (const id of ids) {
+        const s = $savedRequests.find((r) => r.id === id);
+        if (s && s.collection_id !== collectionId) {
+          await api.savedRequestSave({ ...s, collection_id: collectionId });
+        }
+      }
+      selectedReqIds = new Set();
+      await reloadRequests();
+      toast(`Moved ${ids.length} request${ids.length === 1 ? '' : 's'}`, 'success', 1800);
+    } catch (e) {
+      toastError(e);
+    }
+  }
+  async function moveSelectedToNewCollection() {
+    const name = await promptDialog('New collection name:');
+    if (!name) return;
+    try {
+      const col = await api.collectionSave({ id: '', name, parent_id: null });
+      await moveSelectedToCollection(col.id);
+    } catch (e) {
+      toastError(e);
+    }
+  }
+  async function exportSelected() {
+    const ids = new Set(selectedReqIds);
+    const reqs = $savedRequests.filter((r) => ids.has(r.id)).map((r) => ({ ...r, collection_id: null }));
+    if (!reqs.length) return;
+    const name = await promptDialog('Export as collection named:', 'Selected requests');
+    if (!name) return;
+    const pm = toPostmanCollection(name, [], reqs);
+    const file = name.replace(/[^\w.-]+/g, '_').slice(0, 60) || 'export';
+    const saved = await downloadText(`${file}.json`, JSON.stringify(pm, null, 2), 'application/json');
+    if (saved) toast(`Exported ${reqs.length} request${reqs.length === 1 ? '' : 's'}`, 'success', 2000);
+  }
+
   let dragReqId = null;
   async function moveToCollection(collectionId) {
     if (!dragReqId) return;
@@ -1106,6 +1147,28 @@
           <button class="icon-btn" title="Deselect all" on:click={() => (selectedReqIds = new Set())}
             >{@html ICONS.close?.svg ?? '✕'}</button
           >
+          <button class="icon-btn" title={ICONS.exportPostman.label} on:click={exportSelected}
+            >{@html ICONS.exportPostman.svg}</button
+          >
+          <span class="move-menu">
+            <button
+              class="icon-btn"
+              title="Move to a collection"
+              on:click={() => (moveMenuOpen = !moveMenuOpen)}
+            >{@html ICONS.moveToCollection.svg}</button>
+            {#if moveMenuOpen}
+              <div class="backdrop" role="presentation" on:click={() => (moveMenuOpen = false)}></div>
+              <div class="dd">
+                <button class="item" on:click={() => moveSelectedToNewCollection()}>+ New collection…</button>
+                <div class="sep"></div>
+                {#each $requestCollections as c (c.id)}
+                  <button class="item" on:click={() => moveSelectedToCollection(c.id)}>{c.name}</button>
+                {/each}
+                <div class="sep"></div>
+                <button class="item" on:click={() => moveSelectedToCollection(null)}>Ungrouped</button>
+              </div>
+            {/if}
+          </span>
           <button class="icon-btn" title="Delete selected" on:click={deleteSelected}
             >{@html ICONS.delete.svg}</button
           >
@@ -1724,6 +1787,52 @@
   .sec-actions :global(.icon-btn svg) {
     width: 16px;
     height: 16px;
+  }
+  .move-menu {
+    position: relative;
+    display: inline-flex;
+  }
+  .move-menu .backdrop {
+    position: fixed;
+    inset: 0;
+    z-index: 300;
+  }
+  .move-menu .dd {
+    position: absolute;
+    top: 100%;
+    right: 0;
+    z-index: 301;
+    min-width: 180px;
+    max-height: 260px;
+    overflow-y: auto;
+    margin-top: 4px;
+    background: var(--surface-1);
+    border: 1px solid var(--border-strong, var(--border));
+    border-radius: 6px;
+    box-shadow: var(--shadow-pop, 0 4px 16px rgba(0, 0, 0, 0.3));
+    padding: 4px;
+  }
+  .move-menu .item {
+    display: block;
+    width: 100%;
+    text-align: left;
+    background: none;
+    border: none;
+    color: var(--text-primary);
+    font-size: 12px;
+    font-weight: 400;
+    text-transform: none;
+    padding: 6px 8px;
+    border-radius: 4px;
+    cursor: pointer;
+  }
+  .move-menu .item:hover {
+    background: var(--surface-3);
+  }
+  .move-menu .sep {
+    height: 1px;
+    background: var(--border);
+    margin: 4px 2px;
   }
   .scroll {
     flex: 1;
