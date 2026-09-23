@@ -572,8 +572,18 @@
   }
   .x {
     flex-shrink: 0;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
     font-size: 12px;
     opacity: 0.55;
+  }
+  .x :global(.ico-svg) {
+    /* Inside its own centered flex box, not sharing a text line with
+       anything — the shared -0.15em baseline nudge (ui.css, tuned for an
+       icon sitting next to a text label) overcorrects here and pushes it
+       off-center. */
+    vertical-align: baseline;
   }
   .x:hover {
     opacity: 1;
