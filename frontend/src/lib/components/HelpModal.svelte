@@ -6,6 +6,8 @@
   import { api } from '../api.js';
 
   const ISSUE_REPO = 'OmegaGiven/OG-TestDesk';
+  let searchEl;
+  onMount(() => searchEl?.focus());
 
   // Shown at the bottom of the nav so a bug report (or the person
   // reading one) always knows which build they're looking at.
@@ -222,7 +224,7 @@
 <Modal title="Help & documentation" width="760px" on:close>
   <div class="help">
     <aside class="nav">
-      <input class="input" placeholder="Search docs…" bind:value={query} autofocus />
+      <input class="input" placeholder="Search docs…" bind:value={query} bind:this={searchEl} />
       <ul>
         {#each matches as s (s.id)}
           <li>

@@ -51,7 +51,24 @@
         run: () => {
           dispatch('run');
           return true;
-        }
+        },
+        preventDefault: true
+      },
+      // Explicit Ctrl-Enter alongside Mod-Enter: on macOS "Mod" maps to
+      // Cmd, so muscle-memory Ctrl+Enter (common coming from
+      // Windows/Linux tools) is otherwise never intercepted — and
+      // unbound Ctrl+Enter inside a contentEditable is a known WebKit
+      // quirk that pops the native right-click/context menu instead of
+      // doing nothing. Binding it explicitly (harmless no-op on
+      // Windows/Linux, where it's identical to Mod-Enter already) stops
+      // that at the source.
+      {
+        key: 'Ctrl-Enter',
+        run: () => {
+          dispatch('run');
+          return true;
+        },
+        preventDefault: true
       },
       {
         key: 'Mod-s',

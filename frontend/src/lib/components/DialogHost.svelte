@@ -1,10 +1,20 @@
 <script>
+  import { tick } from 'svelte';
   import Modal from './Modal.svelte';
   import { dialogRequest } from '../stores.js';
 
   let value = '';
+  let inputEl;
 
-  $: if ($dialogRequest?.type === 'prompt') value = $dialogRequest.defaultValue ?? '';
+  // The HTML `autofocus` attribute is unreliable in an embedded
+  // webview (WKWebView on macOS notably) — it can lose the race
+  // against the modal's own mount/layout, leaving focus nowhere and
+  // every keystroke going nowhere. Focusing explicitly after Svelte's
+  // finished the DOM update is the reliable version of the same intent.
+  $: if ($dialogRequest?.type === 'prompt') {
+    value = $dialogRequest.defaultValue ?? '';
+    tick().then(() => inputEl?.focus());
+  }
 
   function settle(result) {
     const req = $dialogRequest;
@@ -27,7 +37,7 @@
   <Modal title={$dialogRequest.type === 'confirm' ? 'Confirm' : 'Input needed'} width="380px" on:close={onCancel}>
     <p class="msg">{$dialogRequest.message}</p>
     {#if $dialogRequest.type === 'prompt'}
-      <input class="input" bind:value autofocus on:keydown={onKeydown} />
+      <input class="input" bind:value bind:this={inputEl} on:keydown={onKeydown} />
     {/if}
     <svelte:fragment slot="footer">
       <button class="btn" on:click={onCancel}>Cancel</button>

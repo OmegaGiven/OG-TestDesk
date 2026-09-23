@@ -288,16 +288,30 @@ pub trait DbDriver: Send + Sync {
     async fn server_time(&self, cfg: &ConnConfig, password: Option<&str>) -> Result<DbTime>;
 }
 
+/// The statement's first real keyword, lowercased — skipping leading
+/// `--` line comments and `/* ... */` block comments first (a query
+/// that opens with a doc comment, like `/* THE LIST FOR ... */\nSELECT`,
+/// is common and was previously misdetected as non-row-returning
+/// because the raw first token was `/*`, not `select`).
+fn leading_keyword(sql: &str) -> String {
+    let mut rest = sql;
+    loop {
+        rest = rest.trim_start();
+        if let Some(after) = rest.strip_prefix("--") {
+            rest = after.split_once('\n').map_or("", |(_, tail)| tail);
+        } else if let Some(after) = rest.strip_prefix("/*") {
+            rest = after.split_once("*/").map_or("", |(_, tail)| tail);
+        } else {
+            break;
+        }
+    }
+    rest.split_whitespace().next().unwrap_or("").to_ascii_lowercase()
+}
+
 /// Statements that can be safely wrapped as `SELECT * FROM (<sql>) x` for
 /// pagination / counting. `SHOW`, `EXPLAIN`, `PRAGMA`, `DESCRIBE` cannot.
 pub(crate) fn is_wrappable(sql: &str) -> bool {
-    let head = sql
-        .trim_start()
-        .split_whitespace()
-        .next()
-        .unwrap_or("")
-        .to_ascii_lowercase();
-    matches!(head.as_str(), "select" | "with" | "table" | "values")
+    matches!(leading_keyword(sql).as_str(), "select" | "with" | "table" | "values")
 }
 
 pub(crate) fn strip_trailing_semi(sql: &str) -> &str {
@@ -332,17 +346,10 @@ pub fn driver_for(kind: DbKind) -> Box<dyn DbDriver> {
 /// reporting a row set vs. an affected-row count, and to enforce
 /// read-only access (see the MCP server).
 pub fn stmt_returns_rows(sql: &str) -> bool {
-    let trimmed = sql.trim_start();
-    // skip leading line comments / CTEs
-    let head = trimmed
-        .split_whitespace()
-        .next()
-        .unwrap_or("")
-        .to_ascii_lowercase();
     matches!(
-        head.as_str(),
+        leading_keyword(sql).as_str(),
         "select" | "with" | "show" | "explain" | "table" | "values" | "pragma" | "describe" | "desc"
-    ) || trimmed.to_ascii_lowercase().contains(" returning ")
+    ) || sql.to_ascii_lowercase().contains(" returning ")
 }
 
 #[cfg(test)]
@@ -417,6 +424,21 @@ mod tests {
         assert_eq!(opts.row_cap_override, Some(10_000));
         assert_eq!(max_rows(), usize::MAX); // confirms the risky global is in effect
         set_max_rows(original);
+    }
+
+    #[test]
+    fn stmt_returns_rows_skips_leading_comments() {
+        // Regression test: a query opening with a /* ... */ doc comment
+        // (a common style for annotating a saved report query) was
+        // misdetected as non-row-returning, since the raw first token
+        // was "/*" — reported as "N rows affected" with no result grid,
+        // instead of actually running as a SELECT.
+        assert!(stmt_returns_rows(
+            "/*\nTHE LIST FOR FAILED CONNECT ALERTS\n*/\nSELECT id FROM t"
+        ));
+        assert!(stmt_returns_rows("-- a line comment\nSELECT 1"));
+        assert!(stmt_returns_rows("/* one */ /* two */ SELECT 1"));
+        assert!(is_wrappable("/* comment */\nSELECT * FROM t"));
     }
 
     #[test]
