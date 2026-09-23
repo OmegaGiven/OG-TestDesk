@@ -117,7 +117,7 @@
       params: [{ k: '', v: '', on: true }],
       body: t.body || '',
       ...hydrateBodyMode(t),
-      collection_id: null,
+      collection_id: $savedRequests.find((s) => s.id === t.saved_request_id)?.collection_id ?? null,
       pre_request_script: t.pre_request_script || '',
       test_script: t.test_script || ''
     };
@@ -808,6 +808,40 @@
       toastError(e);
     }
   }
+  let selectedReqIds = new Set();
+  function toggleSelect(id) {
+    const next = new Set(selectedReqIds);
+    if (next.has(id)) next.delete(id);
+    else next.add(id);
+    selectedReqIds = next;
+  }
+  async function deleteSelected() {
+    const n = selectedReqIds.size;
+    if (!n) return;
+    if (!(await confirmDialog(`Delete ${n} selected request${n === 1 ? '' : 's'}?`, { danger: true }))) return;
+    try {
+      for (const id of selectedReqIds) await api.savedRequestDelete(id);
+      selectedReqIds = new Set();
+      await reloadRequests();
+    } catch (e) {
+      toastError(e);
+    }
+  }
+
+  let dragReqId = null;
+  async function moveToCollection(collectionId) {
+    if (!dragReqId) return;
+    const s = $savedRequests.find((r) => r.id === dragReqId);
+    dragReqId = null;
+    if (!s || s.collection_id === collectionId) return;
+    try {
+      await api.savedRequestSave({ ...s, collection_id: collectionId });
+      if (draft.id === s.id) draft.collection_id = collectionId;
+      await reloadRequests();
+    } catch (e) {
+      toastError(e);
+    }
+  }
   async function delCollection(c) {
     if (!(await confirmDialog(`Delete collection "${c.name}" and its requests?`, { danger: true }))) return;
     try {
@@ -1052,6 +1086,17 @@
   {#if $requestTabs.length}
   <aside class="sidebar" style="width:{sidebarW}px">
     <div class="sec-head">
+      {#if selectedReqIds.size}
+        <span>{selectedReqIds.size} selected</span>
+        <div class="sec-actions">
+          <button class="icon-btn" title="Deselect all" on:click={() => (selectedReqIds = new Set())}
+            >{@html ICONS.close?.svg ?? '✕'}</button
+          >
+          <button class="icon-btn" title="Delete selected" on:click={deleteSelected}
+            >{@html ICONS.delete.svg}</button
+          >
+        </div>
+      {:else}
       <span>Collections</span>
       <div class="sec-actions">
         <button
@@ -1069,6 +1114,7 @@
           >{@html ICONS.newQuery.svg}</button
         >
       </div>
+      {/if}
     </div>
     <input
       type="file"
@@ -1080,7 +1126,13 @@
     <div class="scroll">
       {#each grouped.collections as col (col.id)}
         {@const isOpen = !collapsedCols.has(col.id)}
-        <button class="col-head" on:click={() => toggleCol(col.id)}>
+        <button
+          class="col-head"
+          class:drop-target={dragReqId !== null}
+          on:click={() => toggleCol(col.id)}
+          on:dragover|preventDefault
+          on:drop|preventDefault={() => moveToCollection(col.id)}
+        >
           <span class="chev">{@html isOpen ? ICONS.expandOpen.svg : ICONS.expandClosed.svg}</span>
           <span class="col-name">{col.name}</span>
           <span class="col-cnt">{col.items.length}</span>
@@ -1094,7 +1146,19 @@
         </button>
         {#if isOpen}
           {#each col.items as s (s.id)}
-            <div class="req-item" class:active={draft.id === s.id}>
+            <div
+              class="req-item"
+              class:active={draft.id === s.id}
+              draggable="true"
+              on:dragstart={() => (dragReqId = s.id)}
+              on:dragend={() => (dragReqId = null)}
+            >
+              <input
+                type="checkbox"
+                class="ri-check"
+                checked={selectedReqIds.has(s.id)}
+                on:click|stopPropagation={() => toggleSelect(s.id)}
+              />
               <button class="ri-main" on:click={() => loadSaved(s)}>
                 <span class="mm" style="color:var(--m-{s.method.toLowerCase()})">{s.method}</span>
                 <span class="rn">{s.name}</span>
@@ -1104,10 +1168,27 @@
           {/each}
         {/if}
       {/each}
-      {#if grouped.loose.length}
-        <div class="col-head"><span>Ungrouped</span></div>
+      {#if grouped.loose.length || dragReqId !== null}
+        <div
+          class="col-head"
+          class:drop-target={dragReqId !== null}
+          on:dragover|preventDefault
+          on:drop|preventDefault={() => moveToCollection(null)}
+        ><span>Ungrouped</span></div>
         {#each grouped.loose as s (s.id)}
-          <div class="req-item" class:active={draft.id === s.id}>
+          <div
+            class="req-item"
+            class:active={draft.id === s.id}
+            draggable="true"
+            on:dragstart={() => (dragReqId = s.id)}
+            on:dragend={() => (dragReqId = null)}
+          >
+            <input
+              type="checkbox"
+              class="ri-check"
+              checked={selectedReqIds.has(s.id)}
+              on:click|stopPropagation={() => toggleSelect(s.id)}
+            />
             <button class="ri-main" on:click={() => loadSaved(s)}>
               <span class="mm" style="color:var(--m-{s.method.toLowerCase()})">{s.method}</span>
               <span class="rn">{s.name}</span>
@@ -1651,6 +1732,11 @@
   .col-head:hover {
     background: var(--surface-3);
   }
+  .col-head.drop-target {
+    outline: 1px dashed var(--tool-requests-text, var(--accent));
+    outline-offset: -1px;
+    background: var(--surface-3);
+  }
   .col-head .chev {
     font-size: 9px;
     width: 10px;
@@ -1674,6 +1760,11 @@
   }
   .req-item.active {
     background: color-mix(in srgb, var(--tool-requests-text) 14%, transparent);
+  }
+  .ri-check {
+    flex-shrink: 0;
+    margin-left: 8px;
+    cursor: pointer;
   }
   .ri-main {
     flex: 1;
