@@ -299,7 +299,7 @@
               on:contextmenu={(e) => onTabContextMenu('sql', item.tab, e)}
               title={item.tab.title}
             >
-              {item.tab.dirty ? '•' : ''}{item.tab.title}
+              <span class="tab-title">{item.tab.dirty ? '•' : ''}{item.tab.title}</span>
               <span class="x" on:click={(e) => close(item.tab.id, e)} role="button" tabindex="-1"
                 >{@html ICONS.closeTab.svg}</span
               >
@@ -320,7 +320,7 @@
               <span class="rt-method" style="color: var(--m-{(item.tab.method || 'get').toLowerCase()})">
                 {item.tab.method}
               </span>
-              {item.tab.dirty ? '•' : ''}{item.tab.title}
+              <span class="tab-title">{item.tab.dirty ? '•' : ''}{item.tab.title}</span>
               <span class="x" on:click={(e) => closeReq(item.tab.id, e)} role="button" tabindex="-1"
                 >{@html ICONS.closeTab.svg}</span
               >
@@ -366,7 +366,7 @@
           <span class="rt-method" style="color: var(--m-{(item.tab.method || 'get').toLowerCase()})">
             {item.tab.method}
           </span>
-          {item.tab.dirty ? '•' : ''}{item.tab.title}
+          <span class="tab-title">{item.tab.dirty ? '•' : ''}{item.tab.title}</span>
           <span class="x" on:click={(e) => closeReq(item.tab.id, e)} role="button" tabindex="-1"
             >{@html ICONS.closeTab.svg}</span
           >
@@ -522,8 +522,21 @@
     border: none;
     cursor: pointer;
     max-width: 160px;
+  }
+  /* text-overflow:ellipsis on the flex row itself (.tab) doesn't work —
+     it has no effect on individual flex children, so a long title just
+     clipped the whole row at max-width, cutting off whatever came after
+     it in markup order — the close button, making it unclickable/
+     invisible instead of just hidden-until-hover. Truncating the title
+     itself (flex:1, its own overflow/ellipsis) while keeping .x
+     flex-shrink:0 keeps the close button visible and clickable no
+     matter how long the title is. */
+  .tab-title {
+    flex: 1;
+    min-width: 0;
     overflow: hidden;
     text-overflow: ellipsis;
+    white-space: nowrap;
   }
   .tab:hover {
     background: color-mix(in srgb, var(--c, var(--text-secondary)) 12%, transparent);
@@ -538,6 +551,7 @@
     box-shadow: inset 2px 0 0 0 var(--c, var(--text-primary));
   }
   .rt-method {
+    flex-shrink: 0;
     font-size: 9px;
     font-weight: 800;
   }
@@ -557,6 +571,7 @@
     display: inline-block;
   }
   .x {
+    flex-shrink: 0;
     font-size: 12px;
     opacity: 0.55;
   }

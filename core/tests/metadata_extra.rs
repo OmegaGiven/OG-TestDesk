@@ -352,3 +352,52 @@ async fn mock_routes_crud() {
     db.delete_mock_route("mr1").await.unwrap();
     assert!(db.list_mock_routes().await.unwrap().is_empty());
 }
+
+#[tokio::test]
+async fn delete_collection_deletes_its_requests_not_just_ungroups_them() {
+    // Regression test: unlike SQL saved-query folders (where deleting a
+    // folder ungroups its queries), deleting a Requests collection is
+    // meant to delete the requests inside it too — a plain `DELETE FROM
+    // request_collections` alone only fires the schema's ON DELETE SET
+    // NULL, leaving the requests behind as "ungrouped" instead of gone.
+    // Also covers a nested sub-collection: its requests must go too.
+    let db = store().await;
+
+    db.upsert_collection(&RequestCollection { id: "parent".into(), name: "Parent".into(), parent_id: None })
+        .await
+        .unwrap();
+    db.upsert_collection(&RequestCollection {
+        id: "child".into(),
+        name: "Child".into(),
+        parent_id: Some("parent".into()),
+    })
+    .await
+    .unwrap();
+
+    let mk = |id: &str, collection_id: &str| SavedRequest {
+        id: id.into(),
+        collection_id: Some(collection_id.into()),
+        name: id.into(),
+        method: "GET".into(),
+        url: "{{baseUrl}}/x".into(),
+        headers_json: "{}".into(),
+        body: None,
+        sort_order: 0,
+        created_at: 0,
+        pre_request_script: None,
+        test_script: None,
+        body_mode_json: None,
+    };
+    db.upsert_saved_request(&mk("req-in-parent", "parent")).await.unwrap();
+    db.upsert_saved_request(&mk("req-in-child", "child")).await.unwrap();
+
+    assert_eq!(db.list_saved_requests().await.unwrap().len(), 2);
+
+    db.delete_collection("parent").await.unwrap();
+
+    assert!(
+        db.list_saved_requests().await.unwrap().is_empty(),
+        "requests in the deleted collection and its sub-collection should be gone, not just ungrouped"
+    );
+    assert!(db.list_collections().await.unwrap().is_empty());
+}

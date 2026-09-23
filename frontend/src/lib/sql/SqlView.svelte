@@ -881,16 +881,16 @@
         <button class="btn ghost sm" title="Run every statement in the editor, one after another" on:click={runAll} disabled={tab.running}>
           Run All
         </button>
-        <button class="btn" on:click={saveQuery}>Save</button>
+        <button class="icon-btn big-glyph" title={ICONS.saveToBookmarks.label} on:click={saveQuery}
+          >{@html ICONS.saveToBookmarks.svg}</button
+        >
+        <button class="btn ghost sm" title={ICONS.saveFile.label} on:click={saveToFile}>Save As…</button>
         <button class="btn ghost sm" title="Format SQL (⇧⌥F)" on:click={formatSql}>Format</button>
         {#if tabConn && !tabConn.read_only}
           <button class="btn ghost sm" title="Import a CSV file into this connection" on:click={() => (showCsvImport = true)}>
             Import CSV
           </button>
         {/if}
-        <button class="icon-btn big-glyph" title={ICONS.saveFile.label} on:click={saveToFile}
-          >{@html ICONS.saveFile.svg}</button
-        >
         <span class="tb-conn" style="--c: {tabConn?.color || 'var(--conn-slate)'}">
           {tabConn?.nickname}
         </span>

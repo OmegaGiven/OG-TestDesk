@@ -1092,7 +1092,40 @@ impl MetadataStore {
         Ok(())
     }
 
+    /// Deletes a collection AND its saved requests — unlike SQL saved-query
+    /// folders (where deleting a folder ungroups its queries to the top
+    /// level), a Requests collection deletion is destructive by design:
+    /// the requests inside go with it. Sub-collections cascade via the
+    /// schema's ON DELETE CASCADE on parent_id, but saved_requests only
+    /// has ON DELETE SET NULL on collection_id (so a plain `DELETE FROM
+    /// request_collections` alone just ungroups the requests instead of
+    /// removing them) — walk the folder tree first and delete every
+    /// request under it (this collection and all its descendants)
+    /// explicitly before the collection rows themselves go.
     pub async fn delete_collection(&self, id: &str) -> Result<()> {
+        let mut ids = vec![id.to_string()];
+        let mut frontier = vec![id.to_string()];
+        while !frontier.is_empty() {
+            let mut next = Vec::new();
+            for parent in &frontier {
+                let children: Vec<String> =
+                    sqlx::query_scalar("SELECT id FROM request_collections WHERE parent_id = ?")
+                        .bind(parent)
+                        .fetch_all(&self.pool)
+                        .await?;
+                next.extend(children);
+            }
+            ids.extend(next.iter().cloned());
+            frontier = next;
+        }
+        let placeholders = ids.iter().map(|_| "?").collect::<Vec<_>>().join(",");
+        let sql = format!("DELETE FROM saved_requests WHERE collection_id IN ({placeholders})");
+        let mut q = sqlx::query(&sql);
+        for cid in &ids {
+            q = q.bind(cid);
+        }
+        q.execute(&self.pool).await?;
+
         sqlx::query("DELETE FROM request_collections WHERE id = ?")
             .bind(id)
             .execute(&self.pool)

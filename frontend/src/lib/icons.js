@@ -66,6 +66,7 @@ export const ICONS = {
   success: { svg: svg('<path d="M20 6 9 17l-5-5"/>'), label: 'Statement executed successfully', where: 'Result pane' },
   toInspector: { svg: svg('<path d="M5 12h14"/><path d="m12 5 7 7-7 7"/>'), label: 'Send to Inspector', where: 'SQL results, request response' },
   saveFile: { svg: svg('<path d="M15.2 3a2 2 0 0 1 1.4.6l3.8 3.8a2 2 0 0 1 .6 1.4V19a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2z"/><path d="M17 21v-7a1 1 0 0 0-1-1H8a1 1 0 0 0-1 1v7"/><path d="M7 3v4a1 1 0 0 0 1 1h7"/>'), label: 'Save this query to a .sql file', where: 'SQL toolbar' },
+  saveToBookmarks: { svg: svg('<path d="M12 7v6"/><path d="M15 10H9"/><path d="M17 3a2 2 0 0 1 2 2v15a1 1 0 0 1-1.496.868l-4.512-2.578a2 2 0 0 0-1.984 0l-4.512 2.578A1 1 0 0 1 5 20V5a2 2 0 0 1 2-2z"/>'), label: 'Save to Saved Queries', where: 'SQL toolbar' },
 
   connOk: { svg: svg('<circle cx="12" cy="12" r="8" fill="currentColor" stroke="none"/>'), label: 'Connection reachable', where: 'Connections dropdown', colorVar: '--ok' },
   connErr: { svg: svg('<circle cx="12" cy="12" r="8" fill="currentColor" stroke="none"/>'), label: 'Connection failed', where: 'Connections dropdown', colorVar: '--danger' },
