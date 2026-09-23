@@ -6,12 +6,20 @@
   let value = '';
   let inputEl;
 
-  // The HTML `autofocus` attribute is unreliable in an embedded
-  // webview (WKWebView on macOS notably) — it can lose the race
-  // against the modal's own mount/layout, leaving focus nowhere and
-  // every keystroke going nowhere. Focusing explicitly after Svelte's
-  // finished the DOM update is the reliable version of the same intent.
-  $: if ($dialogRequest?.type === 'prompt') {
+  // Init (seed `value`, focus the input) exactly once per dialog, the
+  // moment it opens — NOT a continuously-reactive block. `$: if (...) {
+  // value = ... }` looked right but wasn't: Svelte re-runs a component's
+  // reactive statements on every flush, and re-assigning `value` here
+  // (itself a dirtying write) was enough to make this block's own guard
+  // re-evaluate truthy on the very next flush too — every keystroke
+  // (which reassigns `value` via bind:value) re-triggered this block,
+  // which stomped `value` straight back to defaultValue before the
+  // keystroke could ever be seen: typing looked like it did nothing.
+  // Tracking which request we've already initialized makes the whole
+  // block run at most once per dialog, however many flushes happen.
+  let initedFor = null;
+  $: if ($dialogRequest?.type === 'prompt' && $dialogRequest !== initedFor) {
+    initedFor = $dialogRequest;
     value = $dialogRequest.defaultValue ?? '';
     tick().then(() => inputEl?.focus());
   }
