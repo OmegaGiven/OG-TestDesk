@@ -38,8 +38,54 @@
   const langComp = new Compartment();
   const roComp = new Compartment();
 
+  // The built-in schema completion (@codemirror/lang-sql) only resolves
+  // "ident." when `ident` is a literal table/schema name from `schema` —
+  // it has no idea `o.` means `orders` in `FROM orders o`. Aliases are
+  // how most real SQL is written, so without this the "." dropdown looks
+  // broken for the common case even though it technically works for the
+  // rare one (typing the full table name out again). Registered as an
+  // *additional* completion source (language.data.of, same mechanism
+  // lang-sql itself uses) alongside the built-in one rather than
+  // replacing it, so real-table-name and keyword completion are untouched.
+  const RESERVED_AFTER_TABLE = new Set([
+    'where', 'group', 'order', 'having', 'limit', 'on', 'join', 'inner', 'left',
+    'right', 'full', 'outer', 'union', 'set', 'values', 'returning', 'window',
+    'select', 'from', 'and', 'or', 'offset'
+  ]);
+  function aliasSchemaCompletion(tableSchema) {
+    return (context) => {
+      const word = context.matchBefore(/[A-Za-z_]\w*\.\w*/);
+      if (!word) return null;
+      const dot = word.text.indexOf('.');
+      const ident = word.text.slice(0, dot);
+      if (tableSchema[ident]) return null; // real table name — let the built-in source handle it
+      const aliasRe = /\b(?:from|join)\s+([A-Za-z_][\w.]*)\s+(?:as\s+)?([A-Za-z_]\w*)\b/gi;
+      const doc = context.state.doc.toString();
+      let table = null;
+      let m;
+      while ((m = aliasRe.exec(doc))) {
+        if (RESERVED_AFTER_TABLE.has(m[2].toLowerCase())) continue;
+        if (m[2].toLowerCase() === ident.toLowerCase()) {
+          table = m[1].split('.').pop();
+          break;
+        }
+      }
+      const cols = table ? tableSchema[table] : null;
+      if (!cols || !cols.length) return null;
+      return {
+        from: word.from + dot + 1,
+        options: cols.map((name) => ({ label: name, type: 'property' })),
+        validFor: /^\w*$/
+      };
+    };
+  }
+
   function langExt() {
-    if (language === 'sql') return sqlLang(schema ? { schema, upperCaseKeywords: true } : { upperCaseKeywords: true });
+    if (language === 'sql') {
+      const base = sqlLang(schema ? { schema, upperCaseKeywords: true } : { upperCaseKeywords: true });
+      if (!schema) return base;
+      return [base, base.language.data.of({ autocomplete: aliasSchemaCompletion(schema) })];
+    }
     if (language === 'json') return jsonLang();
     return [];
   }
@@ -141,6 +187,44 @@
               background: 'color-mix(in srgb, var(--text-secondary) 8%, transparent)'
             },
             '.cm-activeLineGutter': { background: 'transparent' },
+            // CodeMirror's autocomplete tooltip has no default theming of
+            // its own — it inherited the page's text color (white, in
+            // dark mode) with no matching background, so every row but
+            // the selected one (which gets CM's built-in blue highlight)
+            // was white text on an effectively-transparent/white
+            // background: unreadable.
+            '.cm-tooltip': {
+              border: '1px solid var(--border-strong, var(--border))',
+              backgroundColor: 'var(--surface-1)'
+            },
+            '.cm-tooltip.cm-tooltip-autocomplete': {
+              boxShadow: 'var(--shadow-pop, 0 4px 16px rgba(0, 0, 0, 0.3))'
+            },
+            '.cm-tooltip.cm-tooltip-autocomplete > ul': {
+              backgroundColor: 'var(--surface-1)',
+              fontFamily: 'var(--font-mono)',
+              maxHeight: '18em'
+            },
+            '.cm-tooltip.cm-tooltip-autocomplete > ul > li': {
+              color: 'var(--text-primary)'
+            },
+            '.cm-tooltip.cm-tooltip-autocomplete > ul > li[aria-selected]': {
+              backgroundColor: 'color-mix(in srgb, var(--tool-sql-text) 30%, var(--surface-2))',
+              color: 'var(--text-primary)'
+            },
+            '.cm-completionLabel': { color: 'var(--text-primary)' },
+            '.cm-completionDetail': { color: 'var(--text-muted)', fontStyle: 'normal' },
+            '.cm-completionMatchedText': {
+              color: 'var(--tool-sql-text)',
+              textDecoration: 'none',
+              fontWeight: 700
+            },
+            '.cm-completionIcon': { color: 'var(--text-muted)' },
+            '.cm-tooltip.cm-completionInfo': {
+              backgroundColor: 'var(--surface-1)',
+              color: 'var(--text-primary)',
+              border: '1px solid var(--border-strong, var(--border))'
+            },
             '.cm-matchingBracket': {
               background: 'color-mix(in srgb, var(--tool-sql-text) 25%, transparent)',
               outline: 'none'
