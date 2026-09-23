@@ -3,6 +3,7 @@
   import { downloadText, copyText, rowsToDelimited, rowsToObjects } from '../export.js';
   import { toast } from '../stores.js';
   import { ICONS } from '../icons.js';
+  import ExportMenu from '../components/ExportMenu.svelte';
   export let result;
   export let name = 'result';
   export let loadingMore = false; // parent is fetching the next page
@@ -271,22 +272,29 @@
   }
 
   $: fileBase = (name || 'result').replace(/[^\w.-]+/g, '_').slice(0, 60) || 'result';
-  function doExport(fmt) {
+  async function doExport(fmt, withHeaders = true) {
+    let saved;
     if (fmt === 'csv') {
-      downloadText(`${fileBase}.csv`, rowsToDelimited(cols, exportRows, ','), 'text/csv');
+      saved = await downloadText(`${fileBase}.csv`, rowsToDelimited(cols, exportRows, ',', withHeaders), 'text/csv');
     } else if (fmt === 'tsv') {
-      downloadText(`${fileBase}.tsv`, rowsToDelimited(cols, exportRows, '\t'), 'text/tab-separated-values');
+      saved = await downloadText(
+        `${fileBase}.tsv`,
+        rowsToDelimited(cols, exportRows, '\t', withHeaders),
+        'text/tab-separated-values'
+      );
     } else if (fmt === 'json') {
-      downloadText(
+      saved = await downloadText(
         `${fileBase}.json`,
-        JSON.stringify(rowsToObjects(cols, exportRows), null, 2),
+        JSON.stringify(rowsToObjects(cols, exportRows, withHeaders), null, 2),
         'application/json'
       );
-    } else if (fmt === 'copy') {
-      copyText(rowsToDelimited(cols, exportRows, '\t')).then((ok) =>
-        toast(ok ? `Copied ${exportRows.length.toLocaleString()} rows` : 'Copy blocked', ok ? 'success' : 'error', 1800)
-      );
     }
+    if (saved) toast(`Saved ${exportRows.length.toLocaleString()} rows`, 'success', 1800);
+  }
+  function doCopy(withHeaders = true) {
+    copyText(rowsToDelimited(cols, exportRows, '\t', withHeaders)).then((ok) =>
+      toast(ok ? `Copied ${exportRows.length.toLocaleString()} rows` : 'Copy blocked', ok ? 'success' : 'error', 1800)
+    );
   }
 
   function display(v) {
@@ -414,18 +422,23 @@
     {/if}
     <span class="export">
       <span class="ex-label"
-        >Export{editCount
-          ? ' (edited)'
+        >{editCount
+          ? '(edited)'
           : hasFilter
-            ? ' (filtered)'
+            ? '(filtered)'
             : result.has_more || result.page > 0
-              ? ' (loaded)'
+              ? '(loaded)'
               : ''}</span
       >
-      <button class="btn ghost sm" on:click={() => doExport('csv')}>CSV</button>
-      <button class="btn ghost sm" on:click={() => doExport('tsv')}>TSV</button>
-      <button class="btn ghost sm" on:click={() => doExport('json')}>JSON</button>
-      <button class="btn ghost sm" title="Copy as TSV (paste into a spreadsheet)" on:click={() => doExport('copy')}>{@html ICONS.copy.svg}</button>
+      <ExportMenu
+        formats={[
+          { key: 'csv', label: 'CSV' },
+          { key: 'tsv', label: 'TSV' },
+          { key: 'json', label: 'JSON' }
+        ]}
+        on:export={(e) => doExport(e.detail.format, e.detail.withHeaders)}
+        on:copy={(e) => doCopy(e.detail.withHeaders)}
+      />
     </span>
   </div>
 

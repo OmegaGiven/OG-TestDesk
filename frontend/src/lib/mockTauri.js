@@ -4,6 +4,13 @@
 // navigable and demoable without the Rust side. No-op inside Tauri.
 
 if (typeof window !== 'undefined' && !window.__TAURI_INTERNALS__) {
+  // Real Tauri never sets this — lets other modules (export.js, notably)
+  // tell "actually running in the app" apart from "mock preview", since
+  // mockTauri's own invoke() below resolves any plugin:* call to
+  // ok(null) rather than rejecting, so a plain try/catch around a
+  // native-plugin call can't reliably detect this environment on its own.
+  window.__OGTD_MOCK__ = true;
+
   const DEMO_SHOP = 'conn-demo-shop';
   const LOCAL_PG = 'conn-local-pg';
 

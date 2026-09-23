@@ -4,6 +4,7 @@
   import { inspectorPayload, toast, sendToInspector } from '../stores.js';
   import { ICONS } from '../icons.js';
   import { downloadText, copyText, rowsToDelimited } from '../export.js';
+  import ExportMenu from '../components/ExportMenu.svelte';
 
   let mode = 'tree'; // tree | table | summary | raw | chart
   let consumedChartOpen = null;
@@ -352,10 +353,11 @@
   // Export the loaded payload — JSON always, CSV when it's an array of
   // objects (same shape Table mode needs).
   $: fileBase = (label || 'inspector').replace(/[^\w.-]+/g, '_').slice(0, 60) || 'inspector';
-  function doExport(fmt) {
+  async function doExport(fmt, withHeaders = true) {
     if (root === undefined || root === null) return;
+    let saved;
     if (fmt === 'json') {
-      downloadText(`${fileBase}.json`, rawPretty, 'application/json');
+      saved = await downloadText(`${fileBase}.json`, rawPretty, 'application/json');
     } else if (fmt === 'csv') {
       if (!tableRows) {
         toast('CSV needs an array of objects — switch to Table mode to check the shape', 'error', 3000);
@@ -363,10 +365,12 @@
       }
       const csvCols = tableCols.map((name) => ({ name }));
       const csvRows = tableRows.map((r) => tableCols.map((c) => r[c]));
-      downloadText(`${fileBase}.csv`, rowsToDelimited(csvCols, csvRows, ','), 'text/csv');
-    } else if (fmt === 'copy') {
-      copyText(rawPretty).then((ok) => toast(ok ? 'Copied' : 'Copy blocked', ok ? 'success' : 'error', 1500));
+      saved = await downloadText(`${fileBase}.csv`, rowsToDelimited(csvCols, csvRows, ',', withHeaders), 'text/csv');
     }
+    if (saved) toast('Saved', 'success', 1500);
+  }
+  function doCopy() {
+    copyText(rawPretty).then((ok) => toast(ok ? 'Copied' : 'Copy blocked', ok ? 'success' : 'error', 1500));
   }
 </script>
 
@@ -391,12 +395,15 @@
     {/if}
     <span style="flex:1" />
     {#if root !== undefined && root !== null}
-      <span class="export">
-        <span class="ex-label">Export</span>
-        <button class="btn ghost sm" on:click={() => doExport('csv')}>CSV</button>
-        <button class="btn ghost sm" on:click={() => doExport('json')}>JSON</button>
-        <button class="btn ghost sm" title="Copy pretty JSON" on:click={() => doExport('copy')}>{@html ICONS.copy.svg}</button>
-      </span>
+      <ExportMenu
+        formats={[
+          { key: 'csv', label: 'CSV' },
+          { key: 'json', label: 'JSON' }
+        ]}
+        copyTitle="Copy pretty JSON"
+        on:export={(e) => doExport(e.detail.format, e.detail.withHeaders)}
+        on:copy={doCopy}
+      />
     {/if}
     <button class="btn ghost sm" on:click={openFilePicker}>Open file…</button>
     <input

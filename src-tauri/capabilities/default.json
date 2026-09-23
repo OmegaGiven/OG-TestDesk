@@ -12,6 +12,8 @@
     "core:window:allow-close",
     "core:window:allow-start-dragging",
     "core:window:allow-set-decorations",
-    "shell:allow-open"
+    "shell:allow-open",
+    "dialog:allow-save",
+    "fs:allow-write-text-file"
   ]
 }
