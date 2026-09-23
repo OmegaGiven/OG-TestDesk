@@ -219,8 +219,18 @@
   let loadedVarsFor = null;
   let varTimer;
 
+  // A {{var}} inside a commented-out line/block never actually reaches the
+  // server, so it shouldn't be able to block a run just because it's
+  // unfilled — strip comments before deciding what's "required". (Doesn't
+  // try to be a real SQL tokenizer — a "--"/"/*" inside a string literal
+  // will still get stripped, same simplification the run-detection
+  // heuristic on the Rust side makes.)
+  function stripSqlComments(sql) {
+    return sql.replace(/--[^\n]*/g, '').replace(/\/\*[\s\S]*?\*\//g, '');
+  }
+
   $: vars = tab
-    ? [...new Set([...tab.sql_text.matchAll(VAR_RE)].map((m) => m[1]))]
+    ? [...new Set([...stripSqlComments(tab.sql_text).matchAll(VAR_RE)].map((m) => m[1]))]
     : [];
 
   $: if (tab && tab.id !== loadedVarsFor) {
@@ -511,7 +521,7 @@
     const conn = get(connections).find((c) => c.id === t.connection_id);
     if (!conn) return;
     const raw = applyVars(t.sql_text, t.id);
-    if (VAR_RE.test(raw)) {
+    if (VAR_RE.test(stripSqlComments(raw))) {
       VAR_RE.lastIndex = 0;
       toast('Unfilled variables — set values in the bar above the editor', 'error', 4000);
       return;
@@ -641,7 +651,7 @@
     } else {
       sql = applyVars(selectionOrAll(t.sql_text), t.id);
       if (!sql.trim()) return;
-      if (VAR_RE.test(sql)) {
+      if (VAR_RE.test(stripSqlComments(sql))) {
         VAR_RE.lastIndex = 0;
         toast('Unfilled variables — set values in the bar above the editor', 'error', 4000);
         return;

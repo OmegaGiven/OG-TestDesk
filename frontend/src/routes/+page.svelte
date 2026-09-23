@@ -8,7 +8,6 @@
   import Toasts from '../lib/components/Toasts.svelte';
   import DialogHost from '../lib/components/DialogHost.svelte';
   import SettingsModal from '../lib/components/SettingsModal.svelte';
-  import HelpModal from '../lib/components/HelpModal.svelte';
   import ActivityModal from '../lib/components/ActivityModal.svelte';
   import WindowControls from '../lib/components/WindowControls.svelte';
   import ConnectionsMenu from '../lib/sql/ConnectionsMenu.svelte';
@@ -38,8 +37,12 @@
   } from '../lib/stores.js';
 
   let settingsOpen = false;
-  let helpOpen = false;
+  let settingsInitialTab = '';
   let activityOpen = false;
+  function openSettings(tabId = '') {
+    settingsInitialTab = tabId;
+    settingsOpen = true;
+  }
   const THEMES = ['system', 'light', 'dark'];
   function cycleTheme() {
     theme.update((t) => THEMES[(THEMES.indexOf(t) + 1) % THEMES.length]);
@@ -142,7 +145,7 @@
     if (q.has('connmenu')) connMenuOpen.set(true);
     if (q.has('colortheme')) appearance.update((a) => ({ ...a, colorTheme: q.get('colortheme') }));
     if (q.has('settings')) settingsOpen = true;
-    if (q.has('help')) helpOpen = true;
+    if (q.has('help')) openSettings('help');
     if (q.has('activity')) activityOpen = true;
     if (q.has('tool')) activeTool.set(q.get('tool'));
     if (q.has('sqltab')) {
@@ -197,8 +200,7 @@
     {#if isMac}<div class="tl-space" data-tauri-drag-region></div>{/if}
     <TopNav />
     <button class="chrome-btn" on:click={() => (activityOpen = true)} title="History & schedules">{@html ICONS.history.svg}</button>
-    <button class="chrome-btn" on:click={() => (helpOpen = true)} title="Help">{@html ICONS.help.svg}</button>
-    <button class="chrome-btn" on:click={() => (settingsOpen = true)} title="Settings">{@html ICONS.settings.svg}</button>
+    <button class="chrome-btn" on:click={() => openSettings()} title="Settings">{@html ICONS.settings.svg}</button>
     <button class="chrome-btn" on:click={cycleTheme} title="Theme: {$theme}">
       {@html $theme === 'dark' ? ICONS.themeDark.svg : $theme === 'light' ? ICONS.themeLight.svg : ICONS.themeSystem.svg}
     </button>
@@ -214,10 +216,7 @@
 </div>
 
 {#if settingsOpen}
-  <SettingsModal on:close={() => (settingsOpen = false)} />
-{/if}
-{#if helpOpen}
-  <HelpModal on:close={() => (helpOpen = false)} />
+  <SettingsModal initialTab={settingsInitialTab} on:close={() => (settingsOpen = false)} />
 {/if}
 {#if activityOpen}
   <ActivityModal on:close={() => (activityOpen = false)} />

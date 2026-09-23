@@ -1,61 +1,9 @@
 <script>
   import { onMount } from 'svelte';
-  import Modal from './Modal.svelte';
   import { ICONS } from '../icons.js';
-  import { open as openExternal } from '@tauri-apps/plugin-shell';
-  import { api } from '../api.js';
 
-  const ISSUE_REPO = 'OmegaGiven/OG-TestDesk';
   let searchEl;
   onMount(() => searchEl?.focus());
-
-  // Shown at the bottom of the nav so a bug report (or the person
-  // reading one) always knows which build they're looking at.
-  let appVersion = '';
-  onMount(async () => {
-    try {
-      const { getVersion } = await import('@tauri-apps/api/app');
-      appVersion = await getVersion();
-    } catch {}
-  });
-
-  async function reportIssue() {
-    let logTail = '';
-    try {
-      const errors = await api.errorLogList(5);
-      if (errors?.length) {
-        logTail =
-          '\n\n<details><summary>Last few logged errors</summary>\n\n```\n' +
-          errors
-            .map((e) => `[${new Date(e.ts * 1000).toISOString()}] ${e.source}: ${e.message}`)
-            .join('\n') +
-          '\n```\n</details>';
-      }
-    } catch {}
-    const platform =
-      typeof navigator !== 'undefined' ? navigator.platform || navigator.userAgent : 'unknown';
-    const body =
-      `**What happened**\n\n\n**What you expected**\n\n\n**Steps to reproduce**\n\n\n` +
-      `---\nVersion: ${appVersion || 'unknown'}\nPlatform: ${platform}${logTail}`;
-    const url =
-      `https://github.com/${ISSUE_REPO}/issues/new?` +
-      `title=${encodeURIComponent('')}&body=${encodeURIComponent(body)}`;
-    try {
-      await openExternal(url);
-    } catch {
-      // last resort if the shell plugin isn't available for some reason
-      window.open(url, '_blank');
-    }
-  }
-
-  async function sponsor() {
-    const url = 'https://github.com/sponsors/OmegaGiven';
-    try {
-      await openExternal(url);
-    } catch {
-      window.open(url, '_blank');
-    }
-  }
 
   // Each section: plain text `body` lines (rendered as <p>), `code` blocks,
   // and `steps` (ordered). Searchable over title + keywords + all text.
@@ -88,7 +36,7 @@
       blocks: [
         { p: 'Put {{name}} anywhere in a query. A "Variables" bar appears above the editor with a slot for each distinct name.' },
         { p: 'Values are substituted into the SQL exactly as typed right before the query runs (you control quoting — wrap string values in quotes yourself). Values are saved per tab and survive a restart.' },
-        { p: 'Run is blocked with a warning while any slot is empty.' },
+        { p: 'Run is blocked with a warning while any slot is empty — unless that {{name}} only appears inside a commented-out line/block, since a commented-out reference never actually reaches the server.' },
         { code: "SELECT * FROM orders\nWHERE status = '{{status}}' AND placed_at >= '{{since}}';" }
       ]
     },
@@ -98,7 +46,8 @@
       keywords: 'http api rest post get send response headers body json method url collection save',
       blocks: [
         { p: 'Build a request with the method dropdown + URL bar, then Send. The Params tab stays in sync with the query string in the URL. Headers and a JSON body (with a Beautify button) are on their own tabs.' },
-        { p: 'Save requests into collections in the sidebar. The response pane shows status, time, and size, with Body and Headers tabs; → Inspector opens a JSON response in the Inspector.' }
+        { p: 'Save requests into collections in the sidebar. The response pane shows status, time, and size, with Body and Headers tabs; → Inspector opens a JSON response in the Inspector.' },
+        { p: 'Typing "{{" in the URL bar or a header/param value pops a dropdown of every variable currently available (active environment + globals) — arrow keys + Enter/Tab to pick, Escape to dismiss.' }
       ]
     },
     {
@@ -139,7 +88,7 @@
       keywords: 'mcp ai claude model context protocol server sse token expose read-only connect agent local llm',
       blocks: [
         { p: 'OG TestDesk can run a local MCP server so an AI assistant can list your schemas and run queries / requests — without ever seeing your passwords. The server executes everything itself.' },
-        { p: 'Open Settings (⚙ in the top bar) → MCP server:' },
+        { p: 'Settings → MCP server:' },
         { steps: [
           'Tick "Enable MCP server". It binds to 127.0.0.1 on the chosen port (default 7788).',
           'In "Exposed connections", tick a connection to make it visible. It is read-only until you also tick "Writes" here and "Allow write statements" above.',
@@ -152,7 +101,8 @@
         { p: 'Claude Desktop — add to its MCP config:' },
         { code: '{\n  "mcpServers": {\n    "og-testdesk": {\n      "transport": "sse",\n      "url": "http://127.0.0.1:7788/sse?token=YOUR_TOKEN"\n    }\n  }\n}' },
         { p: 'Tools exposed: list_connections, list_schemas, list_columns, run_query, and (when enabled) list_saved_requests, run_saved_request, send_request.' },
-        { p: 'Security: the token is the only gate. Anyone on this machine who has the token and can reach the port can query your exposed connections. Regenerate the token (Settings → New) to revoke old clients.' }
+        { p: 'Security: the token is the only gate. Anyone on this machine who has the token and can reach the port can query your exposed connections. Regenerate the token (Settings → New) to revoke old clients.' },
+        { p: 'MCP-driven query/request runs show up in History tagged "MCP" by default — turn that off in Settings → MCP server for fully silent, backend-only execution.' }
       ]
     },
     {
@@ -221,60 +171,53 @@
   }
 </script>
 
-<Modal title="Help & documentation" width="760px" on:close>
-  <div class="help">
-    <aside class="nav">
-      <input class="input" placeholder="Search docs…" bind:value={query} bind:this={searchEl} />
-      <ul>
-        {#each matches as s (s.id)}
-          <li>
-            <button class:active={active.id === s.id} on:click={() => select(s.id)}>{s.title}</button>
-          </li>
-        {/each}
-        {#if matches.length === 0}
-          <li class="none">No matches.</li>
-        {/if}
-      </ul>
-      <div class="nav-footer">
-        <button class="report-issue" on:click={reportIssue}>Report an issue on GitHub ↗</button>
-        <button class="report-issue sponsor" on:click={sponsor}>{@html ICONS.heart.svg} Sponsor this project</button>
-        {#if appVersion}<div class="app-version">OG TestDesk v{appVersion}</div>{/if}
-      </div>
-    </aside>
-
-    <article class="content">
-      <h2>{active.title}</h2>
-      {#each active.blocks as b}
-        {#if b.p}
-          <p>{b.p}</p>
-        {:else if b.code}
-          <pre>{b.code}</pre>
-        {:else if b.steps}
-          <ol>
-            {#each b.steps as step}<li>{step}</li>{/each}
-          </ol>
-        {:else if b.iconTable}
-          <table class="icon-ref">
-            <thead>
-              <tr><th class="ic">Icon</th><th>Meaning</th><th>Where</th></tr>
-            </thead>
-            <tbody>
-              {#each Object.values(ICONS) as icon}
-                <tr>
-                  <td class="ic" style={icon.colorVar ? `color:var(${icon.colorVar})` : ''}>
-                    {@html icon.svg}
-                  </td>
-                  <td>{icon.label}</td>
-                  <td class="where">{icon.where}</td>
-                </tr>
-              {/each}
-            </tbody>
-          </table>
-        {/if}
+<div class="help">
+  <aside class="nav">
+    <input class="input" placeholder="Search docs…" bind:value={query} bind:this={searchEl} />
+    <ul>
+      {#each matches as s (s.id)}
+        <li>
+          <button class:active={active.id === s.id} on:click={() => select(s.id)}>{s.title}</button>
+        </li>
       {/each}
-    </article>
-  </div>
-</Modal>
+      {#if matches.length === 0}
+        <li class="none">No matches.</li>
+      {/if}
+    </ul>
+  </aside>
+
+  <article class="content">
+    <h2>{active.title}</h2>
+    {#each active.blocks as b}
+      {#if b.p}
+        <p>{b.p}</p>
+      {:else if b.code}
+        <pre>{b.code}</pre>
+      {:else if b.steps}
+        <ol>
+          {#each b.steps as step}<li>{step}</li>{/each}
+        </ol>
+      {:else if b.iconTable}
+        <table class="icon-ref">
+          <thead>
+            <tr><th class="ic">Icon</th><th>Meaning</th><th>Where</th></tr>
+          </thead>
+          <tbody>
+            {#each Object.values(ICONS) as icon}
+              <tr>
+                <td class="ic" style={icon.colorVar ? `color:var(${icon.colorVar})` : ''}>
+                  {@html icon.svg}
+                </td>
+                <td>{icon.label}</td>
+                <td class="where">{icon.where}</td>
+              </tr>
+            {/each}
+          </tbody>
+        </table>
+      {/if}
+    {/each}
+  </article>
+</div>
 
 <style>
   .help {
@@ -282,10 +225,11 @@
     gap: 0;
     min-height: 420px;
     max-height: 60vh;
-    margin: -14px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
   }
   .nav {
-    width: 220px;
+    width: 200px;
     flex-shrink: 0;
     border-right: 1px solid var(--border);
     padding: 12px;
@@ -315,28 +259,6 @@
   }
   .nav button:hover {
     background: var(--surface-3);
-  }
-  .nav-footer {
-    margin-top: auto;
-  }
-  .nav button.report-issue {
-    padding-top: 10px;
-    border-top: 1px solid var(--border);
-    border-radius: 0;
-    color: var(--text-muted);
-    font-size: 11px;
-  }
-  .nav button.report-issue.sponsor {
-    border-top: none;
-    padding-top: 2px;
-    color: var(--danger);
-    font-weight: 600;
-  }
-  .app-version {
-    padding: 4px 8px 0;
-    font-size: 10px;
-    color: var(--text-muted);
-    text-align: center;
   }
   .nav button.active {
     background: var(--tool-sql-tint);

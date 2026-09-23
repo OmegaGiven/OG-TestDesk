@@ -1,13 +1,16 @@
 <script>
   import Modal from './Modal.svelte';
+  import HelpPane from './HelpPane.svelte';
   import { onMount } from 'svelte';
   import { api } from '../api.js';
   import { ICONS } from '../icons.js';
+  import { open as openExternal } from '@tauri-apps/plugin-shell';
   import {
     connections,
     appearance,
     APPEARANCE_DEFAULT,
     effectiveMode,
+    theme,
     toast,
     toastError
   } from '../stores.js';
@@ -21,18 +24,74 @@
     normalizeHex
   } from '../themes.js';
 
+  const THEME_MODES = [
+    ['system', 'System'],
+    ['light', 'Light'],
+    ['dark', 'Dark']
+  ];
   const TABS = [
     ['appearance', 'Appearance'],
     ['theme', 'Colour theme'],
     ['results', 'Query results'],
     ['mcp', 'MCP server'],
-    ['access', 'MCP access']
+    ['access', 'MCP access'],
+    ['help', 'Help & docs']
   ];
-  let tab = 'appearance';
-  try {
-    const t = new URLSearchParams(location.search).get('settingstab');
-    if (t && TABS.some(([id]) => id === t)) tab = t;
-  } catch {}
+  export let initialTab = '';
+  let tab = TABS.some(([id]) => id === initialTab) ? initialTab : 'appearance';
+  if (tab === 'appearance') {
+    try {
+      const t = new URLSearchParams(location.search).get('settingstab');
+      if (t && TABS.some(([id]) => id === t)) tab = t;
+    } catch {}
+  }
+
+  // ---- shown in the rail footer, always visible regardless of tab —
+  // these used to live tucked inside the Help tab's own sidebar, easy to
+  // miss unless you'd already gone looking for help.
+  const ISSUE_REPO = 'OmegaGiven/OG-TestDesk';
+  let appVersion = '';
+  onMount(async () => {
+    try {
+      const { getVersion } = await import('@tauri-apps/api/app');
+      appVersion = await getVersion();
+    } catch {}
+  });
+  async function reportIssue() {
+    let logTail = '';
+    try {
+      const errors = await api.errorLogList(5);
+      if (errors?.length) {
+        logTail =
+          '\n\n<details><summary>Last few logged errors</summary>\n\n```\n' +
+          errors
+            .map((e) => `[${new Date(e.ts * 1000).toISOString()}] ${e.source}: ${e.message}`)
+            .join('\n') +
+          '\n```\n</details>';
+      }
+    } catch {}
+    const platform =
+      typeof navigator !== 'undefined' ? navigator.platform || navigator.userAgent : 'unknown';
+    const body =
+      `**What happened**\n\n\n**What you expected**\n\n\n**Steps to reproduce**\n\n\n` +
+      `---\nVersion: ${appVersion || 'unknown'}\nPlatform: ${platform}${logTail}`;
+    const url =
+      `https://github.com/${ISSUE_REPO}/issues/new?` +
+      `title=${encodeURIComponent('')}&body=${encodeURIComponent(body)}`;
+    try {
+      await openExternal(url);
+    } catch {
+      window.open(url, '_blank');
+    }
+  }
+  async function sponsor() {
+    const url = 'https://github.com/sponsors/OmegaGiven';
+    try {
+      await openExternal(url);
+    } catch {
+      window.open(url, '_blank');
+    }
+  }
 
   const PRESET_KEYS = Object.keys(COLOR_THEMES);
   const SWATCH_BASE = {
@@ -156,18 +215,35 @@
   $: isCustom = ($appearance.colorTheme || 'default') === 'custom';
 </script>
 
-<Modal title="Settings" width="720px" on:close>
+<Modal title="Settings" width={tab === 'help' ? '920px' : '720px'} on:close>
   <div class="wrap">
     <nav class="rail">
       {#each TABS as [id, label]}
         <button class:sel={tab === id} on:click={() => (tab = id)}>{label}</button>
       {/each}
+      <div class="rail-footer">
+        <button class="report-issue" on:click={reportIssue}>Report an issue on GitHub ↗</button>
+        <button class="report-issue sponsor" on:click={sponsor}>{@html ICONS.heart.svg} Sponsor this project</button>
+        {#if appVersion}<div class="app-version">OG TestDesk v{appVersion}</div>{/if}
+      </div>
     </nav>
 
     <div class="pane">
+      {#if tab === 'help'}
+        <HelpPane />
+      {/if}
       {#if tab === 'appearance'}
         <h3>Appearance</h3>
         <p class="muted">Applies instantly. Stored on this device.</p>
+
+        <div class="field">
+          <label>Mode</label>
+          <div class="seg">
+            {#each THEME_MODES as [k, label]}
+              <button class:sel={$theme === k} on:click={() => theme.set(k)}>{label}</button>
+            {/each}
+          </div>
+        </div>
 
         <div class="row">
           <div class="field">
@@ -216,6 +292,16 @@
 
       {#if tab === 'theme'}
         <h3>Colour theme</h3>
+
+        <div class="field">
+          <label>Mode</label>
+          <div class="seg">
+            {#each THEME_MODES as [k, label]}
+              <button class:sel={$theme === k} on:click={() => theme.set(k)}>{label}</button>
+            {/each}
+          </div>
+        </div>
+
         <div class="theme-swatches">
           {#each PRESET_KEYS as key}
             <button
@@ -262,7 +348,7 @@
             </div>
             {#if editMode !== effectiveMode()}
               <p class="muted note">
-                Editing the <b>{editMode}</b> palette — switch the app to {editMode} mode (top-right)
+                Editing the <b>{editMode}</b> palette — switch the app to {editMode} mode (above)
                 to preview it live.
               </p>
             {/if}
@@ -500,6 +586,33 @@
     background: var(--tool-sql-tint);
     color: var(--tool-sql-text);
     font-weight: 600;
+  }
+  .rail-footer {
+    margin-top: auto;
+    display: flex;
+    flex-direction: column;
+  }
+  .rail-footer button.report-issue {
+    text-align: left;
+    background: none;
+    border: none;
+    cursor: pointer;
+    padding: 7px 9px 0;
+    padding-top: 10px;
+    border-top: 1px solid var(--border);
+    color: var(--text-muted);
+    font-size: 11px;
+  }
+  .rail-footer button.report-issue.sponsor {
+    border-top: none;
+    padding-top: 2px;
+    color: var(--danger);
+    font-weight: 600;
+  }
+  .rail-footer .app-version {
+    padding: 4px 9px 0;
+    font-size: 10px;
+    color: var(--text-muted);
   }
   .pane {
     flex: 1;

@@ -1,9 +1,9 @@
 // Central icon registry. Every icon button in the app pulls its markup
-// from here rather than hardcoding it — so the Help modal's icon
-// reference (HelpModal.svelte, "Icon reference" section) renders straight
-// from this same object. Change an icon here and it changes everywhere
-// it's used, docs included, in one edit — the two can never drift out of
-// sync.
+// from here rather than hardcoding it — so the Help tab's icon
+// reference (Settings > Help & docs, HelpPane.svelte, "Icon reference"
+// section) renders straight from this same object. Change an icon here
+// and it changes everywhere it's used, docs included, in one edit — the
+// two can never drift out of sync.
 //
 // Every entry is a real inline SVG (Lucide's icon set, ISC-licensed,
 // currentColor stroke so hover/theme color applies same as text would) —
