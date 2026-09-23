@@ -14,6 +14,12 @@ Built with Tauri (Rust core + native webview) and Svelte. Color-coded
 navigation — SQL blue, Requests green, Inspector violet — so it's
 always obvious which tool, connection, and tab you're looking at.
 
+<p align="center">
+  <a href="https://apps.apple.com/us/app/og-testdesk/id6812359658">Get it on the Mac App Store</a>
+  &middot;
+  <a href="https://github.com/OmegaGiven/OG-TestDesk/releases/latest">Direct download (macOS/Windows/Linux)</a>
+</p>
+
 ## Why this exists
 
 Most people juggle a SQL client, an HTTP client, and a JSON viewer as
