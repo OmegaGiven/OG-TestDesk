@@ -313,6 +313,71 @@
   function pick(r, c) {
     selected = [r, c];
   }
+
+  // ---- whole-row selection (rownum column) + Postico-style right-click
+  // export menu. `selectedRowIdx` holds indices into `rows` (same
+  // absolute indexing as `selected`'s row, i.e. startIdx+vi).
+  let selectedRowIdx = new Set();
+  let lastClickedRow = null;
+  let ctxMenu = null; // { x, y } | null
+  function pickRow(absIdx, e) {
+    if (e.shiftKey && lastClickedRow !== null) {
+      const [a, b] = [lastClickedRow, absIdx].sort((x, y) => x - y);
+      const s = new Set(selectedRowIdx);
+      for (let i = a; i <= b; i++) s.add(i);
+      selectedRowIdx = s;
+    } else if (e.metaKey || e.ctrlKey) {
+      const s = new Set(selectedRowIdx);
+      s.has(absIdx) ? s.delete(absIdx) : s.add(absIdx);
+      selectedRowIdx = s;
+      lastClickedRow = absIdx;
+    } else {
+      selectedRowIdx = new Set([absIdx]);
+      lastClickedRow = absIdx;
+    }
+    selected = null;
+  }
+  function openRowContextMenu(e, absIdx) {
+    e.preventDefault();
+    if (!selectedRowIdx.has(absIdx)) pickRow(absIdx, e);
+    ctxMenu = { x: e.clientX, y: e.clientY };
+  }
+  function closeCtxMenu() {
+    ctxMenu = null;
+  }
+  function selectedRowObjs() {
+    return [...selectedRowIdx].sort((a, b) => a - b).map((i) => rows[i]);
+  }
+  function copySelectedRows(withHeaders) {
+    const rws = selectedRowObjs();
+    if (!rws.length) return;
+    copyText(rowsToDelimited(cols, rws, '\t', withHeaders)).then((ok) =>
+      toast(ok ? `Copied ${rws.length.toLocaleString()} row${rws.length === 1 ? '' : 's'}` : 'Copy blocked', ok ? 'success' : 'error', 1800)
+    );
+    closeCtxMenu();
+  }
+  function copySelectedRowsJson() {
+    const rws = selectedRowObjs();
+    if (!rws.length) return;
+    copyText(JSON.stringify(rowsToObjects(cols, rws, true), null, 2)).then((ok) =>
+      toast(ok ? 'Copied as JSON' : 'Copy blocked', ok ? 'success' : 'error', 1800)
+    );
+    closeCtxMenu();
+  }
+  async function exportSelectedRows(fmt, withHeaders = true) {
+    const rws = selectedRowObjs();
+    if (!rws.length) return;
+    let saved;
+    if (fmt === 'csv') {
+      saved = await downloadText(`${fileBase}.csv`, rowsToDelimited(cols, rws, ',', withHeaders), 'text/csv');
+    } else if (fmt === 'tsv') {
+      saved = await downloadText(`${fileBase}.tsv`, rowsToDelimited(cols, rws, '\t', withHeaders), 'text/tab-separated-values');
+    } else if (fmt === 'json') {
+      saved = await downloadText(`${fileBase}.json`, JSON.stringify(rowsToObjects(cols, rws, withHeaders), null, 2), 'application/json');
+    }
+    if (saved) toast(`Saved ${rws.length.toLocaleString()} rows`, 'success', 1800);
+    closeCtxMenu();
+  }
   async function copyCell() {
     if (!selected) return;
     const row = rows[selected[0]];
@@ -325,6 +390,7 @@
     } catch {}
   }
   function key(e) {
+    if (e.key === 'Escape' && ctxMenu) closeCtxMenu();
     if ((e.metaKey || e.ctrlKey) && e.key === 'c') copyCell();
     if ((e.metaKey || e.ctrlKey) && e.key === 'f') {
       e.preventDefault();
@@ -488,8 +554,16 @@
           <tr class="spacer"><td colspan={visibleIdx.length + 1} style="height:{padTop}px"></td></tr>
         {/if}
         {#each visible as row, vi (startIdx + vi)}
-          <tr class:row-deleted={deletedRows.has(row)}>
-            <td class="rownum">
+          <tr
+            class:row-deleted={deletedRows.has(row)}
+            class:sel-row={selectedRowIdx.has(startIdx + vi)}
+            on:contextmenu={(e) => !(editing && editableTable) && openRowContextMenu(e, startIdx + vi)}
+          >
+            <td
+              class="rownum"
+              class:clickable={!(editing && editableTable)}
+              on:click={(e) => !(editing && editableTable) && pickRow(startIdx + vi, e)}
+            >
               {#if editing && editableTable}
                 <button
                   class="del-toggle"
@@ -566,6 +640,19 @@
       </tbody>
     </table>
   </div>
+  {#if ctxMenu}
+    <div class="ctx-backdrop" on:click={closeCtxMenu} on:contextmenu|preventDefault={closeCtxMenu}></div>
+    <div class="ctx-menu" style="left:{ctxMenu.x}px; top:{ctxMenu.y}px">
+      <div class="ctx-hdr">{selectedRowIdx.size} row{selectedRowIdx.size === 1 ? '' : 's'} selected</div>
+      <button class="ctx-item" on:click={() => copySelectedRows(true)}>Copy (with headers)</button>
+      <button class="ctx-item" on:click={() => copySelectedRows(false)}>Copy (no headers)</button>
+      <button class="ctx-item" on:click={copySelectedRowsJson}>Copy as JSON</button>
+      <div class="ctx-sep"></div>
+      <button class="ctx-item" on:click={() => exportSelectedRows('csv', true)}>Export selected as CSV…</button>
+      <button class="ctx-item" on:click={() => exportSelectedRows('tsv', true)}>Export selected as TSV…</button>
+      <button class="ctx-item" on:click={() => exportSelectedRows('json', true)}>Export selected as JSON…</button>
+    </div>
+  {/if}
 {/if}
 
 <style>
@@ -776,6 +863,59 @@
   }
   thead .rownum {
     z-index: 3;
+  }
+  .rownum.clickable {
+    cursor: pointer;
+  }
+  tr.sel-row td {
+    background: color-mix(in srgb, var(--tool-sql-text, var(--accent)) 16%, transparent);
+  }
+  tr.sel-row .rownum {
+    background: color-mix(in srgb, var(--tool-sql-text, var(--accent)) 28%, var(--surface-1));
+    color: var(--text-primary);
+    font-weight: 700;
+  }
+  .ctx-backdrop {
+    position: fixed;
+    inset: 0;
+    z-index: 200;
+  }
+  .ctx-menu {
+    position: fixed;
+    z-index: 201;
+    min-width: 220px;
+    background: var(--surface-1);
+    border: 1px solid var(--border-strong, var(--border));
+    border-radius: 6px;
+    box-shadow: var(--shadow-pop, 0 4px 16px rgba(0, 0, 0, 0.3));
+    padding: 4px;
+    font-size: 12.5px;
+  }
+  .ctx-hdr {
+    padding: 5px 8px;
+    color: var(--text-muted);
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.02em;
+  }
+  .ctx-item {
+    display: block;
+    width: 100%;
+    text-align: left;
+    background: none;
+    border: none;
+    color: var(--text-primary);
+    padding: 6px 8px;
+    border-radius: 4px;
+    cursor: pointer;
+  }
+  .ctx-item:hover {
+    background: var(--surface-3);
+  }
+  .ctx-sep {
+    height: 1px;
+    background: var(--border);
+    margin: 4px 2px;
   }
   td {
     cursor: default;
