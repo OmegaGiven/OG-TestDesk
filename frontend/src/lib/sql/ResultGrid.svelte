@@ -25,7 +25,22 @@
 
   let sortCol = -1;
   let sortDir = 1;
-  let selected = null; // [r,c]
+  // Cell selection is a rectangle (anchor -> focus), not a single point —
+  // click-drag across cells extends it, like a spreadsheet/Postico, not
+  // a text selection. `user-select: none` on the cells (see style below)
+  // is what stops the browser's own text-highlight from fighting it
+  // during the drag.
+  let selAnchor = null; // [r,c]
+  let selFocus = null; // [r,c]
+  let isSelectingCells = false;
+  $: selRect = selAnchor && selFocus
+    ? {
+        r0: Math.min(selAnchor[0], selFocus[0]),
+        r1: Math.max(selAnchor[0], selFocus[0]),
+        c0: Math.min(selAnchor[1], selFocus[1]),
+        c1: Math.max(selAnchor[1], selFocus[1])
+      }
+    : null;
 
   let search = '';
   let colFilters = {}; // colIndex -> string
@@ -313,8 +328,18 @@
     return 'txt';
   }
 
-  function pick(r, c) {
-    selected = [r, c];
+  function startCellSelect(r, c) {
+    selAnchor = [r, c];
+    selFocus = [r, c];
+    isSelectingCells = true;
+    selectedRowIdx = new Set();
+  }
+  function extendCellSelect(r, c) {
+    if (!isSelectingCells) return;
+    selFocus = [r, c];
+  }
+  function endCellSelect() {
+    isSelectingCells = false;
   }
 
   // ---- whole-row selection (rownum column) + Postico-style right-click
@@ -338,7 +363,8 @@
       selectedRowIdx = new Set([absIdx]);
       lastClickedRow = absIdx;
     }
-    selected = null;
+    selAnchor = null;
+    selFocus = null;
   }
   function openRowContextMenu(e, absIdx) {
     e.preventDefault();
@@ -381,20 +407,41 @@
     if (saved) toast(`Saved ${rws.length.toLocaleString()} rows`, 'success', 1800);
     closeCtxMenu();
   }
-  async function copyCell() {
-    if (!selected) return;
-    const row = rows[selected[0]];
-    const v = row ? cellVal(row, selected[1]) : undefined;
-    if (v === undefined) return;
+  async function copySelectedCells() {
+    if (!selRect) return;
+    // A true 1x1 selection copies the raw value (pretty-printed if it's
+    // an object) rather than a single-cell TSV line — matches the old
+    // single-cell-copy behavior exactly for the common case.
+    if (selRect.r0 === selRect.r1 && selRect.c0 === selRect.c1) {
+      const row = rows[selRect.r0];
+      const v = row ? cellVal(row, selRect.c0) : undefined;
+      if (v === undefined) return;
+      try {
+        await navigator.clipboard.writeText(
+          typeof v === 'object' ? JSON.stringify(v, null, 2) : String(v)
+        );
+      } catch {}
+      return;
+    }
+    const lines = [];
+    for (let r = selRect.r0; r <= selRect.r1; r++) {
+      const row = rows[r];
+      if (!row) continue;
+      const cells = [];
+      for (let c = selRect.c0; c <= selRect.c1; c++) {
+        if (hiddenCols.has(c)) continue;
+        const v = cellVal(row, c);
+        cells.push(v === null || v === undefined ? '' : typeof v === 'object' ? JSON.stringify(v) : String(v));
+      }
+      lines.push(cells.join('\t'));
+    }
     try {
-      await navigator.clipboard.writeText(
-        typeof v === 'object' ? JSON.stringify(v, null, 2) : String(v)
-      );
+      await navigator.clipboard.writeText(lines.join('\n'));
     } catch {}
   }
   function key(e) {
     if (e.key === 'Escape' && ctxMenu) closeCtxMenu();
-    if ((e.metaKey || e.ctrlKey) && e.key === 'c') copyCell();
+    if ((e.metaKey || e.ctrlKey) && e.key === 'c') copySelectedCells();
     if ((e.metaKey || e.ctrlKey) && e.key === 'f') {
       e.preventDefault();
       document.querySelector('.grid-search')?.focus();
@@ -402,7 +449,7 @@
   }
 </script>
 
-<svelte:window on:keydown={key} />
+<svelte:window on:keydown={key} on:mouseup={endCellSelect} />
 
 {#if !result}
   <div class="empty">Run a query to see results.</div>
@@ -593,9 +640,14 @@
               {:else}
                 <td
                   class={cls(cellVal(row, c))}
-                  class:sel={selected && selected[0] === startIdx + vi && selected[1] === c}
+                  class:sel={selRect &&
+                    startIdx + vi >= selRect.r0 &&
+                    startIdx + vi <= selRect.r1 &&
+                    c >= selRect.c0 &&
+                    c <= selRect.c1}
                   class:edited={hasEdit(row, c)}
-                  on:click={() => pick(startIdx + vi, c)}
+                  on:mousedown={() => startCellSelect(startIdx + vi, c)}
+                  on:mouseenter={() => extendCellSelect(startIdx + vi, c)}
                   title={display(cellVal(row, c))}
                 >
                   {display(cellVal(row, c))}
@@ -921,11 +973,17 @@
     margin: 4px 2px;
   }
   td {
-    cursor: default;
+    cursor: cell;
+    /* A click-drag across cells is a range selection, not a text
+       selection — this is what keeps the browser's own text-highlight
+       (and its "select whole words" drag behavior) from fighting the
+       Postico-style cell-range selection below. */
+    user-select: none;
   }
   td.sel {
-    outline: 2px solid var(--tool-sql-text);
-    outline-offset: -2px;
+    background: color-mix(in srgb, var(--tool-sql-text, var(--accent)) 18%, transparent);
+    outline: 1px solid var(--tool-sql-text, var(--accent));
+    outline-offset: -1px;
   }
   td.null {
     color: var(--text-muted);
