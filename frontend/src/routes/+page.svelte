@@ -43,10 +43,6 @@
     settingsInitialTab = tabId;
     settingsOpen = true;
   }
-  const THEMES = ['system', 'light', 'dark'];
-  function cycleTheme() {
-    theme.update((t) => THEMES[(THEMES.indexOf(t) + 1) % THEMES.length]);
-  }
 
   function onKey(e) {
     if ((e.metaKey || e.ctrlKey) && ['1', '2', '3'].includes(e.key)) {
@@ -201,9 +197,6 @@
     <TopNav />
     <button class="chrome-btn" on:click={() => (activityOpen = true)} title="History & schedules">{@html ICONS.history.svg}</button>
     <button class="chrome-btn" on:click={() => openSettings()} title="Settings">{@html ICONS.settings.svg}</button>
-    <button class="chrome-btn" on:click={cycleTheme} title="Theme: {$theme}">
-      {@html $theme === 'dark' ? ICONS.themeDark.svg : $theme === 'light' ? ICONS.themeLight.svg : ICONS.themeSystem.svg}
-    </button>
     {#if !isMac}<WindowControls />{/if}
   </div>
 
