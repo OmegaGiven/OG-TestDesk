@@ -110,12 +110,25 @@
     background: color-mix(in srgb, var(--tool-inspector-text) 18%, transparent);
   }
   .chev {
-    width: 10px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    align-self: stretch;
+    width: 16px;
     color: var(--text-muted);
     font-size: 8px;
+    cursor: pointer;
+  }
+  .chev:hover {
+    color: var(--text-primary);
+    background: color-mix(in srgb, var(--tool-inspector-text) 16%, transparent);
   }
   .chev.hidden {
     visibility: hidden;
+    cursor: default;
+  }
+  .chev.hidden:hover {
+    background: none;
   }
   .key {
     color: var(--j-key);
