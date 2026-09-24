@@ -364,6 +364,67 @@ pub fn driver_for(kind: DbKind) -> Box<dyn DbDriver> {
     }
 }
 
+/// Blanks out `--`/`/* */` comment bodies and single-quoted string
+/// literal contents (keeping the surrounding structure/word-boundaries
+/// intact) — so a later whole-word search can't be fooled by text that
+/// only *looks* like SQL because it's sitting inside a comment or a
+/// string value. Security-relevant: `stmt_returns_rows` uses this to
+/// decide whether a statement is allowed to run on a read-only (e.g.
+/// MCP-exposed) connection — a naive substring search on the raw text
+/// let `DELETE FROM users -- returning` or `SET x = 'returning'` count
+/// as "row-returning" and bypass that gate.
+fn strip_comments_and_strings(sql: &str) -> String {
+    let mut out = String::with_capacity(sql.len());
+    let mut chars = sql.chars().peekable();
+    while let Some(c) = chars.next() {
+        if c == '-' && chars.peek() == Some(&'-') {
+            chars.next();
+            for c2 in chars.by_ref() {
+                if c2 == '\n' {
+                    out.push('\n');
+                    break;
+                }
+            }
+            continue;
+        }
+        if c == '/' && chars.peek() == Some(&'*') {
+            chars.next();
+            let mut prev = '\0';
+            for c2 in chars.by_ref() {
+                if prev == '*' && c2 == '/' {
+                    break;
+                }
+                prev = c2;
+            }
+            continue;
+        }
+        if c == '\'' {
+            out.push(' ');
+            while let Some(c2) = chars.next() {
+                if c2 == '\'' {
+                    if chars.peek() == Some(&'\'') {
+                        chars.next(); // escaped '' inside the literal
+                        continue;
+                    }
+                    break;
+                }
+            }
+            out.push(' ');
+            continue;
+        }
+        out.push(c);
+    }
+    out
+}
+
+/// Whole-word (not substring) search for a genuine `RETURNING` clause,
+/// ignoring anything inside a comment or string literal.
+fn has_returning_clause(sql: &str) -> bool {
+    strip_comments_and_strings(sql)
+        .split(|c: char| !c.is_alphanumeric() && c != '_')
+        .any(|tok| tok.eq_ignore_ascii_case("returning"))
+}
+
 /// Heuristic: does this statement return rows? Used to decide between
 /// reporting a row set vs. an affected-row count, and to enforce
 /// read-only access (see the MCP server).
@@ -371,7 +432,7 @@ pub fn stmt_returns_rows(sql: &str) -> bool {
     matches!(
         leading_keyword(sql).as_str(),
         "select" | "with" | "show" | "explain" | "table" | "values" | "pragma" | "describe" | "desc"
-    ) || sql.to_ascii_lowercase().contains(" returning ")
+    ) || has_returning_clause(sql)
 }
 
 #[cfg(test)]
@@ -479,6 +540,27 @@ mod tests {
         assert!(!stmt_returns_rows("UPDATE t SET a = 1"));
         assert!(!stmt_returns_rows("DELETE FROM t"));
         assert!(!stmt_returns_rows("CREATE TABLE t (a int)"));
+    }
+
+    #[test]
+    fn stmt_returns_rows_does_not_bypass_on_a_fake_returning() {
+        // Regression test: this used to be a naive `.contains(" returning
+        // ")` substring search, which any of these could satisfy without
+        // the statement actually having a RETURNING clause — letting a
+        // write statement on a read-only (e.g. MCP) connection through.
+        assert!(!stmt_returns_rows("DELETE FROM users -- returning"));
+        assert!(!stmt_returns_rows("DELETE FROM users /* returning */"));
+        assert!(!stmt_returns_rows("UPDATE t SET note = 'returning' WHERE id = 1"));
+        assert!(!stmt_returns_rows("UPDATE t SET note = 'still returning here' WHERE id = 1"));
+        assert!(!stmt_returns_rows("DELETE FROM nonreturning_log"));
+        // A real RETURNING clause must still be detected, comments/quotes
+        // notwithstanding.
+        assert!(stmt_returns_rows(
+            "UPDATE t SET a = 1 WHERE id = 1 /* note */ RETURNING a"
+        ));
+        assert!(stmt_returns_rows(
+            "UPDATE t SET note = 'x''y' WHERE id = 1 RETURNING id"
+        ));
     }
 
     #[test]
