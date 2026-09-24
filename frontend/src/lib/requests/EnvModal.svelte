@@ -24,35 +24,59 @@
   let expandedId = null;
   let drafts = {};
 
-  function draftFromGlobals() {
+  // A row marked "secret" never has its real value written into
+  // variables_json (the plain metadata DB) — only `{{secret:<key>}}`
+  // does, same mechanism as the Auth tab (see RequestsView.svelte's
+  // secretPlaceholder). The real value lives in the OS keychain,
+  // fetched back here only for editing.
+  const SECRET_RE = /^\{\{secret:([^}]+)\}\}$/;
+  async function rowsFromEntries(entries) {
+    const rows = await Promise.all(
+      entries.map(async ([k, v]) => {
+        const s = String(v);
+        const m = s.match(SECRET_RE);
+        if (!m) return { k, v: s, secret: false, secretKey: '' };
+        let resolved = '';
+        try {
+          resolved = (await api.secretGet(m[1])) || '';
+        } catch {}
+        return { k, v: resolved, secret: true, secretKey: m[1] };
+      })
+    );
+    rows.push({ k: '', v: '', secret: false, secretKey: '' });
+    return rows;
+  }
+  async function draftFromGlobals() {
     return {
       name: 'Globals',
-      vars: Object.entries($requestGlobals)
-        .map(([k, v]) => ({ k, v: String(v) }))
-        .concat({ k: '', v: '' })
+      vars: await rowsFromEntries(Object.entries($requestGlobals))
     };
   }
-  function draftFromEnv(env) {
+  async function draftFromEnv(env) {
     const obj = JSON.parse(env.variables_json || '{}');
     return {
       name: env.name,
       is_active: env.is_active,
-      vars: Object.entries(obj)
-        .map(([k, v]) => ({ k, v: String(v) }))
-        .concat({ k: '', v: '' })
+      vars: await rowsFromEntries(Object.entries(obj))
     };
   }
+  function toggleSecret(id, i) {
+    const row = drafts[id].vars[i];
+    row.secret = !row.secret;
+    if (!row.secret) row.secretKey = ''; // un-marking mints a fresh key on next save
+    drafts = drafts;
+  }
 
-  function toggle(id, seed) {
+  async function toggle(id, seed) {
     if (expandedId === id) {
       expandedId = null;
       return;
     }
     expandedId = id;
-    if (!drafts[id]) drafts = { ...drafts, [id]: seed() };
+    if (!drafts[id]) drafts = { ...drafts, [id]: await seed() };
   }
   function addRow(id) {
-    drafts[id].vars = [...drafts[id].vars, { k: '', v: '' }];
+    drafts[id].vars = [...drafts[id].vars, { k: '', v: '', secret: false, secretKey: '' }];
     drafts = drafts;
   }
   function removeRow(id, i) {
@@ -64,7 +88,11 @@
     const id = '';
     drafts = {
       ...drafts,
-      [id]: { name: 'New environment', is_active: list.length === 0, vars: [{ k: '', v: '' }] }
+      [id]: {
+        name: 'New environment',
+        is_active: list.length === 0,
+        vars: [{ k: '', v: '', secret: false, secretKey: '' }]
+      }
     };
     expandedId = id;
   }
@@ -72,7 +100,21 @@
   async function save(id) {
     const draft = drafts[id];
     const variables = {};
-    for (const { k, v } of draft.vars) if (k.trim()) variables[k.trim()] = v;
+    for (const row of draft.vars) {
+      if (!row.k.trim()) continue;
+      if (row.secret && row.v) {
+        if (!row.secretKey) row.secretKey = crypto.randomUUID();
+        try {
+          await api.secretSet(row.secretKey, row.v);
+        } catch (e) {
+          toastError(e);
+          return;
+        }
+        variables[row.k.trim()] = `{{secret:${row.secretKey}}}`;
+      } else {
+        variables[row.k.trim()] = row.v;
+      }
+    }
     try {
       if (id === GLOBALS_KEY) {
         await saveGlobals(variables);
@@ -139,13 +181,21 @@
         <div class="editor">
           <p class="hint" style="margin-top:0">
             Globals apply to every request. The active environment overrides a global with the same name.
+            Click {@html ICONS.lockOpen.svg} on a row to store its value in the OS keychain instead of the plain database — for an API key, token, or password.
           </p>
           <div class="vars">
-            <div class="vh"><span>Variable</span><span>Value</span><span /></div>
+            <div class="vh"><span>Variable</span><span>Value</span><span /><span /></div>
             {#each drafts[GLOBALS_KEY].vars as row, i}
               <div class="vr">
                 <input class="input mono" placeholder="baseUrl" bind:value={row.k} />
                 <input class="input mono" placeholder="https://api.example.com" bind:value={row.v} />
+                <button
+                  class="icon-btn sm"
+                  class:secret-on={row.secret}
+                  title={row.secret ? ICONS.lockClosed.label : ICONS.lockOpen.label}
+                  on:click={() => toggleSecret(GLOBALS_KEY, i)}
+                  >{@html row.secret ? ICONS.lockClosed.svg : ICONS.lockOpen.svg}</button
+                >
                 <button class="icon-btn sm" title="Remove row" on:click={() => removeRow(GLOBALS_KEY, i)}
                   >{@html ICONS.delete.svg}</button
                 >
@@ -195,11 +245,18 @@
               <input type="checkbox" bind:checked={drafts[env.id].is_active} /> Active
             </label>
             <div class="vars">
-              <div class="vh"><span>Variable</span><span>Value</span><span /></div>
+              <div class="vh"><span>Variable</span><span>Value</span><span /><span /></div>
               {#each drafts[env.id].vars as row, i}
                 <div class="vr">
                   <input class="input mono" placeholder="baseUrl" bind:value={row.k} />
                   <input class="input mono" placeholder="https://api.example.com" bind:value={row.v} />
+                  <button
+                    class="icon-btn sm"
+                    class:secret-on={row.secret}
+                    title={row.secret ? ICONS.lockClosed.label : ICONS.lockOpen.label}
+                    on:click={() => toggleSecret(env.id, i)}
+                    >{@html row.secret ? ICONS.lockClosed.svg : ICONS.lockOpen.svg}</button
+                  >
                   <button class="icon-btn sm" title="Remove row" on:click={() => removeRow(env.id, i)}
                     >{@html ICONS.delete.svg}</button
                   >
@@ -207,7 +264,10 @@
               {/each}
               <button class="btn ghost sm" on:click={() => addRow(env.id)}>+ Row</button>
             </div>
-            <p class="hint">Use <code>{'{{baseUrl}}'}</code> in URL, headers, or body.</p>
+            <p class="hint">
+              Use <code>{'{{baseUrl}}'}</code> in URL, headers, or body. Click {@html ICONS.lockOpen.svg} on a
+              row to store its value in the OS keychain instead of the plain database.
+            </p>
             <div class="editor-actions">
               <button class="btn" on:click={() => (expandedId = null)}>Cancel</button>
               <button class="btn primary" on:click={() => save(env.id)}>Save</button>
@@ -228,11 +288,18 @@
             <input type="checkbox" bind:checked={drafts[''].is_active} /> Active
           </label>
           <div class="vars">
-            <div class="vh"><span>Variable</span><span>Value</span><span /></div>
+            <div class="vh"><span>Variable</span><span>Value</span><span /><span /></div>
             {#each drafts[''].vars as row, i}
               <div class="vr">
                 <input class="input mono" placeholder="baseUrl" bind:value={row.k} />
                 <input class="input mono" placeholder="https://api.example.com" bind:value={row.v} />
+                <button
+                  class="icon-btn sm"
+                  class:secret-on={row.secret}
+                  title={row.secret ? ICONS.lockClosed.label : ICONS.lockOpen.label}
+                  on:click={() => toggleSecret('', i)}
+                  >{@html row.secret ? ICONS.lockClosed.svg : ICONS.lockOpen.svg}</button
+                >
                 <button class="icon-btn sm" title="Remove row" on:click={() => removeRow('', i)}
                   >{@html ICONS.delete.svg}</button
                 >
@@ -331,7 +398,7 @@
   .vh,
   .vr {
     display: grid;
-    grid-template-columns: 1fr 1.4fr auto;
+    grid-template-columns: 1fr 1.4fr auto auto;
     gap: 6px;
     align-items: center;
   }
@@ -339,6 +406,9 @@
     font-size: 10px;
     text-transform: uppercase;
     color: var(--text-muted);
+  }
+  .secret-on {
+    color: var(--tool-requests-text);
   }
   .hint {
     font-size: 11px;

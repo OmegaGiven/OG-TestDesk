@@ -55,6 +55,8 @@ export const ICONS = {
   newQueryHere: { svg: svg('<path d="M5 12h14"/><path d="M12 5v14"/>'), label: 'New query in this folder', where: 'Saved queries folder row' },
   rename: { svg: svg('<path d="M21.174 6.812a1 1 0 0 0-3.986-3.987L3.842 16.174a2 2 0 0 0-.5.83l-1.321 4.352a.5.5 0 0 0 .623.622l4.353-1.32a2 2 0 0 0 .83-.497z"/><path d="m15 5 4 4"/>'), label: 'Rename / edit', where: 'Saved queries, connections' },
   delete: { svg: svg('<path d="M10 11v6"/><path d="M14 11v6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/><path d="M3 6h18"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>'), label: 'Delete / remove', where: 'Saved queries, requests, schedules, environments' },
+  lockClosed: { svg: svg('<rect width="18" height="11" x="3" y="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/>'), label: 'Secret — value is stored in the OS keychain, not the plain database', where: 'Environments / Globals variable rows' },
+  lockOpen: { svg: svg('<rect width="18" height="11" x="3" y="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 9.9-1"/>'), label: 'Not a secret — click to store this value in the OS keychain instead of the plain database', where: 'Environments / Globals variable rows' },
 
   columnFilters: { svg: svg('<path d="M10 20a1 1 0 0 0 .553.895l2 1A1 1 0 0 0 14 21v-7a2 2 0 0 1 .517-1.341L21.74 4.67A1 1 0 0 0 21 3H3a1 1 0 0 0-.742 1.67l7.225 7.989A2 2 0 0 1 10 14z"/>'), label: 'Per-column filters', where: 'Result grid toolbar' },
   columns: { svg: svg('<rect width="18" height="18" x="3" y="3" rx="2"/><path d="M9 3v18"/><path d="M15 3v18"/>'), label: 'Show / hide columns', where: 'Result grid toolbar' },
