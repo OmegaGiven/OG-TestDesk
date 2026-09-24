@@ -3196,7 +3196,7 @@ dependencies = [
 
 [[package]]
 name = "og_testdesk_core"
-version = "0.2.2-beta.1"
+version = "0.2.3-beta.1"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -3231,7 +3231,7 @@ dependencies = [
 
 [[package]]
 name = "og_testdesk_desktop"
-version = "0.2.2-beta.1"
+version = "0.2.3-beta.1"
 dependencies = [
  "anyhow",
  "axum 0.7.9",
