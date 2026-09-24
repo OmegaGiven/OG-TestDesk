@@ -6,6 +6,7 @@
   import { downloadText, copyText, rowsToDelimited } from '../export.js';
   import { api } from '../api.js';
   import { quote, literal } from '../sqlIdent.js';
+  import { decodeJwt } from '../jwt.js';
   import ExportMenu from '../components/ExportMenu.svelte';
 
   let mode = 'tree'; // tree | table | summary | raw | chart
@@ -16,6 +17,24 @@
   let selected = null; // {path, value, type}
   let rawMode = false;
   let rawText = '';
+
+  // ---- Decode JWT — a small paste-and-decode utility that hands the
+  // result to the normal sendToInspector() pipeline, so it gets Tree/
+  // Table/Summary/Raw and edit for free like any other loaded payload.
+  let jwtMode = false;
+  let jwtInput = '';
+  let jwtError = '';
+  function decodeJwtInput() {
+    jwtError = '';
+    try {
+      const decoded = decodeJwt(jwtInput);
+      sendToInspector('jwt', 'Decoded JWT', decoded);
+      jwtMode = false;
+      jwtInput = '';
+    } catch (e) {
+      jwtError = e.message;
+    }
+  }
 
   // ---- "Selected node" detail panel: draggable/resizable width, same
   // pattern as the SQL view's sidebar resizer
@@ -586,10 +605,28 @@
     <button class="btn ghost sm" class:active={rawMode} on:click={() => (rawMode = !rawMode)}>
       {rawMode ? '← Loaded data' : 'Paste JSON'}
     </button>
+    <button class="btn ghost sm" class:active={jwtMode} on:click={() => (jwtMode = !jwtMode)}>
+      {jwtMode ? '← Loaded data' : 'Decode JWT'}
+    </button>
   </div>
 
   <div class="body" bind:this={bodyEl}>
     <div class="content">
+      {#if jwtMode}
+        <div class="raw-tools">
+          <span class="jwt-hint">Paste a JWT — decoded header + payload load like any other JSON below.</span>
+        </div>
+        <textarea
+          class="raw jwt-input"
+          bind:value={jwtInput}
+          placeholder="eyJhbGciOi...header.eyJzdWIiOi...payload.signature"
+          spellcheck="false"
+        ></textarea>
+        {#if jwtError}<div class="raw-err">{jwtError}</div>{/if}
+        <div class="raw-view-tools">
+          <button class="btn primary sm" on:click={decodeJwtInput} disabled={!jwtInput.trim()}>Decode</button>
+        </div>
+      {/if}
       {#if rawMode}
         <div class="raw-tools">
           <button class="btn ghost sm" on:click={prettify} disabled={!rawText.trim()}>Prettify</button>
@@ -602,10 +639,10 @@
       {/if}
 
       {#if root === undefined || root === null}
-        {#if !rawMode}
+        {#if !rawMode && !jwtMode}
           <div class="empty">
             Run a SQL query or send a request, then choose <b>→ Inspector</b>.<br />
-            Or <b>Open file…</b> / <b>Paste JSON</b> above.
+            Or <b>Open file…</b> / <b>Paste JSON</b> / <b>Decode JWT</b> above.
           </div>
         {/if}
       {:else if mode === 'tree'}
@@ -887,6 +924,14 @@
   .ok-tag {
     font-size: 10px;
     color: var(--ok);
+  }
+  .jwt-hint {
+    font-size: 11px;
+    color: var(--text-muted);
+  }
+  .jwt-input {
+    height: 120px;
+    flex: none;
   }
   .raw-view {
     display: flex;
