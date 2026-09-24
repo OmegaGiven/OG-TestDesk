@@ -1236,6 +1236,16 @@ async fn record_mcp_request_history(
 }
 
 async fn apply_vars(meta: &MetadataStore, req: &mut HttpRequest) {
+    // Secret-backed auth headers (Bearer/Basic/API-key/OAuth2) resolve
+    // unconditionally — see resolve_secret_placeholders and
+    // main.rs's request_send, which does the same thing for the human's
+    // own Send button. Without this an MCP-triggered send of a saved
+    // request with a secret-backed auth header would literally send
+    // the `{{secret:...}}` placeholder text as the header value.
+    let secret_vars = og_testdesk_core::resolve_secret_placeholders(req);
+    if !secret_vars.is_empty() {
+        og_testdesk_core::apply_environment(req, &secret_vars);
+    }
     let mut vars: HashMap<String, String> = HashMap::new();
     if let Ok(Some(raw)) = meta.get_state("request_globals").await {
         if let Ok(g) = serde_json::from_str::<HashMap<String, String>>(&raw) {

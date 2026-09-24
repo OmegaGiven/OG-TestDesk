@@ -7,6 +7,13 @@ const call = (cmd, args) => invoke(cmd, args);
 export const api = {
   // window / environment
   windowEnvironment: () => call('window_environment'),
+  // Generic app-level secret storage (OS keychain / encrypted-file
+  // fallback) for things like a fetched OAuth2 token or an Auth tab
+  // value — see RequestsView.svelte's authSecretKey handling. Never
+  // stored in headers_json directly; only a {{secret:<key>}} placeholder is.
+  secretSet: (key, value) => call('secret_set', { key, value }),
+  secretGet: (key) => call('secret_get', { key }),
+  secretDelete: (key) => call('secret_delete', { key }),
   // Build-time capability flags (e.g. { preConnectCmd: false } in the Mac
   // App Store build, where arbitrary shell exec is sandboxed out).
   appCapabilities: () => call('app_capabilities'),

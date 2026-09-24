@@ -344,6 +344,26 @@
   let prevApiKeyName = '';
   let authSyncedTab = null;
   let authApplying = false;
+  // The live Bearer/Basic/API-key/OAuth2 value never gets written into
+  // draft.headers directly — only `{{secret:<authSecretKey>}}` does.
+  // The real value goes to the OS keychain (via api.secretSet), and gets
+  // resolved back to the real value only at send time (see core's
+  // resolve_secret_placeholders) — so headers_json in the plain
+  // metadata DB never holds a live credential, the same protection
+  // connection passwords already have. One key per draft, reused across
+  // edits (not regenerated per keystroke) and recovered from the
+  // existing placeholder on reopen, in syncAuthFromHeaders.
+  let authSecretKey = '';
+  let secretSaveTimer;
+  function secretPlaceholder(value) {
+    if (!authSecretKey) authSecretKey = crypto.randomUUID();
+    clearTimeout(secretSaveTimer);
+    const key = authSecretKey;
+    secretSaveTimer = setTimeout(() => {
+      api.secretSet(key, value).catch(() => {});
+    }, 400);
+    return `{{secret:${key}}}`;
+  }
 
   // OAuth2/Digest/AWS SigV4 configs have no header representation to
   // round-trip through the way Bearer/Basic/API-key do (a client secret
@@ -416,16 +436,28 @@
     loadAuthCfg(loadedTabId);
     authSyncedTab = loadedTabId;
   }
-  function syncAuthFromHeaders() {
+  async function syncAuthFromHeaders() {
     authApplying = true;
     const authHeader = findRow(draft.headers, 'authorization');
-    if (authHeader && /^bearer\s+/i.test(authHeader.v)) {
+    let headerValue = authHeader?.v || '';
+    const secretMatch = headerValue.match(/\{\{secret:([^}]+)\}\}/);
+    if (secretMatch) {
+      authSecretKey = secretMatch[1];
+      let resolved = '';
+      try {
+        resolved = (await api.secretGet(authSecretKey)) || '';
+      } catch {}
+      headerValue = headerValue.replace(secretMatch[0], resolved);
+    } else {
+      authSecretKey = '';
+    }
+    if (headerValue && /^bearer\s+/i.test(headerValue)) {
       authType = 'bearer';
-      authBearer = authHeader.v.replace(/^bearer\s+/i, '');
-    } else if (authHeader && /^basic\s+/i.test(authHeader.v)) {
+      authBearer = headerValue.replace(/^bearer\s+/i, '');
+    } else if (headerValue && /^basic\s+/i.test(headerValue)) {
       authType = 'basic';
       try {
-        const [u, ...rest] = atob(authHeader.v.replace(/^basic\s+/i, '')).split(':');
+        const [u, ...rest] = atob(headerValue.replace(/^basic\s+/i, '')).split(':');
         authUser = u || '';
         authPass = rest.join(':');
       } catch {
@@ -452,7 +484,11 @@
     if (authType === 'none') {
       draft.headers = removeRow(draft.headers, 'authorization');
     } else if (authType === 'bearer') {
-      draft.headers = upsertRow(draft.headers, 'Authorization', authBearer ? `Bearer ${authBearer}` : '');
+      draft.headers = upsertRow(
+        draft.headers,
+        'Authorization',
+        authBearer ? `Bearer ${secretPlaceholder(authBearer)}` : ''
+      );
     } else if (authType === 'basic') {
       let token = '';
       try {
@@ -460,14 +496,19 @@
       } catch {
         token = '';
       }
-      draft.headers = upsertRow(draft.headers, 'Authorization', token ? `Basic ${token}` : '');
+      draft.headers = upsertRow(
+        draft.headers,
+        'Authorization',
+        token ? `Basic ${secretPlaceholder(token)}` : ''
+      );
     } else if (authType === 'apikey') {
       draft.headers = removeRow(draft.headers, 'authorization');
       if (authKeyName) {
+        const placeholder = authKeyValue ? secretPlaceholder(authKeyValue) : '';
         if (authKeyIn === 'header') {
-          draft.headers = upsertRow(draft.headers, authKeyName, authKeyValue);
+          draft.headers = upsertRow(draft.headers, authKeyName, placeholder);
         } else {
-          draft.params = upsertRow(draft.params, authKeyName, authKeyValue);
+          draft.params = upsertRow(draft.params, authKeyName, placeholder);
           paramsToUrl();
         }
       }
@@ -507,7 +548,17 @@
       const token = tokenResp.access_token;
       if (!token) throw new Error('Response had no access_token');
       authApplying = true;
-      draft.headers = upsertRow(draft.headers, 'Authorization', `${tokenResp.token_type || 'Bearer'} ${token}`);
+      // Immediate, not debounced — a freshly-fetched token is a one-shot
+      // event, not live typing; write it to the keychain right away
+      // rather than racing a timer.
+      if (!authSecretKey) authSecretKey = crypto.randomUUID();
+      clearTimeout(secretSaveTimer);
+      await api.secretSet(authSecretKey, token).catch(() => {});
+      draft.headers = upsertRow(
+        draft.headers,
+        'Authorization',
+        `${tokenResp.token_type || 'Bearer'} {{secret:${authSecretKey}}}`
+      );
       setTimeout(() => (authApplying = false), 0);
       const expiresIn = tokenResp.expires_in ? `, expires in ${tokenResp.expires_in}s` : '';
       oauthStatus = `Token acquired${expiresIn}`;
@@ -1177,11 +1228,38 @@
   }
   let showCodeMenu = false;
   let codeLang = 'curl';
-  function codeSnippet() {
-    return CODE_GENERATORS[codeLang].generate({
+  let codeSnippetText = '';
+  // A code snippet (curl/etc.) is a copy-paste-ready command, so unlike
+  // every other place a {{secret:<key>}} placeholder deliberately stays
+  // unresolved, it needs the *real* auth value substituted in here —
+  // otherwise the generated command would literally contain the
+  // placeholder text instead of working. Resolving is async (a keychain
+  // read), so this is a real function call + reactive variable, not a
+  // plain sync one, generated on menu-open/language-change rather than
+  // live per keystroke (as if editing behind the code menu — reopen or
+  // switch tabs to refresh, plenty for a reference/copy helper).
+  async function resolveSecretPlaceholders(obj) {
+    const out = {};
+    for (const [k, v] of Object.entries(obj)) {
+      const m = typeof v === 'string' && v.match(/\{\{secret:([^}]+)\}\}/);
+      if (m) {
+        let resolved = '';
+        try {
+          resolved = (await api.secretGet(m[1])) || '';
+        } catch {}
+        out[k] = v.replace(m[0], resolved);
+      } else {
+        out[k] = v;
+      }
+    }
+    return out;
+  }
+  async function refreshCodeSnippet() {
+    const headers = await resolveSecretPlaceholders(headersObject());
+    codeSnippetText = CODE_GENERATORS[codeLang].generate({
       method: draft.method,
       url: draft.url,
-      headers: headersObject(),
+      headers,
       bodyMode: draft.bodyMode,
       body: ['GET', 'HEAD'].includes(draft.method) ? null : draft.body || null,
       formFields: draft.formFields,
@@ -1189,8 +1267,10 @@
       graphqlVariables: draft.graphqlVariables
     });
   }
+  $: if (showCodeMenu || codeLang) refreshCodeSnippet();
   async function copyCodeSnippet() {
-    const ok = await copyText(codeSnippet());
+    await refreshCodeSnippet();
+    const ok = await copyText(codeSnippetText);
     toast(ok ? `${CODE_GENERATORS[codeLang].label} snippet copied` : 'Copy blocked', ok ? 'success' : 'error', 1800);
   }
 
@@ -1740,7 +1820,7 @@
                       <button class:active={codeLang === key} on:click={() => (codeLang = key)}>{g.label}</button>
                     {/each}
                   </div>
-                  <pre class="code-snippet">{codeSnippet()}</pre>
+                  <pre class="code-snippet">{codeSnippetText}</pre>
                   <button class="btn ghost sm" on:click={copyCodeSnippet}>{@html ICONS.copy.svg} Copy</button>
                 </div>
               {/if}

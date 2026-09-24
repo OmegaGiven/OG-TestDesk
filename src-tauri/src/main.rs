@@ -379,6 +379,29 @@ fn secrets_status() -> SecretsBackend {
     SecretsStore::backend()
 }
 
+// Generic app-level secret storage for things that aren't a DB connection
+// password but still shouldn't sit in the plain metadata SQLite file —
+// a fetched OAuth2 access token, a Basic-auth user:pass, an API key
+// typed into a saved request's Auth tab. The frontend writes a `key`
+// here and stores only a `{{secret:<key>}}` placeholder in the actual
+// request/header text; `request_send` (and the MCP server's own send
+// path) resolve that placeholder from here at send time, the same way
+// `{{var}}` environment substitution already works. `authhdr:` prefixes
+// every key so this can never collide with a connection id (also keyed
+// directly, with no prefix, in the same underlying store).
+#[tauri::command]
+fn secret_set(key: String, value: String) -> R<()> {
+    SecretsStore::set(&format!("authhdr:{key}"), &value).map_err(err)
+}
+#[tauri::command]
+fn secret_get(key: String) -> R<Option<String>> {
+    SecretsStore::get(&format!("authhdr:{key}")).map_err(err)
+}
+#[tauri::command]
+fn secret_delete(key: String) -> R<()> {
+    SecretsStore::delete(&format!("authhdr:{key}")).map_err(err)
+}
+
 #[tauri::command]
 async fn saved_query_folders_list(state: State<'_, AppState>) -> R<Vec<SavedQueryFolder>> {
     state.metadata.list_saved_query_folders().await.map_err(err)
@@ -545,6 +568,16 @@ async fn request_send(
     saved_request_id: Option<String>,
     name: Option<String>,
 ) -> R<HttpResponse> {
+    // Secret-backed auth headers (Bearer/Basic/API-key/OAuth2 tokens —
+    // see resolve_secret_placeholders) resolve unconditionally, same as
+    // the human's own "Send" button always needing its own auth to
+    // actually go out regardless of the apply_env toggle (which only
+    // ever meant "also apply globals/environment", never "auth is
+    // optional").
+    let secret_vars = og_testdesk_core::resolve_secret_placeholders(&request);
+    if !secret_vars.is_empty() {
+        apply_environment(&mut request, &secret_vars);
+    }
     if apply_env.unwrap_or(true) {
         let mut vars: HashMap<String, String> = HashMap::new();
         // globals first (lowest precedence)
@@ -1138,6 +1171,9 @@ async fn main() {
             saved_query_save,
             saved_query_delete,
             secrets_status,
+            secret_set,
+            secret_get,
+            secret_delete,
             saved_query_folders_list,
             saved_query_folder_save,
             saved_query_folder_delete,

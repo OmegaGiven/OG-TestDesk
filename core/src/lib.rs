@@ -12,7 +12,7 @@ pub use drivers::{
     DbTime, ForeignKey, QueryColumn, QueryOpts, QueryResult, Relation, RelationKind, Schema,
     ServerInfo, SqlFunction,
 };
-pub use requests::{apply_environment, HttpRequest, HttpResponse};
+pub use requests::{apply_environment, resolve_secret_placeholders, HttpRequest, HttpResponse};
 pub use storage::errorlog::{clear_error_log, init_error_log, record_error, recent_errors, ErrorLogEntry};
 pub use storage::metadata::{
     Environment, HistoryEntry, MetadataStore, MockRoute, QueryTab, RequestCollection,

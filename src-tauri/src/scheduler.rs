@@ -158,6 +158,12 @@ pub async fn run_one(metadata: &MetadataStore, s: &Schedule) -> String {
                 Some(r) => r,
                 None => return "misconfigured".into(),
             };
+            // Secret-backed auth headers resolve unconditionally — see
+            // resolve_secret_placeholders and main.rs's request_send.
+            let secret_vars = og_testdesk_core::resolve_secret_placeholders(&req);
+            if !secret_vars.is_empty() {
+                apply_environment(&mut req, &secret_vars);
+            }
             apply_environment(&mut req, &active_vars(metadata).await);
             let net = crate::load_network_settings(metadata).await;
             let res = http_requests::send_with(&req, &net).await;

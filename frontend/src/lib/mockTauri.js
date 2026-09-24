@@ -184,8 +184,18 @@ if (typeof window !== 'undefined' && !window.__TAURI_INTERNALS__) {
 
   const state = { 'sqlvars:tab-4': JSON.stringify({ city: 'Dallas', status: 'paid' }) };
   const ok = (v) => Promise.resolve(v);
+  const mockSecrets = {};
 
   const handlers = {
+    secret_set: ({ key, value }) => {
+      mockSecrets[key] = value;
+      return ok(null);
+    },
+    secret_get: ({ key }) => ok(mockSecrets[key] ?? null),
+    secret_delete: ({ key }) => {
+      delete mockSecrets[key];
+      return ok(null);
+    },
     connections_list: () => ok(connections),
     connection_save: ({ config }) => ok({ ...config, id: config.id || 'conn-' + Date.now() }),
     connection_delete: () => ok(null),

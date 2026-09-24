@@ -114,6 +114,51 @@ fn is_text_content_type(ct: &str) -> bool {
         )
 }
 
+/// Finds every `{{secret:<key>}}` placeholder referenced in a request's
+/// url/headers/body and resolves each from the OS keychain/encrypted-
+/// file `SecretsStore` (namespaced `authhdr:<key>`) into a map ready to
+/// merge into `apply_environment`'s `vars` — the exact same
+/// `{{var}}`-substitution mechanism already used for environment
+/// variables, just sourced from the secrets store instead of the plain
+/// metadata DB. This is how a saved request's Bearer/Basic/API-key/
+/// OAuth2 auth value round-trips without that value ever being written
+/// to disk in `headers_json` — the frontend stores a placeholder there
+/// and the real value only ever lives in the secrets store, resolved
+/// right before the request actually goes out. A key with no matching
+/// secret (deleted, or the app's data moved machines) is silently
+/// skipped — `apply_environment` then leaves that one placeholder
+/// untouched, same as any other unknown `{{var}}`.
+pub fn resolve_secret_placeholders(req: &HttpRequest) -> HashMap<String, String> {
+    let mut keys = std::collections::HashSet::new();
+    let mut scan = |s: &str| {
+        let mut rest = s;
+        while let Some(start) = rest.find("{{secret:") {
+            let after = &rest[start + "{{secret:".len()..];
+            if let Some(end) = after.find("}}") {
+                keys.insert(after[..end].to_string());
+                rest = &after[end + 2..];
+            } else {
+                break;
+            }
+        }
+    };
+    scan(&req.url);
+    if let Some(b) = &req.body {
+        scan(b);
+    }
+    for (k, v) in &req.headers {
+        scan(k);
+        scan(v);
+    }
+    let mut vars = HashMap::new();
+    for key in keys {
+        if let Ok(Some(val)) = crate::storage::secrets::SecretsStore::get(&format!("authhdr:{key}")) {
+            vars.insert(format!("secret:{key}"), val);
+        }
+    }
+    vars
+}
+
 /// Substitutes `{{var}}` tokens in url/headers/body against an
 /// environment's variable set before sending.
 pub fn apply_environment(req: &mut HttpRequest, vars: &HashMap<String, String>) {
@@ -391,6 +436,39 @@ mod tests {
         let mut r = req("https://example.com", &[("{{hdr}}", "value")], None);
         apply_environment(&mut r, &vars);
         assert!(r.headers.contains_key("X-Custom"));
+    }
+
+    #[test]
+    fn resolve_secret_placeholders_reads_the_secrets_store_not_the_metadata_db() {
+        // Regression test for storing a live Bearer/Basic/API-key/OAuth2
+        // token in headers_json in plaintext: the frontend is meant to
+        // write only a `{{secret:<key>}}` placeholder there, with the
+        // real value living in SecretsStore — this confirms the send
+        // path actually resolves that placeholder back to the real
+        // value right before the request goes out.
+        let dir = std::env::temp_dir().join(format!("ogtd-secrets-test-{}", uuid::Uuid::new_v4()));
+        crate::storage::secrets::SecretsStore::init_fallback(dir);
+        crate::storage::secrets::SecretsStore::set("authhdr:tok1", "s3cr3t-bearer-value").unwrap();
+
+        let mut r = req(
+            "https://example.com",
+            &[("Authorization", "Bearer {{secret:tok1}}")],
+            None,
+        );
+        let vars = resolve_secret_placeholders(&r);
+        assert_eq!(vars.get("secret:tok1").map(String::as_str), Some("s3cr3t-bearer-value"));
+        apply_environment(&mut r, &vars);
+        assert_eq!(r.headers.get("Authorization").unwrap(), "Bearer s3cr3t-bearer-value");
+    }
+
+    #[test]
+    fn resolve_secret_placeholders_skips_a_missing_key() {
+        let vars = resolve_secret_placeholders(&req(
+            "https://example.com",
+            &[("Authorization", "Bearer {{secret:does-not-exist}}")],
+            None,
+        ));
+        assert!(vars.is_empty());
     }
 
     fn builder() -> reqwest::RequestBuilder {
