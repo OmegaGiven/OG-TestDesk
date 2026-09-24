@@ -1,5 +1,6 @@
 <script>
-  import { onMount, tick } from 'svelte';
+  import { onMount, tick, setContext } from 'svelte';
+  import { writable, get } from 'svelte/store';
   import CodeEditor from '../components/CodeEditor.svelte';
   import EnvModal from './EnvModal.svelte';
   import CookieManagerModal from './CookieManagerModal.svelte';
@@ -8,8 +9,9 @@
   import WebSocketPanel from './WebSocketPanel.svelte';
   import GrpcPanel from './GrpcPanel.svelte';
   import ConnPicker from '../sql/ConnPicker.svelte';
+  import RequestCollectionNode from './RequestCollectionNode.svelte';
   import { api } from '../api.js';
-  import { parsePostman, toPostmanCollection } from './postman.js';
+  import { parsePostman, toPostmanCollection, countPostmanRequests } from './postman.js';
   import { runScript } from './ScriptSandbox.js';
   import { randomToken, pkceChallengeFromVerifier } from './oauth2.js';
   import { signAwsV4 } from './awsSigV4.js';
@@ -41,11 +43,16 @@
   const METHODS = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'HEAD', 'OPTIONS'];
 
   // collapsed collections in the sidebar — session-only, so collapsing a
-  // big collection leaves room to see the others below it
-  let collapsedCols = new Set();
+  // big collection leaves room to see the others below it. A store (not
+  // a plain `let`) so RequestCollectionNode.svelte, several nesting
+  // levels deep, sees updates reactively via context instead of a
+  // snapshot captured once at mount.
+  const collapsedCols = writable(new Set());
   function toggleCol(id) {
-    collapsedCols.has(id) ? collapsedCols.delete(id) : collapsedCols.add(id);
-    collapsedCols = collapsedCols;
+    collapsedCols.update((s) => {
+      s.has(id) ? s.delete(id) : s.add(id);
+      return new Set(s);
+    });
   }
 
   let draft = blank();
@@ -810,30 +817,25 @@
     }
   }
 
-  async function newCollection() {
-    const name = await promptDialog('Collection name:');
-    if (!name) return;
-    try {
-      await api.collectionSave({ id: '', name, parent_id: null });
-      await reloadRequests();
-    } catch (e) {
-      toastError(e);
-    }
-  }
-  let selectedReqIds = new Set();
+  // A store (not a plain `let`) for the same reason as collapsedCols —
+  // RequestCollectionNode reads/toggles it via context.
+  const selectedReqIds = writable(new Set());
   function toggleSelect(id) {
-    const next = new Set(selectedReqIds);
-    if (next.has(id)) next.delete(id);
-    else next.add(id);
-    selectedReqIds = next;
+    selectedReqIds.update((s) => {
+      const next = new Set(s);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
   }
   async function deleteSelected() {
-    const n = selectedReqIds.size;
+    const ids = [...$selectedReqIds];
+    const n = ids.length;
     if (!n) return;
     if (!(await confirmDialog(`Delete ${n} selected request${n === 1 ? '' : 's'}?`, { danger: true }))) return;
     try {
-      for (const id of selectedReqIds) await api.savedRequestDelete(id);
-      selectedReqIds = new Set();
+      for (const id of ids) await api.savedRequestDelete(id);
+      selectedReqIds.set(new Set());
       await reloadRequests();
     } catch (e) {
       toastError(e);
@@ -843,7 +845,7 @@
   let moveMenuOpen = false;
   async function moveSelectedToCollection(collectionId) {
     moveMenuOpen = false;
-    const ids = [...selectedReqIds];
+    const ids = [...$selectedReqIds];
     if (!ids.length) return;
     try {
       for (const id of ids) {
@@ -852,7 +854,7 @@
           await api.savedRequestSave({ ...s, collection_id: collectionId });
         }
       }
-      selectedReqIds = new Set();
+      selectedReqIds.set(new Set());
       await reloadRequests();
       toast(`Moved ${ids.length} request${ids.length === 1 ? '' : 's'}`, 'success', 1800);
     } catch (e) {
@@ -870,7 +872,7 @@
     }
   }
   async function exportSelected() {
-    const ids = new Set(selectedReqIds);
+    const ids = new Set($selectedReqIds);
     const reqs = $savedRequests.filter((r) => ids.has(r.id)).map((r) => ({ ...r, collection_id: null }));
     if (!reqs.length) return;
     const name = await promptDialog('Export as collection named:', 'Selected requests');
@@ -881,11 +883,14 @@
     if (saved) toast(`Exported ${reqs.length} request${reqs.length === 1 ? '' : 's'}`, 'success', 2000);
   }
 
-  let dragReqId = null;
+  // A store for the same reason as collapsedCols/selectedReqIds — read
+  // and set from RequestCollectionNode via context.
+  const dragReqId = writable(null);
   async function moveToCollection(collectionId) {
-    if (!dragReqId) return;
-    const s = $savedRequests.find((r) => r.id === dragReqId);
-    dragReqId = null;
+    const id = get(dragReqId);
+    if (!id) return;
+    const s = $savedRequests.find((r) => r.id === id);
+    dragReqId.set(null);
     if (!s || s.collection_id === collectionId) return;
     try {
       await api.savedRequestSave({ ...s, collection_id: collectionId });
@@ -933,22 +938,33 @@
         });
         toast(`Imported environment "${parsed.name}" (${Object.keys(parsed.variables).length} vars)`, 'success');
       } else {
-        const col = await api.collectionSave({ id: '', name: parsed.name, parent_id: null });
-        for (let i = 0; i < parsed.requests.length; i++) {
-          const r = parsed.requests[i];
-          await api.savedRequestSave({
-            id: '',
-            collection_id: col.id,
-            name: r.folder ? `${r.folder} / ${r.name}` : r.name,
-            method: r.method,
-            url: r.url,
-            headers_json: JSON.stringify(r.headers || {}),
-            body: r.body,
-            sort_order: i,
-            created_at: 0
-          });
+        // Recreates Postman's folder tree as real sub-collections (each
+        // folder -> a collection with parent_id set to its parent's),
+        // instead of flattening it into "Folder / Request" names.
+        let sortOrder = 0;
+        async function importNodes(nodes, collectionId) {
+          for (const node of nodes) {
+            if (node.type === 'folder') {
+              const sub = await api.collectionSave({ id: '', name: node.name, parent_id: collectionId });
+              await importNodes(node.items, sub.id);
+            } else {
+              await api.savedRequestSave({
+                id: '',
+                collection_id: collectionId,
+                name: node.name,
+                method: node.method,
+                url: node.url,
+                headers_json: JSON.stringify(node.headers || {}),
+                body: node.body,
+                sort_order: sortOrder++,
+                created_at: 0
+              });
+            }
+          }
         }
-        toast(`Imported "${parsed.name}" — ${parsed.requests.length} requests`, 'success');
+        const col = await api.collectionSave({ id: '', name: parsed.name, parent_id: null });
+        await importNodes(parsed.items, col.id);
+        toast(`Imported "${parsed.name}" — ${countPostmanRequests(parsed.items)} requests`, 'success');
       }
       await reloadRequests();
     } catch (err) {
@@ -956,16 +972,134 @@
     }
   }
 
-  $: grouped = groupRequests($requestCollections, $savedRequests);
-  function groupRequests(cols, reqs) {
-    const byCol = new Map(cols.map((c) => [c.id, { ...c, items: [] }]));
-    const loose = [];
-    for (const r of reqs) {
-      if (r.collection_id && byCol.has(r.collection_id)) byCol.get(r.collection_id).items.push(r);
-      else loose.push(r);
+  // ---- sidebar: real folder tree (request_collections.parent_id) +
+  // search/filter, same shape as SQL's Saved Queries sidebar — a filter
+  // query switches to a flat matching list (with each hit's full folder
+  // path shown, since the tree itself is hidden while searching);
+  // clearing it goes back to the tree.
+  let collectionFilter = '';
+  $: rootCollections = $requestCollections
+    .filter((c) => !c.parent_id)
+    .sort((a, b) => a.name.localeCompare(b.name));
+  $: rootRequests = $savedRequests.filter((r) => !r.collection_id);
+  function collectionPath(id) {
+    const parts = [];
+    let cur = id;
+    const seen = new Set();
+    while (cur && !seen.has(cur)) {
+      seen.add(cur);
+      const c = $requestCollections.find((x) => x.id === cur);
+      if (!c) break;
+      parts.unshift(c.name);
+      cur = c.parent_id;
     }
-    return { collections: [...byCol.values()], loose };
+    return parts.join(' / ');
   }
+  $: reqMatches = collectionFilter.trim()
+    ? $savedRequests.filter((r) =>
+        `${collectionPath(r.collection_id)} ${r.name} ${r.method} ${r.url}`
+          .toLowerCase()
+          .includes(collectionFilter.trim().toLowerCase())
+      )
+    : null;
+
+  function collectionDescendants(id) {
+    const out = new Set([id]);
+    let grew = true;
+    while (grew) {
+      grew = false;
+      for (const c of $requestCollections) {
+        if (c.parent_id && out.has(c.parent_id) && !out.has(c.id)) {
+          out.add(c.id);
+          grew = true;
+        }
+      }
+    }
+    return out;
+  }
+  async function newSubcollection(parentId) {
+    const name = await promptDialog(parentId ? 'New subfolder name:' : 'New folder name:');
+    if (!name || !name.trim()) return;
+    try {
+      await api.collectionSave({ id: '', name: name.trim(), parent_id: parentId || null });
+      if (parentId) collapsedCols.update((s) => (s.delete(parentId), new Set(s)));
+      await reloadRequests();
+    } catch (e) {
+      toastError(e);
+    }
+  }
+  async function renameCollection(c) {
+    const name = await promptDialog('Rename collection:', c.name);
+    if (!name || !name.trim() || name.trim() === c.name) return;
+    try {
+      await api.collectionSave({ ...c, name: name.trim() });
+      await reloadRequests();
+    } catch (e) {
+      toastError(e);
+    }
+  }
+  function beginDragReq(e, id) {
+    dragReqId.set(id);
+    e.dataTransfer.effectAllowed = 'move';
+    try {
+      e.dataTransfer.setData('text/plain', id);
+    } catch {}
+  }
+  // Not a store — only read/written programmatically at drop time, never
+  // bound directly in a template, unlike dragReqId (dragged over from
+  // when it doubled as the "is anything being dragged" template flag).
+  let draggedCollectionId = null;
+  function beginDragCollection(e, id) {
+    draggedCollectionId = id;
+    e.dataTransfer.effectAllowed = 'move';
+    try {
+      e.dataTransfer.setData('text/plain', 'c:' + id);
+    } catch {}
+  }
+  const dragOverKey = writable(null);
+  // One drop handler for a collection header/root — dispatches to
+  // "move the dragged request here" or "move the dragged collection
+  // here" depending on which one is actually mid-drag.
+  async function dropOnCollection(targetId) {
+    dragOverKey.set(null);
+    if (draggedCollectionId) {
+      const draggedId = draggedCollectionId;
+      draggedCollectionId = null;
+      const c = $requestCollections.find((x) => x.id === draggedId);
+      if (!c || c.parent_id === (targetId || null) || draggedId === targetId) return;
+      if (targetId && collectionDescendants(draggedId).has(targetId)) {
+        toast('Cannot move a folder into itself', 'error', 2000);
+        return;
+      }
+      try {
+        await api.collectionSave({ ...c, parent_id: targetId || null });
+        await reloadRequests();
+      } catch (e) {
+        toastError(e);
+      }
+      return;
+    }
+    await moveToCollection(targetId);
+  }
+
+  setContext('reqtree', {
+    collections: requestCollections,
+    requests: savedRequests,
+    collapsed: collapsedCols,
+    dragOverKey,
+    selectedIds: selectedReqIds,
+    toggle: toggleCol,
+    toggleSelect,
+    openRequest: loadSaved,
+    deleteRequest: delSaved,
+    deleteCollection: delCollection,
+    newSubcollection,
+    renameCollection,
+    beginDragReq,
+    beginDragCollection,
+    dropOnCollection,
+    setDragOverKey: (k) => dragOverKey.set(k)
+  });
 
   function bodyLang() {
     const ct = (draft.headers.find((h) => h.k.toLowerCase() === 'content-type') || {}).v || '';
@@ -1141,10 +1275,10 @@
   {#if $requestTabs.length}
   <aside class="sidebar" style="width:{sidebarW}px">
     <div class="sec-head">
-      {#if selectedReqIds.size}
-        <span>{selectedReqIds.size} selected</span>
+      {#if $selectedReqIds.size}
+        <span>{$selectedReqIds.size} selected</span>
         <div class="sec-actions">
-          <button class="icon-btn" title="Deselect all" on:click={() => (selectedReqIds = new Set())}
+          <button class="icon-btn" title="Deselect all" on:click={() => selectedReqIds.set(new Set())}
             >{@html ICONS.close?.svg ?? '✕'}</button
           >
           <button class="icon-btn" title={ICONS.exportPostman.label} on:click={exportSelected}
@@ -1184,7 +1318,7 @@
         <button class="icon-btn big-glyph" title={ICONS.exportPostman.label} on:click={exportPostman}
           >{@html ICONS.exportPostman.svg}</button
         >
-        <button class="icon-btn" title="New folder" on:click={newCollection}
+        <button class="icon-btn" title="New folder" on:click={() => newSubcollection(null)}
           >{@html ICONS.newFolder.svg}</button
         >
         <button class="icon-btn" title="New request" on:click={() => newRequestTab()}
@@ -1200,70 +1334,50 @@
       on:change={onImportFile}
       style="display:none"
     />
-    <div class="scroll">
-      {#each grouped.collections as col (col.id)}
-        {@const isOpen = !collapsedCols.has(col.id)}
-        <button
-          class="col-head"
-          class:drop-target={dragReqId !== null}
-          on:click={() => toggleCol(col.id)}
-          on:dragover|preventDefault
-          on:drop|preventDefault={() => moveToCollection(col.id)}
-        >
-          <span class="chev">{@html isOpen ? ICONS.expandOpen.svg : ICONS.expandClosed.svg}</span>
-          <span class="col-name">{col.name}</span>
-          <span class="col-cnt">{col.items.length}</span>
-          <span
-            class="del"
-            title="Delete collection"
-            on:click|stopPropagation={() => delCollection(col)}
-            role="button"
-            tabindex="-1">{@html ICONS.delete.svg}</span
-          >
-        </button>
-        {#if isOpen}
-          {#each col.items as s (s.id)}
-            <div
-              class="req-item"
-              class:active={draft.id === s.id}
-              draggable="true"
-              on:dragstart={() => (dragReqId = s.id)}
-              on:dragend={() => (dragReqId = null)}
-            >
-              <input
-                type="checkbox"
-                class="ri-check"
-                checked={selectedReqIds.has(s.id)}
-                on:click|stopPropagation={() => toggleSelect(s.id)}
-              />
-              <button class="ri-main" on:click={() => loadSaved(s)}>
-                <span class="mm" style="color:var(--m-{s.method.toLowerCase()})">{s.method}</span>
-                <span class="rn">{s.name}</span>
-              </button>
-              <button class="del" on:click={() => delSaved(s)}>{@html ICONS.delete.svg}</button>
-            </div>
-          {/each}
-        {/if}
-      {/each}
-      {#if grouped.loose.length || dragReqId !== null}
-        <div
-          class="col-head"
-          class:drop-target={dragReqId !== null}
-          on:dragover|preventDefault
-          on:drop|preventDefault={() => moveToCollection(null)}
-        ><span>Ungrouped</span></div>
-        {#each grouped.loose as s (s.id)}
+    <div class="filter-row">
+      <input class="input sm" placeholder="Filter requests…" bind:value={collectionFilter} />
+    </div>
+    <div
+      class="scroll"
+      class:over={$dragOverKey === 'root'}
+      on:dragover|preventDefault={() => dragOverKey.set('root')}
+      on:dragleave={() => dragOverKey.set(null)}
+      on:drop|preventDefault={() => dropOnCollection(null)}
+    >
+      {#if reqMatches}
+        {#each reqMatches as s (s.id)}
+          <div class="req-item" class:active={draft.id === s.id}>
+            <input
+              type="checkbox"
+              class="ri-check"
+              checked={$selectedReqIds.has(s.id)}
+              on:click|stopPropagation={() => toggleSelect(s.id)}
+            />
+            <button class="ri-main" on:click={() => loadSaved(s)}>
+              <span class="mm" style="color:var(--m-{s.method.toLowerCase()})">{s.method}</span>
+              <span class="rn">{s.name}</span>
+              {#if collectionPath(s.collection_id)}<span class="ri-path">{collectionPath(s.collection_id)}</span>{/if}
+            </button>
+            <button class="del" on:click={() => delSaved(s)}>{@html ICONS.delete.svg}</button>
+          </div>
+        {/each}
+        {#if reqMatches.length === 0}<div class="muted" style="padding:10px">No matches.</div>{/if}
+      {:else}
+        {#each rootCollections as c (c.id)}
+          <RequestCollectionNode collectionId={c.id} depth={0} />
+        {/each}
+        {#each rootRequests as s (s.id)}
           <div
             class="req-item"
             class:active={draft.id === s.id}
             draggable="true"
-            on:dragstart={() => (dragReqId = s.id)}
-            on:dragend={() => (dragReqId = null)}
+            on:dragstart={(e) => beginDragReq(e, s.id)}
+            on:dragend={() => dragReqId.set(null)}
           >
             <input
               type="checkbox"
               class="ri-check"
-              checked={selectedReqIds.has(s.id)}
+              checked={$selectedReqIds.has(s.id)}
               on:click|stopPropagation={() => toggleSelect(s.id)}
             />
             <button class="ri-main" on:click={() => loadSaved(s)}>
@@ -1273,9 +1387,9 @@
             <button class="del" on:click={() => delSaved(s)}>{@html ICONS.delete.svg}</button>
           </div>
         {/each}
-      {/if}
-      {#if $savedRequests.length === 0}
-        <div class="muted" style="padding:10px">No saved requests.</div>
+        {#if rootCollections.length === 0 && rootRequests.length === 0}
+          <div class="muted" style="padding:10px">No saved requests.</div>
+        {/if}
       {/if}
     </div>
     <div class="env-bar">
@@ -1834,10 +1948,17 @@
     background: var(--border);
     margin: 4px 2px;
   }
+  .filter-row {
+    padding: 6px 8px;
+    border-bottom: 1px solid var(--border);
+  }
   .scroll {
     flex: 1;
     overflow: auto;
     padding: 4px 0;
+  }
+  .scroll.over {
+    background: color-mix(in srgb, var(--tool-requests-text) 10%, transparent);
   }
   .col-head {
     width: 100%;
@@ -1915,6 +2036,11 @@
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+  }
+  .ri-path {
+    font-size: 9px;
+    color: var(--text-muted);
+    flex-shrink: 0;
   }
   .del {
     background: none;

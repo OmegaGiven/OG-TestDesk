@@ -50,32 +50,44 @@ function bodyToString(body) {
 }
 
 /**
- * @returns {{ kind:'collection', name:string, requests:Array<{name,method,url,headers,body,folder}> }}
+ * Preserves Postman's folder nesting as-is (a folder becomes a real
+ * sub-collection on import, not a flattened "Folder / Request" name) —
+ * @returns {{ kind:'collection', name:string, items:PmNode[] }}
+ * @typedef {{type:'folder', name:string, items:PmNode[]} | {type:'request', name:string, method:string, url:string, headers:object, body:string|null}} PmNode
  */
 export function parsePostmanCollection(json) {
   const name = json?.info?.name || 'Imported collection';
-  const requests = [];
 
-  const walk = (items, folder) => {
-    if (!Array.isArray(items)) return;
-    for (const it of items) {
-      if (it.item) {
-        walk(it.item, folder ? `${folder} / ${it.name}` : it.name);
-      } else if (it.request) {
-        const r = it.request;
-        requests.push({
-          name: it.name || 'Request',
-          method: (typeof r === 'string' ? 'GET' : r.method || 'GET').toUpperCase(),
-          url: urlToString(typeof r === 'string' ? r : r.url),
-          headers: headersToObject(r.header),
-          body: bodyToString(r.body),
-          folder: folder || null
-        });
-      }
+  const buildNode = (it) => {
+    if (it.item) {
+      return { type: 'folder', name: it.name || 'Folder', items: (it.item || []).map(buildNode).filter(Boolean) };
     }
+    if (it.request) {
+      const r = it.request;
+      return {
+        type: 'request',
+        name: it.name || 'Request',
+        method: (typeof r === 'string' ? 'GET' : r.method || 'GET').toUpperCase(),
+        url: urlToString(typeof r === 'string' ? r : r.url),
+        headers: headersToObject(r.header),
+        body: bodyToString(r.body)
+      };
+    }
+    return null;
   };
-  walk(json?.item, null);
-  return { kind: 'collection', name, requests };
+
+  const items = Array.isArray(json?.item) ? json.item.map(buildNode).filter(Boolean) : [];
+  return { kind: 'collection', name, items };
+}
+
+/** Flat request count across a parsed Postman node tree — for the "imported N requests" toast. */
+export function countPostmanRequests(items) {
+  let n = 0;
+  for (const it of items || []) {
+    if (it.type === 'request') n++;
+    else if (it.type === 'folder') n += countPostmanRequests(it.items);
+  }
+  return n;
 }
 
 /**

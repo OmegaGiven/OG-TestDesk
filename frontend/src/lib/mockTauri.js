@@ -455,11 +455,44 @@ if (typeof window !== 'undefined' && !window.__TAURI_INTERNALS__) {
       return ok(null);
     },
     collections_list: () => ok(collections),
-    collection_save: ({ collection }) => ok({ ...collection, id: collection.id || 'col-' + Date.now() }),
-    collection_delete: () => ok(null),
+    collection_save: ({ collection }) => {
+      const s = { ...collection, id: collection.id || 'col-' + Date.now() + Math.random().toString(36).slice(2, 6) };
+      const i = collections.findIndex((x) => x.id === s.id);
+      if (i >= 0) collections[i] = s;
+      else collections.push(s);
+      return ok(s);
+    },
+    collection_delete: ({ id }) => {
+      const gone = new Set([id]);
+      let grew = true;
+      while (grew) {
+        grew = false;
+        for (const c of collections) {
+          if (c.parent_id && gone.has(c.parent_id) && !gone.has(c.id)) {
+            gone.add(c.id);
+            grew = true;
+          }
+        }
+      }
+      for (let i = collections.length - 1; i >= 0; i--) if (gone.has(collections[i].id)) collections.splice(i, 1);
+      for (let i = savedRequests.length - 1; i >= 0; i--) {
+        if (gone.has(savedRequests[i].collection_id)) savedRequests.splice(i, 1);
+      }
+      return ok(null);
+    },
     saved_requests_list: () => ok(savedRequests),
-    saved_request_save: ({ request }) => ok({ ...request, id: request.id || 'r-' + Date.now() }),
-    saved_request_delete: () => ok(null),
+    saved_request_save: ({ request }) => {
+      const s = { ...request, id: request.id || 'r-' + Date.now() + Math.random().toString(36).slice(2, 6) };
+      const i = savedRequests.findIndex((x) => x.id === s.id);
+      if (i >= 0) savedRequests[i] = s;
+      else savedRequests.push(s);
+      return ok(s);
+    },
+    saved_request_delete: ({ id }) => {
+      const i = savedRequests.findIndex((x) => x.id === id);
+      if (i >= 0) savedRequests.splice(i, 1);
+      return ok(null);
+    },
     request_tabs_list: () => ok(mockReqTabs),
     request_tab_save: ({ tab }) => {
       const s = { ...tab, id: tab.id || 'rt-' + Date.now() };
