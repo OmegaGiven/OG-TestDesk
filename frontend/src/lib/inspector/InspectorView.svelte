@@ -473,6 +473,39 @@
           }
         })();
 
+  // ---- "Go to line" for Raw mode — most useful on pasted logs/code/text
+  // dropped in via Paste JSON or a JSON-wrapped blob, where scrolling to
+  // find one specific line by eye is the whole reason you're looking at
+  // Raw in the first place.
+  $: rawLines = rawPretty ? rawPretty.split('\n') : [];
+  let gotoLineInput = '';
+  let highlightLine = null;
+  let rawPrettyEl;
+  let rawEditEl;
+  function goToLine() {
+    const n = parseInt(gotoLineInput, 10);
+    if (!n || n < 1) return;
+    if (n > rawLines.length) {
+      toast(`Only ${rawLines.length.toLocaleString()} lines`, 'error', 2000);
+      return;
+    }
+    if (editingRaw && rawEditEl) {
+      const lines = rawEditText.split('\n');
+      let offset = 0;
+      for (let i = 0; i < n - 1; i++) offset += lines[i].length + 1;
+      rawEditEl.focus();
+      rawEditEl.setSelectionRange(offset, offset + (lines[n - 1]?.length ?? 0));
+      const lineHeight = parseFloat(getComputedStyle(rawEditEl).lineHeight) || 18;
+      rawEditEl.scrollTop = Math.max(0, (n - 3) * lineHeight);
+    } else {
+      highlightLine = n;
+      rawPrettyEl?.querySelector(`[data-line="${n}"]`)?.scrollIntoView({ block: 'center' });
+    }
+  }
+  // a fresh Raw search/edit toggle clears a stale highlight
+  $: if (mode !== 'raw') highlightLine = null;
+  $: if (editingRaw) highlightLine = null;
+
   // Export the loaded payload — JSON always, CSV when it's an array of
   // objects (same shape Table mode needs).
   $: fileBase = (label || 'inspector').replace(/[^\w.-]+/g, '_').slice(0, 60) || 'inspector';
@@ -664,12 +697,24 @@
                 >
               {/if}
             {/if}
-            <span class="mc">{rawPretty.length.toLocaleString()} chars</span>
+            <form class="goto-line" on:submit|preventDefault={goToLine}>
+              <span>Line</span>
+              <input
+                class="input sm"
+                type="number"
+                min="1"
+                placeholder="#"
+                bind:value={gotoLineInput}
+                disabled={!rawPretty}
+              />
+              <button class="btn ghost sm" type="submit" disabled={!rawPretty || !gotoLineInput}>Go</button>
+            </form>
+            <span class="mc">{rawPretty.length.toLocaleString()} chars · {rawLines.length.toLocaleString()} lines</span>
           </div>
           {#if editingRaw}
-            <textarea class="raw" bind:value={rawEditText} spellcheck="false"></textarea>
+            <textarea class="raw" bind:value={rawEditText} bind:this={rawEditEl} spellcheck="false"></textarea>
           {:else}
-            <pre class="raw-pretty">{rawPretty}</pre>
+            <pre class="raw-pretty" bind:this={rawPrettyEl}>{#each rawLines as line, i}<div class="raw-line" class:hl={i + 1 === highlightLine} data-line={i + 1}>{line}</div>{/each}</pre>
           {/if}
         </div>
       {:else if mode === 'chart'}
@@ -864,6 +909,27 @@
     font-size: 12px;
     color: var(--text-primary);
     white-space: pre;
+  }
+  .raw-line {
+    padding: 0 4px;
+    border-radius: 2px;
+  }
+  .raw-line.hl {
+    background: color-mix(in srgb, var(--tool-inspector-text) 30%, transparent);
+    outline: 1px solid var(--tool-inspector-text);
+    outline-offset: -1px;
+  }
+  .goto-line {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+  }
+  .goto-line span {
+    font-size: 11px;
+    color: var(--text-muted);
+  }
+  .goto-line input {
+    width: 64px;
   }
   .raw-view .raw {
     flex: 1;
