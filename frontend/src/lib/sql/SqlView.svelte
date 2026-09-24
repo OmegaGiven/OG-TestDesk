@@ -955,40 +955,7 @@
         {:else if dbTimeErr}
           <span class="tb-tz muted">clock unavailable</span>
         {/if}
-        {#if tab.result?.is_select && tab.result.page_size > 0}
-          {@const r = tab.result}
-          <span class="pager">
-            <span class="pg-info">
-              {r.row_count.toLocaleString()}{r.total != null
-                ? ` of ${r.total.toLocaleString()}`
-                : r.has_more
-                  ? '+'
-                  : ''} rows loaded
-            </span>
-            {#if tab.countPending}
-              <span class="pg-count-spin" title="Still counting the total…">{@html ICONS.refresh?.svg ?? '↻'}</span>
-            {/if}
-            {#if r.has_more}<span class="pg-hint">— scroll for more</span>{/if}
-            {#if r.count_ms != null}<span class="pg-ct">count {r.count_ms}ms</span>{/if}
-          </span>
-        {/if}
         <span style="flex:1" />
-        {#if tab.result?.is_select && tab.result.page_size > 0 && (tab.result.has_more || tab.result.page > 0)}
-          {#if $appearance.paginationMode === 'paged'}
-            <button
-              class="btn ghost sm"
-              disabled={tab.result.page === 0 || tab.running}
-              on:click={() => run(tab.result.page - 1)}
-            >‹ Prev</button>
-            <span class="pg-info">Page {tab.result.page + 1}</span>
-            <button
-              class="btn ghost sm"
-              disabled={!tab.result.has_more || tab.running}
-              on:click={() => run(tab.result.page + 1)}
-            >Next ›</button>
-          {/if}
-          <button class="btn ghost sm" on:click={() => run(-1)}>Load all</button>
-        {/if}
       </div>
 
       {#if vars.length}
@@ -1063,18 +1030,54 @@
       </div>
 
       <div class="statusbar">
-        {#if tab.error}
-          <span class="s-err">error</span>
-        {:else if tab.result}
-          {tab.result.is_select
-            ? tab.result.total != null
-              ? `${tab.result.total.toLocaleString()} rows total`
-              : `${tab.result.row_count.toLocaleString()} rows`
-            : `${tab.result.rows_affected} affected`} · {tab.result.duration_ms} ms{tab.result.truncated
-            ? ' · capped'
-            : ''}
-        {:else}
-          ready · ⌘↵ run
+        <span class="s-text">
+          {#if tab.error}
+            <span class="s-err">error</span>
+          {:else if tab.result}
+            {tab.result.is_select
+              ? tab.result.total != null
+                ? `${tab.result.total.toLocaleString()} rows total`
+                : `${tab.result.row_count.toLocaleString()} rows`
+              : `${tab.result.rows_affected} affected`} · {tab.result.duration_ms} ms{tab.result.truncated
+              ? ' · capped'
+              : ''}
+          {:else}
+            ready · ⌘↵ run
+          {/if}
+        </span>
+        {#if tab.result?.is_select && tab.result.page_size > 0}
+          {@const r = tab.result}
+          <span class="pager">
+            <span class="pg-info">
+              {r.row_count.toLocaleString()}{r.total != null
+                ? ` of ${r.total.toLocaleString()}`
+                : r.has_more
+                  ? '+'
+                  : ''} rows loaded
+            </span>
+            {#if tab.countPending}
+              <span class="pg-count-spin" title="Still counting the total…">{@html ICONS.refresh?.svg ?? '↻'}</span>
+            {/if}
+            {#if r.has_more}<span class="pg-hint">— scroll for more</span>{/if}
+            {#if r.count_ms != null}<span class="pg-ct">count {r.count_ms}ms</span>{/if}
+          </span>
+        {/if}
+        <span style="flex:1" />
+        {#if tab.result?.is_select && tab.result.page_size > 0 && (tab.result.has_more || tab.result.page > 0)}
+          {#if $appearance.paginationMode === 'paged'}
+            <button
+              class="btn ghost sm"
+              disabled={tab.result.page === 0 || tab.running}
+              on:click={() => run(tab.result.page - 1)}
+            >‹ Prev</button>
+            <span class="pg-info">Page {tab.result.page + 1}</span>
+            <button
+              class="btn ghost sm"
+              disabled={!tab.result.has_more || tab.running}
+              on:click={() => run(tab.result.page + 1)}
+            >Next ›</button>
+          {/if}
+          <button class="btn ghost sm" on:click={() => run(-1)}>Load all</button>
         {/if}
       </div>
     {/if}
@@ -1493,11 +1496,18 @@
     }
   }
   .statusbar {
+    display: flex;
+    align-items: center;
+    gap: 8px;
     padding: 4px 10px;
     font-size: 10.5px;
     color: var(--text-muted);
     border-top: 1px solid var(--border);
     background: var(--surface-1);
+  }
+  .s-text {
+    flex-shrink: 0;
+    white-space: nowrap;
   }
   .s-err {
     color: var(--danger);
