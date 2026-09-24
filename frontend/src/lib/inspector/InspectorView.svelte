@@ -1,9 +1,11 @@
 <script>
   import JsonNode from './JsonNode.svelte';
   import ChartView from './ChartView.svelte';
-  import { inspectorPayload, toast, sendToInspector } from '../stores.js';
+  import { inspectorPayload, toast, toastError, sendToInspector, connections } from '../stores.js';
   import { ICONS } from '../icons.js';
   import { downloadText, copyText, rowsToDelimited } from '../export.js';
+  import { api } from '../api.js';
+  import { quote, literal } from '../sqlIdent.js';
   import ExportMenu from '../components/ExportMenu.svelte';
 
   let mode = 'tree'; // tree | table | summary | raw | chart
@@ -63,6 +65,114 @@
     mode = 'chart';
   }
   $: label = rawMode ? 'Pasted JSON' : payload?.label || 'Nothing loaded';
+
+  // ---- write edits back to the database, when this payload came from a
+  // SQL result on a plain single-table SELECT with a primary key (the
+  // same check SqlView's own results grid uses for its Edit mode —
+  // carried over via meta.editableTable, see SqlView's inspectResult()).
+  // A pristine snapshot of the row data as it arrived, so edits made in
+  // any view (Tree node edit, Raw edit, Table cell edit) can be diffed
+  // against it row-by-row (matched by array index) to build UPDATEs.
+  let originalRoot = null;
+  let originalAt = null;
+  $: if (!rawMode && payload?.at !== originalAt) {
+    originalAt = payload?.at ?? null;
+    originalRoot = payload ? JSON.parse(JSON.stringify(payload.json)) : null;
+  }
+  $: editableTable = !rawMode ? payload?.meta?.editableTable : null;
+  $: dbConn = editableTable ? $connections.find((c) => c.id === payload?.meta?.connectionId) : null;
+  // { rowIndex, changes: {col: newVal} }[] — only rows present in both
+  // snapshots, at the same array index, with at least one changed field.
+  // Rows added/removed since load are left out of the DB save entirely
+  // (no safe INSERT/DELETE inference from a plain edited array) — still
+  // fine to edit and export locally, just not part of what gets written.
+  $: pendingDbEdits =
+    editableTable && Array.isArray(root) && Array.isArray(originalRoot)
+      ? root
+          .map((row, i) => {
+            const orig = originalRoot[i];
+            if (!row || !orig || typeof row !== 'object' || typeof orig !== 'object') return null;
+            const changes = {};
+            for (const k of Object.keys(row)) {
+              if (JSON.stringify(row[k]) !== JSON.stringify(orig[k])) changes[k] = row[k];
+            }
+            return Object.keys(changes).length ? { rowIndex: i, orig, changes } : null;
+          })
+          .filter(Boolean)
+      : [];
+  let savingToDb = false;
+  async function saveToDatabase() {
+    if (!editableTable || !dbConn || !pendingDbEdits.length) return;
+    const missingPk = pendingDbEdits.find((e) => editableTable.pkCols.some((pk) => e.orig[pk] === undefined));
+    if (missingPk) {
+      toast('Primary key column missing from result — cannot save', 'error', 4000);
+      return;
+    }
+    const ref =
+      dbConn.kind === 'sqlite'
+        ? quote(dbConn, editableTable.table)
+        : `${quote(dbConn, editableTable.schema)}.${quote(dbConn, editableTable.table)}`;
+    savingToDb = true;
+    try {
+      for (const { orig, changes } of pendingDbEdits) {
+        const sets = Object.entries(changes)
+          .map(([col, val]) => `${quote(dbConn, col)} = ${literal(dbConn, val)}`)
+          .join(', ');
+        const where = editableTable.pkCols
+          .map((pk) => `${quote(dbConn, pk)} = ${literal(dbConn, orig[pk])}`)
+          .join(' AND ');
+        await api.queryRun(dbConn, `UPDATE ${ref} SET ${sets} WHERE ${where}`);
+      }
+      originalRoot = JSON.parse(JSON.stringify(root));
+      inspectorPayload.update((p) => (p ? { ...p, json: root } : p));
+      toast(`Saved ${pendingDbEdits.length} row${pendingDbEdits.length === 1 ? '' : 's'} to the database`, 'success', 2500);
+    } catch (e) {
+      toastError(e);
+    } finally {
+      savingToDb = false;
+    }
+  }
+  function discardEdits() {
+    if (originalRoot === null) return;
+    inspectorPayload.update((p) => (p ? { ...p, json: JSON.parse(JSON.stringify(originalRoot)) } : p));
+    toast('Edits discarded', 'info', 1500);
+  }
+
+  // ---- Table mode cell editing
+  let editingCell = null; // { rowIndex, col } | null
+  let cellEditText = '';
+  function startCellEdit(rowIndex, col, value) {
+    editingCell = { rowIndex, col };
+    cellEditText = value === undefined || value === null ? '' : typeof value === 'object' ? JSON.stringify(value) : String(value);
+  }
+  function commitCellEdit() {
+    if (!editingCell) return;
+    const { rowIndex, col } = editingCell;
+    editingCell = null;
+    const row = root[rowIndex];
+    if (!row) return;
+    let next = cellEditText;
+    // Try to preserve the original value's type (number/bool/null/object)
+    // instead of silently turning everything into a string.
+    const orig = row[col];
+    if (typeof orig === 'number' && next.trim() !== '' && !Number.isNaN(Number(next))) next = Number(next);
+    else if (typeof orig === 'boolean') next = next === 'true';
+    else if (orig === null && next === '') next = null;
+    else if (orig !== null && typeof orig === 'object') {
+      try {
+        next = JSON.parse(next);
+      } catch {
+        /* keep as typed string — invalid JSON for an object column */
+      }
+    }
+    if (next === orig) return;
+    const nextRoot = [...root];
+    nextRoot[rowIndex] = { ...row, [col]: next };
+    inspectorPayload.update((p) => (p ? { ...p, json: nextRoot } : p));
+  }
+  function cancelCellEdit() {
+    editingCell = null;
+  }
 
   // Auto-expand the first two levels whenever a new payload loads.
   let autoExpandedFor = null;
@@ -407,6 +517,20 @@
       {#if filter}<span class="mc">{matchCount} match{matchCount === 1 ? '' : 'es'}</span>{/if}
     {/if}
     <span style="flex:1" />
+    {#if !rawMode && originalRoot !== null && JSON.stringify(root) !== JSON.stringify(originalRoot)}
+      <span class="edited-tag">edited</span>
+      {#if editableTable}
+        <button
+          class="btn primary sm"
+          disabled={!dbConn || !pendingDbEdits.length || savingToDb}
+          title={dbConn ? '' : "This result's connection isn't available"}
+          on:click={saveToDatabase}
+        >
+          {savingToDb ? 'Saving…' : `Save ${pendingDbEdits.length || ''} to database`}
+        </button>
+      {/if}
+      <button class="btn ghost sm" on:click={discardEdits}>Discard edits</button>
+    {/if}
     {#if root !== undefined && root !== null}
       <ExportMenu
         formats={[
@@ -477,7 +601,26 @@
                   <tr>
                     <td class="rn">{i + 1}</td>
                     {#each tableCols as c}
-                      <td>{row[c] === undefined ? '' : typeof row[c] === 'object' ? JSON.stringify(row[c]) : String(row[c])}</td>
+                      {#if editingCell?.rowIndex === i && editingCell?.col === c}
+                        <td class="editing">
+                          <input
+                            class="cell-edit"
+                            value={cellEditText}
+                            autofocus
+                            on:input={(e) => (cellEditText = e.target.value)}
+                            on:blur={commitCellEdit}
+                            on:keydown={(e) => {
+                              if (e.key === 'Enter') commitCellEdit();
+                              else if (e.key === 'Escape') cancelCellEdit();
+                            }}
+                          />
+                        </td>
+                      {:else}
+                        <td
+                          class:cell-edited={originalRoot?.[i] && JSON.stringify(row[c]) !== JSON.stringify(originalRoot[i][c])}
+                          on:click={() => startCellEdit(i, c, row[c])}
+                        >{row[c] === undefined ? '' : typeof row[c] === 'object' ? JSON.stringify(row[c]) : String(row[c])}</td>
+                      {/if}
                     {/each}
                   </tr>
                 {/each}
@@ -768,6 +911,40 @@
   .rn {
     color: var(--text-muted);
     text-align: right;
+  }
+  td:not(.rn) {
+    cursor: pointer;
+  }
+  td:not(.rn):hover {
+    background: var(--surface-3);
+  }
+  td.cell-edited {
+    background: color-mix(in srgb, var(--tool-inspector-text) 16%, transparent);
+  }
+  td.editing {
+    padding: 0;
+  }
+  .cell-edit {
+    width: 100%;
+    box-sizing: border-box;
+    border: none;
+    outline: 2px solid var(--tool-inspector-text);
+    outline-offset: -2px;
+    background: var(--surface-1);
+    color: var(--text-primary);
+    font-family: var(--font-mono);
+    font-size: 11px;
+    padding: 4px 8px;
+  }
+  .edited-tag {
+    font-size: 10px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+    color: var(--tool-inspector-text);
+    background: var(--tool-inspector-tint);
+    padding: 2px 6px;
+    border-radius: 3px;
   }
   .summary {
     padding: 14px;

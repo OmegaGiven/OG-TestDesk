@@ -809,7 +809,12 @@
     const objs = r.rows.map((row) => Object.fromEntries(r.columns.map((c, i) => [c.name, row[i]])));
     sendToInspector('sql', `${tab.title} (${r.row_count} rows)`, objs, {
       connectionId: tab.connection_id,
-      sql: tab.execSql || tab.sql_text
+      sql: tab.execSql || tab.sql_text,
+      // Carries over the same "is this a plain SELECT * FROM one table
+      // with a primary key" check SqlView already did for its own
+      // results grid — lets the Inspector offer the same save-to-
+      // database path for edits made there, without re-deriving it.
+      editableTable: tab.editableTable
     });
   }
 
