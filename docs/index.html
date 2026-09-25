@@ -191,6 +191,39 @@
   .support-card .t { font-weight: 700; font-size: 15px; margin-bottom: 6px; }
   .support-card .d { font-size: 12.5px; color: var(--text-muted); line-height: 1.5; }
 
+  /* ---------- theme carousel ---------- */
+  section.themes { padding-block: 70px; border-top: 1px solid var(--border); text-align: center; }
+  section.themes h2 { font-size: 28px; font-weight: 800; margin-bottom: 10px; }
+  section.themes p.lead { color: var(--text-secondary); margin-bottom: 32px; }
+  .carousel { position: relative; max-width: 900px; margin: 0 auto; }
+  .carousel-frame {
+    border-radius: 14px; overflow: hidden; border: 1px solid var(--border-strong);
+    box-shadow: 0 30px 80px -20px rgba(0,0,0,0.35); background: var(--surface-2);
+  }
+  .carousel-track { display: flex; transition: transform 0.45s cubic-bezier(0.4, 0, 0.2, 1); }
+  .carousel-track img { display: block; width: 100%; flex: 0 0 100%; }
+  .carousel-arrow {
+    position: absolute; top: 50%; transform: translateY(-50%);
+    width: 42px; height: 42px; border-radius: 50%; border: 1px solid var(--border-strong);
+    background: var(--surface-2); color: var(--text-primary); cursor: pointer;
+    display: flex; align-items: center; justify-content: center; font-size: 18px; font-weight: 700;
+    box-shadow: 0 8px 20px rgba(0,0,0,0.2);
+  }
+  .carousel-arrow:hover { background: var(--surface-3); }
+  .carousel-arrow.prev { left: -21px; }
+  .carousel-arrow.next { right: -21px; }
+  .carousel-caption { margin-top: 18px; font-weight: 700; font-size: 14.5px; }
+  .carousel-dots { display: flex; justify-content: center; gap: 8px; margin-top: 14px; }
+  .carousel-dot {
+    width: 9px; height: 9px; border-radius: 50%; border: none; padding: 0; cursor: pointer;
+    background: var(--border-strong);
+  }
+  .carousel-dot.active { background: var(--text-primary); }
+  @media (max-width: 760px) {
+    .carousel-arrow.prev { left: 4px; }
+    .carousel-arrow.next { right: 4px; }
+  }
+
   footer { padding-block: 34px; text-align: center; font-size: 12.5px; color: var(--text-muted); border-top: 1px solid var(--border); }
   footer a { color: var(--text-secondary); text-decoration: none; font-weight: 600; }
 
@@ -349,6 +382,28 @@
   </div>
 </section>
 
+<section class="themes">
+  <div class="wrap">
+    <h2>Make it your own</h2>
+    <p class="lead">Six built-in palettes, plus a custom colour editor if you want to go further.</p>
+    <div class="carousel" id="theme-carousel">
+      <button class="carousel-arrow prev" id="theme-prev" aria-label="Previous theme">‹</button>
+      <div class="carousel-frame">
+        <div class="carousel-track" id="theme-track">
+          <img src="img/theme-default.png" alt="Default theme" />
+          <img src="img/theme-nord.png" alt="Nord theme" />
+          <img src="img/theme-sepia.png" alt="Sepia theme" />
+          <img src="img/theme-contrast.png" alt="High contrast theme" />
+          <img src="img/theme-ocean.png" alt="Ocean theme" />
+        </div>
+      </div>
+      <button class="carousel-arrow next" id="theme-next" aria-label="Next theme">›</button>
+      <div class="carousel-caption" id="theme-caption">Default</div>
+      <div class="carousel-dots" id="theme-dots"></div>
+    </div>
+  </div>
+</section>
+
 <section id="support" class="support">
   <div class="wrap">
     <h2>Support the project</h2>
@@ -379,5 +434,31 @@
   </div>
 </footer>
 
+<script>
+(function () {
+  var names = ['Default', 'Nord', 'Sepia', 'High contrast', 'Ocean'];
+  var track = document.getElementById('theme-track');
+  var caption = document.getElementById('theme-caption');
+  var dotsWrap = document.getElementById('theme-dots');
+  var i = 0;
+  names.forEach(function (n, idx) {
+    var b = document.createElement('button');
+    b.className = 'carousel-dot' + (idx === 0 ? ' active' : '');
+    b.setAttribute('aria-label', 'Go to ' + n + ' theme');
+    b.addEventListener('click', function () { go(idx); });
+    dotsWrap.appendChild(b);
+  });
+  function go(n) {
+    i = (n + names.length) % names.length;
+    track.style.transform = 'translateX(-' + (i * 100) + '%)';
+    caption.textContent = names[i];
+    Array.from(dotsWrap.children).forEach(function (d, idx) {
+      d.classList.toggle('active', idx === i);
+    });
+  }
+  document.getElementById('theme-prev').addEventListener('click', function () { go(i - 1); });
+  document.getElementById('theme-next').addEventListener('click', function () { go(i + 1); });
+})();
+</script>
 </body>
 </html>
