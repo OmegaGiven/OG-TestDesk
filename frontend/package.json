@@ -1,6 +1,6 @@
 {
   "name": "og-testdesk-frontend",
-  "version": "0.2.3-beta.1",
+  "version": "0.2.4-beta.1",
   "private": true,
   "license": "Apache-2.0",
   "packageManager": "pnpm@12.3.4",
