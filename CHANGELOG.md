@@ -5,6 +5,10 @@ versioning follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+- Inspector: Decode JWT now keeps the token in its box after decoding
+  and renders the decoded tree directly below it, so the token can be
+  edited and re-decoded. The toggle reads "Hide JWT" while open.
+
 ## [0.2.0-beta.2] - 2026-09-14
 
 - Fix: macOS window couldn't be dragged by the titlebar or
