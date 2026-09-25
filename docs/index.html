@@ -390,11 +390,16 @@
       <button class="carousel-arrow prev" id="theme-prev" aria-label="Previous theme">‹</button>
       <div class="carousel-frame">
         <div class="carousel-track" id="theme-track">
-          <img src="img/theme-default.png" alt="Default theme" />
-          <img src="img/theme-nord.png" alt="Nord theme" />
-          <img src="img/theme-sepia.png" alt="Sepia theme" />
-          <img src="img/theme-contrast.png" alt="High contrast theme" />
-          <img src="img/theme-ocean.png" alt="Ocean theme" />
+          <img src="img/theme-default.png" alt="Default theme, dark mode" />
+          <img src="img/theme-default-light.png" alt="Default theme, light mode" />
+          <img src="img/theme-nord.png" alt="Nord theme, dark mode" />
+          <img src="img/theme-nord-light.png" alt="Nord theme, light mode" />
+          <img src="img/theme-sepia.png" alt="Sepia theme, dark mode" />
+          <img src="img/theme-sepia-light.png" alt="Sepia theme, light mode" />
+          <img src="img/theme-contrast.png" alt="High contrast theme, dark mode" />
+          <img src="img/theme-contrast-light.png" alt="High contrast theme, light mode" />
+          <img src="img/theme-ocean.png" alt="Ocean theme, dark mode" />
+          <img src="img/theme-ocean-light.png" alt="Ocean theme, light mode" />
         </div>
       </div>
       <button class="carousel-arrow next" id="theme-next" aria-label="Next theme">›</button>
@@ -436,7 +441,13 @@
 
 <script>
 (function () {
-  var names = ['Default', 'Nord', 'Sepia', 'High contrast', 'Ocean'];
+  var names = [
+    'Default · Dark', 'Default · Light',
+    'Nord · Dark', 'Nord · Light',
+    'Sepia · Dark', 'Sepia · Light',
+    'High contrast · Dark', 'High contrast · Light',
+    'Ocean · Dark', 'Ocean · Light'
+  ];
   var track = document.getElementById('theme-track');
   var caption = document.getElementById('theme-caption');
   var dotsWrap = document.getElementById('theme-dots');
