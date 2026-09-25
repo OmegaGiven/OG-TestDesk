@@ -14,9 +14,34 @@
   import { appearance, applyAppearance } from '../lib/stores.js';
   import { ICONS } from '../lib/icons.js';
 
+  // Static import (not just relying on +layout.svelte's) so this module's
+  // own top-level code below is guaranteed to run after mockTauri.js has
+  // set window.__OGTD_MOCK__ — ESM resolves a module's imports before its
+  // own body, regardless of import order between sibling modules.
+  import '../lib/mockTauri.js';
+
+  // A browser tab never gets real OS-drawn traffic lights — even when the
+  // visitor is genuinely on a Mac — so the "try it in your browser" demo
+  // must always fall back to the on-screen window controls, or the
+  // reserved .tl-space gap renders as a dead blank strip with nothing in
+  // it. Real Tauri builds (where the OS actually draws chrome on macOS)
+  // keep the real platform sniff. `?mac=1`/`?mac=0` is a marketing-
+  // screenshot-only override (see docs' capture scripts) to force the
+  // mac layout even under the mock, without needing a real Mac.
+  const macParam = (() => {
+    try {
+      return new URLSearchParams(location.search).get('mac');
+    } catch {
+      return null;
+    }
+  })();
   const isMac =
-    typeof navigator !== 'undefined' &&
-    /Mac|iPhone|iPad/i.test(navigator.platform || navigator.userAgent || '');
+    macParam != null
+      ? macParam === '1'
+      : typeof window !== 'undefined' &&
+        !window.__OGTD_MOCK__ &&
+        typeof navigator !== 'undefined' &&
+        /Mac|iPhone|iPad/i.test(navigator.platform || navigator.userAgent || '');
   import SqlView from '../lib/sql/SqlView.svelte';
   import RequestsView from '../lib/requests/RequestsView.svelte';
   import InspectorView from '../lib/inspector/InspectorView.svelte';
