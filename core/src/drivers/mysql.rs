@@ -55,12 +55,16 @@ impl DbDriver for MySqlDriverImpl {
         })
     }
 
+    // MySQL 8 returns information_schema columns as VARBINARY with UPPERCASE
+    // names (5.7/MariaDB: VARCHAR, lowercase). sqlx won't decode VARBINARY
+    // into String and row.get("name") panics on a name miss, so every
+    // information_schema column is CAST to CHAR under an explicit alias.
     async fn list_schemas(&self, cfg: &ConnConfig, password: Option<&str>) -> Result<Vec<Schema>> {
         let url = conn_url(cfg, password).await?;
         let pool = mysql_pool(&url).await?;
         let rows = sqlx::query(
             r#"
-            SELECT table_schema, table_name, table_type
+            SELECT CAST(table_schema AS CHAR) AS table_schema, CAST(table_name AS CHAR) AS table_name, CAST(table_type AS CHAR) AS table_type
             FROM information_schema.tables
             WHERE table_schema NOT IN ('mysql', 'information_schema', 'performance_schema', 'sys')
             ORDER BY table_schema, table_name
@@ -101,7 +105,8 @@ impl DbDriver for MySqlDriverImpl {
         let pool = mysql_pool(&url).await?;
         let rows = sqlx::query(
             r#"
-            SELECT column_name, column_type, is_nullable, column_default, column_key
+            SELECT CAST(column_name AS CHAR) AS column_name, CAST(column_type AS CHAR) AS column_type, CAST(is_nullable AS CHAR) AS is_nullable,
+                   CAST(column_default AS CHAR) AS column_default, CAST(column_key AS CHAR) AS column_key
             FROM information_schema.columns
             WHERE table_schema = ? AND table_name = ?
             ORDER BY ordinal_position
@@ -145,8 +150,10 @@ impl DbDriver for MySqlDriverImpl {
         let pool = mysql_pool(&url).await?;
         let rows = sqlx::query(
             r#"
-            SELECT table_schema, table_name, column_name,
-                   referenced_table_schema, referenced_table_name, referenced_column_name
+            SELECT CAST(table_schema AS CHAR) AS table_schema, CAST(table_name AS CHAR) AS table_name, CAST(column_name AS CHAR) AS column_name,
+                   CAST(referenced_table_schema AS CHAR) AS referenced_table_schema,
+                   CAST(referenced_table_name AS CHAR) AS referenced_table_name,
+                   CAST(referenced_column_name AS CHAR) AS referenced_column_name
             FROM information_schema.key_column_usage
             WHERE referenced_table_name IS NOT NULL
               AND table_schema NOT IN ('mysql', 'information_schema', 'performance_schema', 'sys')
@@ -174,18 +181,18 @@ impl DbDriver for MySqlDriverImpl {
         let rows = sqlx::query(
             r#"
             SELECT
-                r.ROUTINE_SCHEMA AS schema_name,
-                r.ROUTINE_NAME AS name,
-                LOWER(r.ROUTINE_TYPE) AS kind,
-                COALESCE((
+                CAST(r.ROUTINE_SCHEMA AS CHAR) AS schema_name,
+                CAST(r.ROUTINE_NAME AS CHAR) AS name,
+                CAST(LOWER(r.ROUTINE_TYPE) AS CHAR) AS kind,
+                CAST(COALESCE((
                     SELECT GROUP_CONCAT(CONCAT(p.PARAMETER_NAME, ' ', p.DTD_IDENTIFIER)
                                          ORDER BY p.ORDINAL_POSITION SEPARATOR ', ')
                     FROM information_schema.parameters p
                     WHERE p.SPECIFIC_SCHEMA = r.ROUTINE_SCHEMA
                       AND p.SPECIFIC_NAME = r.ROUTINE_NAME
                       AND p.PARAMETER_MODE IS NOT NULL
-                ), '') AS arguments,
-                r.DTD_IDENTIFIER AS return_type
+                ), '') AS CHAR) AS arguments,
+                CAST(r.DTD_IDENTIFIER AS CHAR) AS return_type
             FROM information_schema.routines r
             WHERE r.ROUTINE_SCHEMA NOT IN ('mysql', 'information_schema', 'performance_schema', 'sys')
             ORDER BY r.ROUTINE_SCHEMA, r.ROUTINE_NAME

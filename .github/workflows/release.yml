@@ -9,7 +9,11 @@ permissions:
   contents: write
 
 jobs:
+  tests:
+    uses: ./.github/workflows/ci.yml
+
   release:
+    needs: tests
     strategy:
       fail-fast: false
       matrix:
@@ -23,6 +27,9 @@ jobs:
     runs-on: ${{ matrix.platform }}
     steps:
       - uses: actions/checkout@v4
+
+      - name: Tag matches the app version
+        run: node scripts/check-versions.mjs "${{ github.ref_name }}"
 
       - name: Install Tauri Linux build deps
         if: matrix.platform == 'ubuntu-22.04'

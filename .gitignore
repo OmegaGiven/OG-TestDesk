@@ -29,3 +29,7 @@ src-tauri/*.json
 
 # Written at CI time by appstore.yml — never committed
 src-tauri/AppStore.provisionprofile
+
+# Playwright
+test-results/
+playwright-report/
