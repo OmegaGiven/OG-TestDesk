@@ -73,6 +73,10 @@ if you see them anywhere — they're not the direction.
 - Postgres/MySQL driver tests are `#[ignore]`'d; run with the docker
   commands at the top of `core/tests/db_integration.rs`, then
   `cargo test -p og_testdesk_core --test db_integration --test password_leak_audit -- --ignored`.
+- Web demo (`docs/try/`, GitHub Pages): `cd frontend && pnpm build:demo`, copy
+  `build/` into `docs/try/`, then plain `pnpm build` again so `frontend/build`
+  is back to the Tauri build. `build:demo` sets the /OG-TestDesk/try base
+  path and `VITE_WEB_DEMO=1` (hides the fake window buttons).
 - CI (`ci.yml`) runs all of the above plus macOS/Windows `cargo check`.
   `appstore.yml` and `release.yml` call `ci.yml` first — nothing ships
   unless it passes.
