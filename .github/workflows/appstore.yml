@@ -9,6 +9,11 @@ name: Mac App Store build
 # on `v*` tags too, same as release.yml.
 on:
   workflow_dispatch:
+    inputs:
+      upload:
+        description: Upload to App Store Connect (untick for a rehearsal — full tests, build, sign and .pkg, no upload)
+        type: boolean
+        default: true
 
 permissions:
   contents: read
@@ -134,7 +139,7 @@ jobs:
           retention-days: 14
 
       - name: Upload to App Store Connect
-        if: ${{ vars.HAS_APPSTORE_UPLOAD == 'true' }}
+        if: ${{ vars.HAS_APPSTORE_UPLOAD == 'true' && inputs.upload }}
         env:
           APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
           APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
