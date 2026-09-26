@@ -200,7 +200,9 @@ async fn exercise(cfg: ConnConfig, schema: &str, create_sql: &str, table: &str, 
     );
 
     let func = format!("{table}_double");
-    setup_exec(&cfg, &create_fn.replace("{fn}", &func)).await;
+    drv.run_query(&cfg, pw, &create_fn.replace("{fn}", &func), full)
+        .await
+        .expect("create function via the editor path");
     let funcs = drv.list_functions(&cfg, pw).await.expect("list functions");
     let f = funcs
         .iter()
@@ -211,7 +213,9 @@ async fn exercise(cfg: ConnConfig, schema: &str, create_sql: &str, table: &str, 
         "arguments decoded as {:?}",
         f.arguments
     );
-    setup_exec(&cfg, &format!("DROP FUNCTION {func}")).await;
+    drv.run_query(&cfg, pw, &format!("DROP FUNCTION {func}"), full)
+        .await
+        .expect("drop function via the editor path");
     drv.run_query(&cfg, pw, &format!("DROP TABLE {child}"), full)
         .await
         .unwrap();
@@ -241,40 +245,6 @@ async fn exercise(cfg: ConnConfig, schema: &str, create_sql: &str, table: &str, 
         .unwrap();
 }
 
-/// Fixture DDL over the plain text protocol. The app's own run_query uses
-/// prepared statements, which MySQL refuses for CREATE FUNCTION (error 1295).
-async fn setup_exec(cfg: &ConnConfig, sql: &str) {
-    let host = cfg.host.as_deref().unwrap();
-    let (port, db, user) = (
-        cfg.port.unwrap(),
-        cfg.database.as_deref().unwrap(),
-        cfg.user.as_deref().unwrap(),
-    );
-    match cfg.kind {
-        DbKind::Postgres => {
-            let pool =
-                sqlx::PgPool::connect(&format!("postgres://{user}:{PASSWORD}@{host}:{port}/{db}"))
-                    .await
-                    .unwrap();
-            sqlx::raw_sql(sql)
-                .execute(&pool)
-                .await
-                .expect("fixture sql");
-        }
-        DbKind::MySql => {
-            let pool =
-                sqlx::MySqlPool::connect(&format!("mysql://{user}:{PASSWORD}@{host}:{port}/{db}"))
-                    .await
-                    .unwrap();
-            sqlx::raw_sql(sql)
-                .execute(&pool)
-                .await
-                .expect("fixture sql");
-        }
-        DbKind::Sqlite => unreachable!(),
-    }
-}
-
 fn table_name() -> String {
     format!(
         "it_widgets_{}",
@@ -299,6 +269,7 @@ async fn postgres_end_to_end() {
         func,
     )
     .await;
+    postgres_routines_via_editor().await;
 }
 
 #[tokio::test]
@@ -318,4 +289,119 @@ async fn mysql_end_to_end() {
         func,
     )
     .await;
+    mysql_routines_via_editor().await;
+}
+
+/// Runs `sql` the way the SQL editor does (one run_query call per Run) and
+/// returns the first cell of the first row, if any.
+async fn scalar(cfg: &ConnConfig, sql: &str) -> Value {
+    let res = driver_for(cfg.kind)
+        .run_query(cfg, Some(PASSWORD), sql, QueryOpts::full())
+        .await
+        .unwrap_or_else(|e| panic!("{sql}\n-> {e}"));
+    res.rows
+        .first()
+        .and_then(|r| r.first())
+        .cloned()
+        .unwrap_or(Value::Null)
+}
+
+/// Stored routines typed straight into the editor. Called from the
+/// end_to_end tests rather than being their own #[tokio::test]: the pool
+/// cache is global and keyed by URL, so two tests (= two runtimes) on the
+/// same server would share connections from a runtime that shut down.
+///: bodies full of `;`,
+/// no DELIMITER (that's a client-side directive the splitter strips).
+async fn mysql_routines_via_editor() {
+    let c = cfg(DbKind::MySql, 53306, "ogtd", "root");
+    let t = table_name();
+    for sql in [
+        format!("CREATE TABLE {t} (id INT PRIMARY KEY AUTO_INCREMENT, qty INT, audit INT DEFAULT 0)"),
+        format!(
+            "CREATE PROCEDURE {t}_add(IN q INT)\nBEGIN\n  INSERT INTO {t} (qty) VALUES (q);\n  INSERT INTO {t} (qty) VALUES (q * 10);\nEND"
+        ),
+        format!(
+            "CREATE TRIGGER {t}_bi BEFORE INSERT ON {t} FOR EACH ROW\nBEGIN\n  SET NEW.audit = NEW.qty + 1;\nEND"
+        ),
+        format!(
+            "CREATE FUNCTION {t}_triple(x INT) RETURNS INT DETERMINISTIC\nBEGIN\n  DECLARE r INT;\n  SET r = x * 3;\n  RETURN r;\nEND"
+        ),
+        format!("CALL {t}_add(2)"),
+    ] {
+        scalar(&c, &sql).await;
+    }
+    assert_eq!(
+        num(&scalar(&c, &format!("SELECT COUNT(*) FROM {t}")).await),
+        2.0
+    );
+    assert_eq!(
+        num(&scalar(&c, &format!("SELECT audit FROM {t} WHERE qty = 20")).await),
+        21.0
+    );
+    assert_eq!(
+        num(&scalar(&c, &format!("SELECT {t}_triple(4)")).await),
+        12.0
+    );
+    for sql in [
+        format!("DROP TRIGGER {t}_bi"),
+        format!("DROP PROCEDURE {t}_add"),
+        format!("DROP FUNCTION {t}_triple"),
+        format!("DROP TABLE {t}"),
+    ] {
+        scalar(&c, &sql).await;
+    }
+}
+
+async fn postgres_routines_via_editor() {
+    let c = cfg(DbKind::Postgres, 55432, "postgres", "postgres");
+    let t = table_name();
+    for sql in [
+        format!("CREATE TABLE {t} (id SERIAL PRIMARY KEY, qty INT, audit INT DEFAULT 0)"),
+        format!(
+            "CREATE FUNCTION {t}_triple(x integer) RETURNS integer LANGUAGE plpgsql AS $$\nDECLARE r integer;\nBEGIN\n  r := x * 3;\n  RETURN r;\nEND\n$$"
+        ),
+        format!(
+            "CREATE PROCEDURE {t}_add(q integer) LANGUAGE plpgsql AS $body$\nBEGIN\n  INSERT INTO {t} (qty) VALUES (q);\n  INSERT INTO {t} (qty) VALUES (q * 10);\nEND\n$body$"
+        ),
+        format!(
+            "CREATE FUNCTION {t}_audit() RETURNS trigger LANGUAGE plpgsql AS $$\nBEGIN\n  NEW.audit := NEW.qty + 1;\n  RETURN NEW;\nEND\n$$"
+        ),
+        format!("CREATE TRIGGER {t}_bi BEFORE INSERT ON {t} FOR EACH ROW EXECUTE FUNCTION {t}_audit()"),
+        format!("CALL {t}_add(2)"),
+    ] {
+        scalar(&c, &sql).await;
+    }
+    assert_eq!(
+        num(&scalar(&c, &format!("SELECT COUNT(*) FROM {t}")).await),
+        2.0
+    );
+    assert_eq!(
+        num(&scalar(&c, &format!("SELECT audit FROM {t} WHERE qty = 20")).await),
+        21.0
+    );
+    assert_eq!(
+        num(&scalar(&c, &format!("SELECT {t}_triple(4)")).await),
+        12.0
+    );
+
+    // Several non-row statements in one Run now go through together.
+    let multi = driver_for(c.kind)
+        .run_query(
+            &c,
+            Some(PASSWORD),
+            &format!("INSERT INTO {t} (qty) VALUES (7); INSERT INTO {t} (qty) VALUES (8)"),
+            QueryOpts::full(),
+        )
+        .await
+        .expect("multi-statement run");
+    assert_eq!(multi.rows_affected, 2);
+
+    for sql in [
+        format!("DROP TABLE {t}"),
+        format!("DROP FUNCTION {t}_audit"),
+        format!("DROP PROCEDURE {t}_add"),
+        format!("DROP FUNCTION {t}_triple"),
+    ] {
+        scalar(&c, &sql).await;
+    }
 }

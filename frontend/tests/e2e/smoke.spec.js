@@ -134,3 +134,31 @@ test('Appearance: ?theme=dark&colortheme=ocean applies the palette', async ({ pa
   const bg = await page.evaluate(() => getComputedStyle(document.documentElement).getPropertyValue('--surface-0').trim());
   expect(bg).toBe('#0d1b26');
 });
+
+test('SQL: a pasted MySQL DELIMITER script runs as separate statements on plain Run', async ({ page }) => {
+  await boot(page);
+  await page.locator('.chrome').getByText('Top customers', { exact: true }).click();
+  const editor = page.locator('.view.show .cm-content');
+  await editor.click();
+  await page.keyboard.press('Control+a');
+  await page.keyboard.insertText(
+    [
+      'DELIMITER $$',
+      'CREATE PROCEDURE add_two(IN q INT)',
+      'BEGIN',
+      '  INSERT INTO t (qty) VALUES (q);',
+      '  INSERT INTO t (qty) VALUES (q * 10);',
+      'END$$',
+      'DELIMITER ;',
+      'CALL add_two(2);'
+    ].join('\n')
+  );
+  await page.evaluate(() => (window.__OGTD_MOCK_QUERY_LOG__.length = 0));
+  await page.locator('.view.show .toolbar .btn.primary').click();
+  await expect(page.getByText('2 statements executed')).toBeVisible();
+  const sent = await page.evaluate(() => window.__OGTD_MOCK_QUERY_LOG__);
+  expect(sent).toEqual([
+    'CREATE PROCEDURE add_two(IN q INT)\nBEGIN\n  INSERT INTO t (qty) VALUES (q);\n  INSERT INTO t (qty) VALUES (q * 10);\nEND',
+    'CALL add_two(2)'
+  ]);
+});

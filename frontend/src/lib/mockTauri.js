@@ -185,6 +185,8 @@ if (typeof window !== 'undefined' && !window.__TAURI_INTERNALS__) {
   const state = { 'sqlvars:tab-4': JSON.stringify({ city: 'Dallas', status: 'paid' }) };
   const ok = (v) => Promise.resolve(v);
   const mockSecrets = {};
+  // Every SQL string the UI sent, in order — E2E tests assert on it.
+  const queryLog = (window.__OGTD_MOCK_QUERY_LOG__ = []);
   const desktopOnly = (what) =>
     Promise.reject(`${what} needs the desktop app — it isn't available in the browser demo.`);
   let mockCookies = [
@@ -236,6 +238,7 @@ if (typeof window !== 'undefined' && !window.__TAURI_INTERNALS__) {
       return ok({ local_time, tz_name: config.kind === 'sqlite' ? 'UTC' : 'Etc/GMT+5', utc_offset_secs: offsetSecs });
     },
     query_run: ({ sql, page, pageSize, count }) => {
+      queryLog.push(sql);
       const s = (sql || '').toLowerCase();
       const paged = (allRows, cols, total, dur) => {
         if (pageSize && pageSize > 0) {

@@ -1,6 +1,7 @@
 <script>
   import { get } from 'svelte/store';
   import { tick } from 'svelte';
+  import { parseScript, splitStatements } from './splitSql.js';
   import { ICONS } from '../icons.js';
   import CodeEditor from '../components/CodeEditor.svelte';
   import ResultGrid from './ResultGrid.svelte';
@@ -453,68 +454,6 @@
     }
   }
 
-  // Splits a script into top-level statements on `;`, respecting line
-  // comments, block comments, and quoted strings (single/double/back-tick,
-  // with doubled-quote escaping) so a semicolon inside a string literal
-  // doesn't end a statement early. Doesn't understand Postgres
-  // dollar-quoted (`$$...$$`) function bodies — a script that uses those
-  // should be run as one statement via plain Run, not Run All.
-  function splitStatements(sql) {
-    const stmts = [];
-    let cur = '';
-    let i = 0;
-    const n = sql.length;
-    while (i < n) {
-      const c = sql[i];
-      if (c === '-' && sql[i + 1] === '-') {
-        const nl = sql.indexOf('\n', i);
-        const end = nl === -1 ? n : nl;
-        cur += sql.slice(i, end);
-        i = end;
-        continue;
-      }
-      if (c === '/' && sql[i + 1] === '*') {
-        const close = sql.indexOf('*/', i + 2);
-        const end = close === -1 ? n : close + 2;
-        cur += sql.slice(i, end);
-        i = end;
-        continue;
-      }
-      if (c === "'" || c === '"' || c === '`') {
-        const quote = c;
-        let j = i + 1;
-        while (j < n) {
-          if (sql[j] === quote) {
-            if (sql[j + 1] === quote) {
-              j += 2;
-              continue;
-            }
-            j++;
-            break;
-          }
-          if (sql[j] === '\\' && quote !== '`') {
-            j += 2;
-            continue;
-          }
-          j++;
-        }
-        cur += sql.slice(i, j);
-        i = j;
-        continue;
-      }
-      if (c === ';') {
-        if (cur.trim()) stmts.push(cur.trim());
-        cur = '';
-        i++;
-        continue;
-      }
-      cur += c;
-      i++;
-    }
-    if (cur.trim()) stmts.push(cur.trim());
-    return stmts;
-  }
-
   async function runAll() {
     const t = tab;
     if (!t || t.running) return;
@@ -529,9 +468,13 @@
     const stmts = splitStatements(raw);
     if (stmts.length === 0) return;
     if (stmts.length === 1) {
-      run();
+      run(0, stmts[0]);
       return;
     }
+    await runStatements(t, conn, stmts);
+  }
+
+  async function runStatements(t, conn, stmts) {
     touchSqlTab(t.id, { running: true, error: null, multiResults: [], activeResultIdx: 0, editableTable: null });
     const results = [];
     for (const sql of stmts) {
@@ -639,7 +582,8 @@
   }
 
   // page < 0 → full result (no pagination wrapper, capped by max rows)
-  async function run(page = 0) {
+  // `override` = one statement already split out by Run All.
+  async function run(page = 0, override = null) {
     const t = tab;
     if (!t || t.running) return;
     const conn = get(connections).find((c) => c.id === t.connection_id);
@@ -649,12 +593,24 @@
     if (page > 0 && t.execSql) {
       sql = t.execSql; // paging — reuse the exact statement page 0 ran
     } else {
-      sql = applyVars(selectionOrAll(t.sql_text), t.id);
+      sql = override ?? applyVars(selectionOrAll(t.sql_text), t.id);
       if (!sql.trim()) return;
       if (VAR_RE.test(stripSqlComments(sql))) {
         VAR_RE.lastIndex = 0;
         toast('Unfilled variables — set values in the bar above the editor', 'error', 4000);
         return;
+      }
+      // A MySQL script pasted with DELIMITER lines (how every MySQL tool
+      // writes procedures/triggers) — the server doesn't understand the
+      // directive, so split it out here even on plain Run.
+      const script = parseScript(sql);
+      if (script.hadDelimiter) {
+        if (script.statements.length === 0) return;
+        if (script.statements.length > 1) {
+          await runStatements(t, conn, script.statements);
+          return;
+        }
+        sql = script.statements[0];
       }
       touchSqlTab(t.id, { execSql: sql });
     }

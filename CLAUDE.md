@@ -61,6 +61,8 @@ if you see them anywhere — they're not the direction.
 ## Testing / CI
 
 - `cargo test --workspace` — unit + SQLite tests, no services needed.
+- `cd frontend && pnpm test:unit` — `node:test` unit tests (`frontend/tests/unit/`),
+  e.g. the SQL script splitter (`lib/sql/splitSql.js`: DELIMITER, `$$` bodies).
 - `cd frontend && pnpm test:e2e` — builds, then Playwright smoke tests
   (`frontend/tests/e2e/`) against the real UI running on `mockTauri.js`.
 - `node scripts/check-commands.mjs` — every `api.js` command must be in

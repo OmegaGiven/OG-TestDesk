@@ -135,6 +135,9 @@ jobs:
         run: pnpm run check
         continue-on-error: true
 
+      - name: Unit tests (SQL statement splitter)
+        run: pnpm run test:unit
+
       - run: pnpm run build
 
       - name: Install Playwright Chromium
