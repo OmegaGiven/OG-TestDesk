@@ -86,7 +86,8 @@ jobs:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
-      # core/ has no Tauri/webkit deps, so no apt step needed here.
+      # core/ needs no webkit, but keyring's Linux Secret Service backend links libdbus.
+      - run: sudo apt-get update && sudo apt-get install -y libdbus-1-dev pkg-config
       # These are #[ignore]'d for plain `cargo test` (they need servers).
       - name: Driver end-to-end + password-leak audit
         run: cargo test -p og_testdesk_core --test db_integration --test password_leak_audit -- --ignored
