@@ -9,9 +9,12 @@
     "dev": "vite dev --host",
     "build": "vite build",
     "preview": "vite preview",
-    "check": "svelte-check --tsconfig ./tsconfig.json"
+    "check": "svelte-check --tsconfig ./tsconfig.json",
+    "test:e2e": "vite build && playwright test",
+    "test:unit": "node --test tests/unit/*.test.js"
   },
   "devDependencies": {
+    "@playwright/test": "1.60.0",
     "@sveltejs/adapter-static": "3.0.5",
     "@sveltejs/kit": "2.20.7",
     "@sveltejs/vite-plugin-svelte": "3.1.2",
@@ -31,9 +34,9 @@
     "@lezer/highlight": "^1.2.0",
     "@tauri-apps/api": "^2.0.0",
     "@tauri-apps/cli": "^2.0.0",
-    "@tauri-apps/plugin-shell": "^2.3.6",
     "@tauri-apps/plugin-dialog": "^2.3.6",
     "@tauri-apps/plugin-fs": "^2.3.6",
+    "@tauri-apps/plugin-shell": "^2.3.6",
     "chart.js": "^4.5.1",
     "codemirror": "^6.0.1",
     "sql-formatter": "^15.8.2"

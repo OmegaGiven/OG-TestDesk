@@ -185,6 +185,18 @@ if (typeof window !== 'undefined' && !window.__TAURI_INTERNALS__) {
   const state = { 'sqlvars:tab-4': JSON.stringify({ city: 'Dallas', status: 'paid' }) };
   const ok = (v) => Promise.resolve(v);
   const mockSecrets = {};
+  // Every SQL string the UI sent, in order — E2E tests assert on it.
+  const queryLog = (window.__OGTD_MOCK_QUERY_LOG__ = []);
+  const desktopOnly = (what) =>
+    Promise.reject(`${what} needs the desktop app — it isn't available in the browser demo.`);
+  let mockCookies = [
+    { domain: 'jsonplaceholder.typicode.com', path: '/', name: 'session', value: 'demo-3f9a2c', secure: true, http_only: true }
+  ];
+  let mockErrorLog = [];
+  let mockNetwork = { proxy_url: null, extra_ca_pem: null, client_certs: [] };
+  let mockRoutes = [
+    { id: 'mr-1', method: 'GET', path: '/health', status: 200, headers_json: '{"content-type":"application/json"}', body: '{"ok":true}', enabled: true, sort_order: 0 }
+  ];
 
   const handlers = {
     secret_set: ({ key, value }) => {
@@ -226,6 +238,7 @@ if (typeof window !== 'undefined' && !window.__TAURI_INTERNALS__) {
       return ok({ local_time, tz_name: config.kind === 'sqlite' ? 'UTC' : 'Etc/GMT+5', utc_offset_secs: offsetSecs });
     },
     query_run: ({ sql, page, pageSize, count }) => {
+      queryLog.push(sql);
       const s = (sql || '').toLowerCase();
       const paged = (allRows, cols, total, dur) => {
         if (pageSize && pageSize > 0) {
@@ -539,6 +552,56 @@ if (typeof window !== 'undefined' && !window.__TAURI_INTERNALS__) {
         duration_ms: 128,
         size_bytes: 292
       }),
+    query_count: ({ config, sql }) => handlers.query_run({ config, sql, page: 0, pageSize: 1, count: true }),
+
+    cookies_list: () => ok(mockCookies),
+    cookies_clear: ({ domain }) => {
+      mockCookies = domain ? mockCookies.filter((c) => c.domain !== domain) : [];
+      return ok(null);
+    },
+    cookie_delete: ({ domain, name }) => {
+      mockCookies = mockCookies.filter((c) => !(c.domain === domain && c.name === name));
+      return ok(null);
+    },
+
+    error_log_list: ({ limit }) => ok(limit ? mockErrorLog.slice(-limit) : mockErrorLog),
+    error_log_clear: () => {
+      mockErrorLog = [];
+      return ok(null);
+    },
+    log_client_error: ({ source, message }) => {
+      mockErrorLog = [...mockErrorLog, { ts: Math.floor(Date.now() / 1000), source: `frontend:${source}`, message }];
+      return ok(null);
+    },
+    debug_state_set: () => ok(null),
+
+    network_settings_get: () => ok(mockNetwork),
+    network_settings_set: ({ settings }) => {
+      mockNetwork = settings;
+      return ok(null);
+    },
+
+    mock_routes_list: () => ok(mockRoutes),
+    mock_route_save: ({ route }) => {
+      const r = { ...route, id: route.id || 'mr-' + Date.now() };
+      const i = mockRoutes.findIndex((x) => x.id === r.id);
+      mockRoutes = i >= 0 ? mockRoutes.map((x) => (x.id === r.id ? r : x)) : [...mockRoutes, r];
+      return ok(r);
+    },
+    mock_route_delete: ({ id }) => {
+      mockRoutes = mockRoutes.filter((r) => r.id !== id);
+      return ok(null);
+    },
+    mock_server_status: () => ok({ running: false, port: null }),
+    mock_server_start: () => desktopOnly('Running the mock server'),
+    mock_server_stop: () => ok({ running: false, port: null }),
+
+    grpc_list_services: () => desktopOnly('gRPC server reflection'),
+    grpc_list_methods: () => desktopOnly('gRPC server reflection'),
+    grpc_call_unary: () => desktopOnly('gRPC calls'),
+    oauth_start_listener: () => desktopOnly('The OAuth 2.0 browser sign-in flow'),
+    oauth_wait_callback: () => desktopOnly('The OAuth 2.0 browser sign-in flow'),
+
     window_environment: () => ok({ tiling: false, os: 'linux' }),
     app_capabilities: () => ok({ preConnectCmd: true }),
     state_get: ({ key }) => ok(state[key] ?? null),
@@ -723,5 +786,9 @@ if (typeof window !== 'undefined' && !window.__TAURI_INTERNALS__) {
         : Promise.reject(`mock: no handler for ${cmd}`);
     }
   };
+  // @tauri-apps/api's listen() returns an unlisten fn that calls this on
+  // component teardown; without it, closing any panel that listens for
+  // backend events throws.
+  window.__TAURI_EVENT_PLUGIN_INTERNALS__ = { unregisterListener: () => {} };
   console.info('[OG TestDesk] mock IPC installed (not running in Tauri)');
 }

@@ -58,6 +58,25 @@ if you see them anywhere — they're not the direction.
 - `pnpm build` in `frontend/` produces `build/`; `cargo check` passes for the whole workspace.
 - Icons regenerated as RGBA (scaffold's `icon.png` was palette-mode and broke `generate_context!`).
 
+## Testing / CI
+
+- `cargo test --workspace` — unit + SQLite tests, no services needed.
+- `cd frontend && pnpm test:unit` — `node:test` unit tests (`frontend/tests/unit/`),
+  e.g. the SQL script splitter (`lib/sql/splitSql.js`: DELIMITER, `$$` bodies).
+- `cd frontend && pnpm test:e2e` — builds, then Playwright smoke tests
+  (`frontend/tests/e2e/`) against the real UI running on `mockTauri.js`.
+- `node scripts/check-commands.mjs` — every `api.js` command must be in
+  `main.rs`'s `generate_handler!` AND `mockTauri.js`. Adding a command
+  means touching all three.
+- `node scripts/check-versions.mjs [tag]` — Cargo.toml, package.json and
+  `tauri.macos-appstore.conf.json` versions must agree.
+- Postgres/MySQL driver tests are `#[ignore]`'d; run with the docker
+  commands at the top of `core/tests/db_integration.rs`, then
+  `cargo test -p og_testdesk_core --test db_integration --test password_leak_audit -- --ignored`.
+- CI (`ci.yml`) runs all of the above plus macOS/Windows `cargo check`.
+  `appstore.yml` and `release.yml` call `ci.yml` first — nothing ships
+  unless it passes.
+
 ## MCP server (`src-tauri/src/mcp.rs`)
 
 The app can host a local MCP server so on-device AI tools use its stored

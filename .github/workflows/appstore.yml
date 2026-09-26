@@ -14,10 +14,20 @@ permissions:
   contents: read
 
 jobs:
+  # The whole CI suite (unit, E2E, DB drivers, cross-platform, command and
+  # version consistency) must pass on this exact commit before anything
+  # gets built, signed, or uploaded to Apple.
+  tests:
+    uses: ./.github/workflows/ci.yml
+
   build:
+    needs: tests
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
+
+      - name: Versions in lockstep (App Store config overrides Cargo's)
+        run: node scripts/check-versions.mjs
 
       - uses: dtolnay/rust-toolchain@stable
         with:

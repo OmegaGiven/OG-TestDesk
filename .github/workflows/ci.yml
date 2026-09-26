@@ -4,9 +4,27 @@ on:
   push:
     branches: [main, master]
   pull_request:
+  # Lets appstore.yml / release.yml run the full suite as a gate before shipping.
+  workflow_call:
 
 jobs:
+  consistency:
+    name: Consistency (commands + versions)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      # Every command api.js calls must be registered in main.rs and
+      # handled by mockTauri.js — the mock hides a missing registration
+      # everywhere except the real app.
+      - run: node scripts/check-commands.mjs
+      # Cargo.toml / package.json / the App Store config must agree.
+      - run: node scripts/check-versions.mjs
+
   rust:
+    name: Rust (Linux) — check, test, lint
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -25,7 +43,7 @@ jobs:
 
       - uses: dtolnay/rust-toolchain@stable
         with:
-          components: clippy
+          components: clippy, rustfmt
 
       - uses: Swatinem/rust-cache@v2
 
@@ -43,7 +61,57 @@ jobs:
         run: cargo fmt --all -- --check
         continue-on-error: true
 
+  db-integration:
+    name: Postgres + MySQL drivers
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_PASSWORD: RealSecretPass123
+        ports: ['55432:5432']
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s --health-timeout 5s --health-retries 20
+      mysql:
+        image: mysql:8
+        env:
+          MYSQL_ROOT_PASSWORD: RealSecretPass123
+          MYSQL_DATABASE: ogtd
+        ports: ['53306:3306']
+        options: >-
+          --health-cmd "mysqladmin ping -uroot -pRealSecretPass123 --silent"
+          --health-interval 5s --health-timeout 5s --health-retries 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      # core/ needs no webkit, but keyring's Linux Secret Service backend links libdbus.
+      - run: sudo apt-get update && sudo apt-get install -y libdbus-1-dev pkg-config
+      # These are #[ignore]'d for plain `cargo test` (they need servers).
+      - name: Driver end-to-end + password-leak audit
+        run: cargo test -p og_testdesk_core --test db_integration --test password_leak_audit -- --ignored
+
+  cross-platform:
+    name: Build check (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      # Catches platform-only compile breaks (cfg(target_os) code, keychain
+      # backends, path handling) on every PR instead of at release time.
+      - run: cargo check --workspace --all-targets
+      - run: cargo check -p og_testdesk_desktop --features app-store
+        if: matrix.os == 'macos-latest'
+      - run: cargo test -p og_testdesk_core
+
   frontend:
+    name: Frontend — build + E2E
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -67,4 +135,25 @@ jobs:
         run: pnpm run check
         continue-on-error: true
 
+      - name: Unit tests (SQL statement splitter)
+        run: pnpm run test:unit
+
       - run: pnpm run build
+
+      - name: Install Playwright Chromium
+        run: pnpm exec playwright install --with-deps chromium
+
+      # Real UI flows against the mock backend: run a query, send a
+      # request, Inspector detail pane, typing into dialogs, export,
+      # every panel opening without errors.
+      - name: E2E smoke tests
+        run: pnpm exec playwright test
+
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: playwright-report
+          path: |
+            frontend/playwright-report
+            frontend/test-results
+          retention-days: 14

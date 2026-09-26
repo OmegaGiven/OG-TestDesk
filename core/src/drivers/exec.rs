@@ -29,7 +29,10 @@ macro_rules! run_query_body {
         }
 
         if !stmt_returns_rows(sql) {
-            let res = sqlx::query(sql).execute(&pool).await?;
+            // Text protocol, not a prepared statement: MySQL refuses
+            // CREATE/DROP FUNCTION|PROCEDURE|TRIGGER|EVENT over the prepared
+            // protocol (error 1295). Read-only was already enforced above.
+            let res = sqlx::raw_sql(sql).execute(&pool).await?;
             return Ok(QueryResult {
                 columns: vec![],
                 rows: vec![],
