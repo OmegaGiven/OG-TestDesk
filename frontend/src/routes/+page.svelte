@@ -20,6 +20,11 @@
   // own body, regardless of import order between sibling modules.
   import '../lib/mockTauri.js';
 
+  // Set only by `pnpm build:demo` (the GitHub Pages "try it" build): a
+  // browser tab has its own window chrome, so fake min/max/close buttons
+  // there are just clutter. Dev server and screenshots still show them.
+  const webDemo = import.meta.env.VITE_WEB_DEMO === '1';
+
   // A browser tab never gets real OS-drawn traffic lights — even when the
   // visitor is genuinely on a Mac — so the "try it in your browser" demo
   // must always fall back to the on-screen window controls, or the
@@ -222,7 +227,7 @@
     <TopNav />
     <button class="chrome-btn" on:click={() => (activityOpen = true)} title="History & schedules">{@html ICONS.history.svg}</button>
     <button class="chrome-btn" on:click={() => openSettings()} title="Settings">{@html ICONS.settings.svg}</button>
-    {#if !isMac}<WindowControls />{/if}
+    {#if !isMac && !webDemo}<WindowControls />{/if}
   </div>
 
   <main>
