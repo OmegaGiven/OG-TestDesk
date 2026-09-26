@@ -493,6 +493,10 @@ mod tests {
         }
     }
 
+    // Tests run in parallel threads and MAX_ROWS is a process-wide global;
+    // any test that sets it holds this for its whole duration.
+    static MAX_ROWS_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
     #[test]
     fn full_capped_ignores_unlimited_max_rows_setting() {
         // Regression test: MCP/scheduler must stay hard-capped even when a
@@ -501,6 +505,7 @@ mod tests {
         // 0-means-unlimited escape hatch above. A 5M-row `SELECT *` run
         // unattended through this path once froze the whole app because
         // full() alone just inherits that global setting.
+        let _guard = MAX_ROWS_TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let original = max_rows();
         set_max_rows(0);
         let opts = QueryOpts::full_capped(10_000);
@@ -565,6 +570,7 @@ mod tests {
 
     #[test]
     fn max_rows_round_trips_through_set_max_rows() {
+        let _guard = MAX_ROWS_TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let original = max_rows();
         set_max_rows(1234);
         assert_eq!(max_rows(), 1234);
