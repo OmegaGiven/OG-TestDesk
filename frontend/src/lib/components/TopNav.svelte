@@ -101,6 +101,40 @@
     })
     .filter((g) => g.items.length && g.conn);
 
+  // ---- collapsible groups: clicking a group's name folds it down to just
+  // the name + tab count. Remembered across launches (per machine).
+  const COLLAPSED_KEY = 'ogtestdesk.collapsedGroups';
+  let collapsed = new Set();
+  try {
+    collapsed = new Set(JSON.parse(localStorage.getItem(COLLAPSED_KEY) || '[]'));
+  } catch {}
+  function setCollapsed(key, on) {
+    const next = new Set(collapsed);
+    if (on) next.add(key);
+    else next.delete(key);
+    collapsed = next;
+    try {
+      localStorage.setItem(COLLAPSED_KEY, JSON.stringify([...next]));
+    } catch {}
+  }
+  const toggleGroup = (key) => setCollapsed(key, !collapsed.has(key));
+
+  // Whatever tab is active must stay visible: if it's opened/selected from
+  // elsewhere (sidebar, MCP, Run) while its group is folded, unfold it.
+  $: activeItemKey =
+    $activeTool === 'sql'
+      ? $activeSqlTabId && 'sql:' + $activeSqlTabId
+      : $activeTool === 'requests'
+        ? $activeRequestTabId && 'request:' + $activeRequestTabId
+        : $inspectorOpen && 'inspector:' + INSPECTOR_TAB_ID;
+  $: activeGroupKey =
+    renderGroups.find((g) => g.items.some((it) => it.kind + ':' + it.tab.id === activeItemKey))?.key ?? null;
+  let lastActiveItemKey = null;
+  $: if (activeItemKey !== lastActiveItemKey) {
+    if (lastActiveItemKey && activeGroupKey && collapsed.has(activeGroupKey)) setCollapsed(activeGroupKey, false);
+    lastActiveItemKey = activeItemKey;
+  }
+
   // ---- standalone (ungrouped) request tabs + the Inspector pill, in one
   // freely-reorderable row
   $: looseItems = [
@@ -160,7 +194,10 @@
   }
   function onGroupDrop(key) {
     if (draggedGroup && draggedGroup !== key) reorderGroups(draggedGroup, key);
-    else if (draggedTab) moveTabToGroup(draggedTab.kind, draggedTab.tab, key);
+    else if (draggedTab) {
+      moveTabToGroup(draggedTab.kind, draggedTab.tab, key);
+      setCollapsed(key, false);
+    }
     draggedGroup = null;
     draggedTab = null;
     dragOverKey = null;
@@ -251,7 +288,7 @@
 <nav class="topnav" data-tauri-drag-region>
   <button
     class="icon-btn plus"
-    title="New connection, request, or open Inspector"
+    title="Switch or add a connection, new request, or open Inspector"
     on:click={() => connMenuOpen.update((v) => !v)}>+</button
   >
 
@@ -276,14 +313,20 @@
       >
         <button
           class="group-label"
+          class:collapsed={collapsed.has(g.key)}
+          class:holds-active={collapsed.has(g.key) && activeGroupKey === g.key}
           draggable="true"
+          aria-expanded={!collapsed.has(g.key)}
           on:dragstart={(e) => onGroupDragStart(g.key, e)}
-          on:click={() => connMenuOpen.set(true)}
-          title="Drag to reorder · click to switch connection"
+          on:click={() => toggleGroup(g.key)}
+          title={collapsed.has(g.key)
+            ? `Expand ${g.conn.nickname} (${g.items.length} tab${g.items.length === 1 ? '' : 's'}) · drag to reorder`
+            : `Collapse ${g.conn.nickname} · drag to reorder`}
         >
           {g.conn.nickname}
+          {#if collapsed.has(g.key)}<span class="group-count">{g.items.length}</span>{/if}
         </button>
-        {#each g.items as item (item.kind + ':' + item.tab.id)}
+        {#each collapsed.has(g.key) ? [] : g.items as item (item.kind + ':' + item.tab.id)}
           {#if item.kind === 'sql'}
             <button
               class="tab"
@@ -509,6 +552,30 @@
     background: none;
     border: none;
     cursor: pointer;
+  }
+  .group-label {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    border-radius: 4px;
+  }
+  .group-label:hover {
+    background: color-mix(in srgb, var(--c, var(--conn-slate)) 18%, transparent);
+  }
+  .group-count {
+    font-size: 9.5px;
+    font-weight: 700;
+    min-width: 15px;
+    padding: 1px 4px;
+    border-radius: 999px;
+    text-align: center;
+    color: var(--text-secondary);
+    background: color-mix(in srgb, var(--c, var(--conn-slate)) 28%, var(--surface-1));
+  }
+  /* folded group that contains the active tab — so you can still tell where you are */
+  .group-label.holds-active .group-count {
+    color: var(--text-primary);
+    box-shadow: inset 0 0 0 1px var(--c, var(--conn-slate));
   }
   .tab {
     display: flex;

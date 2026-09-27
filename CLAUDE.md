@@ -33,6 +33,10 @@ if you see them anywhere — they're not the direction.
   `--tool-*-text` vars). Any new UI for these tools reuses its tool's
   hue — buttons, badges, selected states, everything. Don't introduce a
   fourth ad-hoc color for a one-off element.
+- **Tab-strip color = grouping, not tab type.** A tab group takes its
+  connection's accent color so people can keep tabs organized; new tab
+  kinds (e.g. dashboards) don't get their own hue — they join groups like
+  any other tab. Clicking a group's name folds it to name + tab count.
 - **Driver trait, not per-DB special-casing.** New DB engines get a new
   `impl DbDriver` in `core/src/drivers/`, nothing else changes. See
   `docs/design-decisions.md` for the full rationale and the nav/color

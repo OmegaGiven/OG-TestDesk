@@ -162,3 +162,35 @@ test('SQL: a pasted MySQL DELIMITER script runs as separate statements on plain 
     'CALL add_two(2)'
   ]);
 });
+
+test('Tab groups: clicking the group name collapses and expands it, and it sticks', async ({ page }) => {
+  await boot(page);
+  const chrome = page.locator('.chrome');
+  const label = chrome.locator('.group-label', { hasText: 'DEMO SHOP' });
+  await expect(chrome.getByText('Orders by status', { exact: true })).toBeVisible();
+
+  await label.click();
+  await expect(label).toHaveAttribute('aria-expanded', 'false');
+  await expect(chrome.getByText('Orders by status', { exact: true })).toHaveCount(0);
+  await expect(label.locator('.group-count')).toHaveText(/^\d+$/);
+  // Tabs outside the group are untouched.
+  await expect(chrome.getByText('List posts', { exact: true })).toBeVisible();
+
+  await page.reload();
+  await expect(chrome.locator('.group-label', { hasText: 'DEMO SHOP' })).toHaveAttribute('aria-expanded', 'false');
+
+  await chrome.locator('.group-label', { hasText: 'DEMO SHOP' }).click();
+  await expect(chrome.getByText('Orders by status', { exact: true })).toBeVisible();
+});
+
+test('Tab groups: a folded group unfolds when one of its tabs becomes active', async ({ page }) => {
+  await boot(page);
+  const chrome = page.locator('.chrome');
+  await chrome.getByText('List posts', { exact: true }).click(); // active tab outside the group
+  await chrome.locator('.group-label', { hasText: 'DEMO SHOP' }).click();
+  await expect(chrome.getByText('Top customers', { exact: true })).toHaveCount(0);
+  // Opening a saved query from the sidebar activates a DEMO SHOP tab.
+  await page.keyboard.press('Control+1');
+  await page.locator('.view.show').getByText('Orders by status', { exact: true }).first().click();
+  await expect(chrome.locator('.group-label', { hasText: 'DEMO SHOP' })).toHaveAttribute('aria-expanded', 'true');
+});
