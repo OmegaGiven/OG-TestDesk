@@ -5,9 +5,29 @@ versioning follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.2.6-beta.1] - 2026-10-08
+
+- Inspector: open `.csv` / `.tsv` files and paste CSV/TSV, not just
+  JSON. Delimiter (comma, tab, semicolon, pipe) is detected; CSV opens
+  in Table view with typed numbers/booleans, while values like `01234`
+  and IDs beyond 2^53 stay text so nothing is corrupted. A "First row
+  is header" toggle re-parses pasted CSV. Text starting with `{`/`[`
+  is always treated as JSON, so a JSON typo still shows the JSON error.
+- SQL Import CSV wizard shares the same parser: now accepts `.tsv` and
+  semicolon/pipe-separated files and strips Excel's byte-order mark.
+- Tab bar: click a group's name to fold it to name + tab count
+  (remembered; unfolds when one of its tabs becomes active).
+
+## [0.2.5-beta.1] - 2026-09-26
+
 - Inspector: Decode JWT now keeps the token in its box after decoding
   and renders the decoded tree directly below it, so the token can be
   edited and re-decoded. The toggle reads "Hide JWT" while open.
+- Fix: MySQL 8 schema tree, columns, foreign keys and functions crashed
+  (information_schema columns are VARBINARY with UPPERCASE names).
+- Fix: MySQL `CREATE/DROP FUNCTION|PROCEDURE|TRIGGER|EVENT` failed with
+  error 1295. Run All keeps routine bodies whole (MySQL `DELIMITER`,
+  Postgres `$$` bodies); plain Run honors `DELIMITER` too.
 
 ## [0.2.0-beta.2] - 2026-09-14
 
