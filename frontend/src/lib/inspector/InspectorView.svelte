@@ -7,6 +7,7 @@
   import { api } from '../api.js';
   import { quote, literal } from '../sqlIdent.js';
   import { decodeJwt } from '../jwt.js';
+  import { csvToObjects, looksLikeCsv, delimiterName } from '../csv.js';
   import ExportMenu from '../components/ExportMenu.svelte';
 
   let mode = 'tree'; // tree | table | summary | raw | chart
@@ -80,12 +81,13 @@
   let rawError = '';
 
   $: payload = $inspectorPayload;
-  $: root = rawMode ? parseRaw(rawText) : payload?.json;
+  // csvHeader is passed in (not just read inside parseRaw) so toggling it re-parses.
+  $: root = rawMode ? parseRaw(rawText, csvHeader) : payload?.json;
   $: if (payload?.source === 'chart-reopen' && payload.at !== consumedChartOpen) {
     consumedChartOpen = payload.at;
     mode = 'chart';
   }
-  $: label = rawMode ? 'Pasted JSON' : payload?.label || 'Nothing loaded';
+  $: label = rawMode ? (rawCsv ? 'Pasted CSV' : 'Pasted JSON') : payload?.label || 'Nothing loaded';
 
   // ---- write edits back to the database, when this payload came from a
   // SQL result on a plain single-table SELECT with a primary key (the
@@ -208,17 +210,34 @@
     }
   }
 
-  function parseRaw(t) {
+  // Paste box takes JSON or CSV/TSV. JSON wins whenever it parses; text
+  // that starts with { or [ stays JSON even when broken, so a typo shows
+  // the JSON error instead of quietly becoming a one-column table.
+  let csvHeader = true;
+  let rawCsv = null; // { rows, columns, delimiter } when the paste is CSV
+  function parseRaw(t, header) {
     rawError = '';
+    rawCsv = null;
     if (!t.trim()) return null;
     try {
       return JSON.parse(t);
     } catch (e) {
+      if (looksLikeCsv(t)) {
+        const parsed = csvToObjects(t, { header });
+        rawCsv = { rows: parsed.rows.length, columns: parsed.columns.length, delimiter: parsed.delimiter };
+        return parsed.rows;
+      }
       rawError = String(e);
       return null;
     }
   }
-  // ---- open a local .json file, same idea as Paste JSON but from disk.
+  // First time a paste turns out to be CSV, show it as a table.
+  let lastRawWasCsv = false;
+  $: if (!!rawCsv !== lastRawWasCsv) {
+    lastRawWasCsv = !!rawCsv;
+    if (rawCsv && mode === 'tree') mode = 'table';
+  }
+  // ---- open a local .json / .csv / .tsv file, same idea as Paste but from disk.
   // Loads through the normal `inspectorPayload` path (not rawMode) so it
   // behaves exactly like a SQL result or HTTP response sent here —
   // works in every mode (Tree/Table/Summary/Chart), not just Raw.
@@ -232,13 +251,35 @@
     if (!file) return;
     const reader = new FileReader();
     reader.onload = () => {
-      try {
-        const parsed = JSON.parse(String(reader.result));
-        sendToInspector('file', file.name, parsed);
-        rawMode = false;
-      } catch (err) {
-        toast(`${file.name} isn't valid JSON: ${err.message}`, 'error');
+      const text = String(reader.result);
+      const csvByName = /\.(csv|tsv)$/i.test(file.name);
+      if (!csvByName) {
+        try {
+          sendToInspector('file', file.name, JSON.parse(text));
+          rawMode = false;
+          return;
+        } catch (err) {
+          if (/\.json$/i.test(file.name) || !looksLikeCsv(text)) {
+            toast(`${file.name} isn't valid JSON or CSV: ${err.message}`, 'error');
+            return;
+          }
+        }
       }
+      const parsed = csvToObjects(text);
+      if (!parsed.columns.length) {
+        toast(`${file.name} is empty`, 'error');
+        return;
+      }
+      sendToInspector('file', file.name, parsed.rows, {
+        csv: { delimiter: parsed.delimiter, columns: parsed.columns }
+      });
+      rawMode = false;
+      mode = 'table';
+      toast(
+        `${file.name}: ${parsed.rows.length.toLocaleString()} rows × ${parsed.columns.length} columns (${delimiterName(parsed.delimiter)}-separated)`,
+        'success',
+        3000
+      );
     };
     reader.onerror = () => toast(`Couldn't read ${file.name}`, 'error');
     reader.readAsText(file);
@@ -599,13 +640,13 @@
     <button class="btn ghost sm" on:click={openFilePicker}>Open file…</button>
     <input
       type="file"
-      accept=".json,application/json"
+      accept=".json,.csv,.tsv,.txt,application/json,text/csv,text/tab-separated-values,text/plain"
       bind:this={fileInputEl}
       on:change={onFileChosen}
       style="display:none"
     />
     <button class="btn ghost sm" class:active={rawMode} on:click={() => (rawMode = !rawMode)}>
-      {rawMode ? '← Loaded data' : 'Paste JSON'}
+      {rawMode ? '← Loaded data' : 'Paste JSON / CSV'}
     </button>
     <button class="btn ghost sm" class:active={jwtMode} on:click={() => (jwtMode = !jwtMode)}>
       {jwtMode ? 'Hide JWT' : 'Decode JWT'}
@@ -631,12 +672,22 @@
       {/if}
       {#if rawMode}
         <div class="raw-tools">
-          <button class="btn ghost sm" on:click={prettify} disabled={!rawText.trim()}>Prettify</button>
-          <button class="btn ghost sm" on:click={minify} disabled={!rawText.trim()}>Minify</button>
+          <button class="btn ghost sm" on:click={prettify} disabled={!rawText.trim() || !!rawCsv}>Prettify</button>
+          <button class="btn ghost sm" on:click={minify} disabled={!rawText.trim() || !!rawCsv}>Minify</button>
           <button class="btn ghost sm" on:click={() => (rawText = '')} disabled={!rawText}>Clear</button>
-          {#if rawText.trim() && !rawError}<span class="ok-tag">valid JSON</span>{/if}
+          {#if rawCsv}
+            <span class="ok-tag">
+              CSV · {rawCsv.rows.toLocaleString()} rows × {rawCsv.columns} cols · {delimiterName(rawCsv.delimiter)}
+            </span>
+            <label class="csv-header"><input type="checkbox" bind:checked={csvHeader} /> First row is header</label>
+          {:else if rawText.trim() && !rawError}<span class="ok-tag">valid JSON</span>{/if}
         </div>
-        <textarea class="raw" bind:value={rawText} placeholder={'{ "paste": "any JSON here" }'} spellcheck="false"></textarea>
+        <textarea
+          class="raw"
+          bind:value={rawText}
+          placeholder={'{ "paste": "any JSON here" }\n\n…or CSV / TSV with a header row:\nid,name,city\n1,Ava,Dallas'}
+          spellcheck="false"
+        ></textarea>
         {#if rawError}<div class="raw-err">{rawError}</div>{/if}
       {/if}
 
@@ -644,7 +695,7 @@
         {#if !rawMode && !jwtMode}
           <div class="empty">
             Run a SQL query or send a request, then choose <b>→ Inspector</b>.<br />
-            Or <b>Open file…</b> / <b>Paste JSON</b> / <b>Decode JWT</b> above.
+            Or <b>Open file…</b> (JSON or CSV) / <b>Paste JSON / CSV</b> / <b>Decode JWT</b> above.
           </div>
         {/if}
       {:else if mode === 'tree'}
@@ -926,6 +977,14 @@
   .ok-tag {
     font-size: 10px;
     color: var(--ok);
+  }
+  .csv-header {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    font-size: 11px;
+    color: var(--text-secondary);
+    cursor: pointer;
   }
   .jwt-hint {
     font-size: 11px;

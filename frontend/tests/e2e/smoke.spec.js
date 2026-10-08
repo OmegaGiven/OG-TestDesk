@@ -194,3 +194,53 @@ test('Tab groups: a folded group unfolds when one of its tabs becomes active', a
   await page.locator('.view.show').getByText('Orders by status', { exact: true }).first().click();
   await expect(chrome.locator('.group-label', { hasText: 'DEMO SHOP' })).toHaveAttribute('aria-expanded', 'true');
 });
+
+test('Inspector: pasting CSV shows a typed table; header toggle re-parses', async ({ page }) => {
+  await boot(page);
+  await page.keyboard.press('Control+3');
+  await page.getByRole('button', { name: 'Paste JSON / CSV' }).click();
+  await page.locator('textarea.raw').fill('id,zip,city\n1,01234,Dallas\n2,90210,Austin');
+  await expect(page.locator('.ok-tag')).toHaveText(/CSV · 2 rows × 3 cols · comma/);
+  const table = page.locator('.view.show .table-scroll table');
+  await expect(table.locator('th', { hasText: 'zip' })).toBeVisible();
+  await expect(table.locator('td', { hasText: '01234' })).toBeVisible(); // leading zero kept
+  await page.getByLabel('First row is header').uncheck();
+  await expect(page.locator('.ok-tag')).toHaveText(/3 rows × 3 cols/);
+  await expect(table.locator('th', { hasText: 'column_1' })).toBeVisible();
+});
+
+test('Inspector: broken JSON is still reported as JSON, not read as CSV', async ({ page }) => {
+  await boot(page);
+  await page.keyboard.press('Control+3');
+  await page.getByRole('button', { name: 'Paste JSON / CSV' }).click();
+  await page.locator('textarea.raw').fill('{"a": 1,\n "b": 2,}');
+  await expect(page.locator('.raw-err')).toBeVisible();
+  await expect(page.locator('.ok-tag')).toHaveCount(0);
+});
+
+test('Inspector: Open file… loads a .tsv as a table', async ({ page }) => {
+  await boot(page);
+  await page.keyboard.press('Control+3');
+  await page.locator('.view.show input[type=file]').setInputFiles({
+    name: 'people.tsv',
+    mimeType: 'text/tab-separated-values',
+    buffer: Buffer.from('name\tage\nAva\t31\nLiam\t27\n')
+  });
+  const table = page.locator('.view.show .table-scroll table');
+  await expect(table.locator('td', { hasText: 'Liam' })).toBeVisible();
+  await expect(page.getByText(/people\.tsv: 2 rows × 2 columns \(tab-separated\)/)).toBeVisible();
+});
+
+test('SQL Import CSV wizard still parses after the shared-parser refactor', async ({ page }) => {
+  await boot(page);
+  await page.locator('.chrome').getByText('Top customers', { exact: true }).click();
+  await page.locator('.view.show').getByRole('button', { name: 'Import CSV' }).click();
+  await page.locator('#csvfile').setInputFiles({
+    name: 'excel-export.csv',
+    mimeType: 'text/csv',
+    buffer: Buffer.from('\uFEFFsku;price\r\nA-1;9.99\r\nB-2;19.5\r\n') // Excel-style: BOM, semicolons, CRLF
+  });
+  const preview = page.locator('.preview table');
+  await expect(preview.locator('th')).toHaveText(['sku', 'price']); // split on ; (comma-only gives 1 column)
+  await expect(preview.locator('tbody tr').nth(1).locator('td')).toHaveText(['B-2', '19.5']);
+});

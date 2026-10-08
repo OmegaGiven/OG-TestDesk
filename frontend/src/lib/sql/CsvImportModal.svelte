@@ -4,6 +4,7 @@
   import { toast, toastError, confirmDialog } from '../stores.js';
   import { quote, literal, defaultSchema } from '../sqlIdent.js';
   import { createEventDispatcher } from 'svelte';
+  import { parseCsv, detectDelimiter, inferType, coerce } from '../csv.js';
 
   export let conn;
   const dispatch = createEventDispatcher();
@@ -45,65 +46,6 @@
   }
   $: if (mode === 'existing' && existingTable) loadExistingColumns();
 
-  // Minimal RFC4180-ish parser: quoted fields (with "" escaping), commas,
-  // and both \n and \r\n line endings.
-  function parseCsv(text) {
-    const out = [];
-    let row = [];
-    let field = '';
-    let inQuotes = false;
-    let i = 0;
-    const n = text.length;
-    while (i < n) {
-      const c = text[i];
-      if (inQuotes) {
-        if (c === '"') {
-          if (text[i + 1] === '"') {
-            field += '"';
-            i += 2;
-            continue;
-          }
-          inQuotes = false;
-          i++;
-          continue;
-        }
-        field += c;
-        i++;
-        continue;
-      }
-      if (c === '"') {
-        inQuotes = true;
-        i++;
-        continue;
-      }
-      if (c === ',') {
-        row.push(field);
-        field = '';
-        i++;
-        continue;
-      }
-      if (c === '\r') {
-        i++;
-        continue;
-      }
-      if (c === '\n') {
-        row.push(field);
-        out.push(row);
-        row = [];
-        field = '';
-        i++;
-        continue;
-      }
-      field += c;
-      i++;
-    }
-    if (field.length || row.length) {
-      row.push(field);
-      out.push(row);
-    }
-    return out.filter((r) => !(r.length === 1 && r[0] === ''));
-  }
-
   async function onFile(e) {
     const f = e.target.files?.[0];
     if (!f) return;
@@ -111,36 +53,23 @@
     parseError = '';
     try {
       const text = await f.text();
-      rawParsed = parseCsv(text);
+      rawParsed = parseCsv(text, detectDelimiter(text));
       if (!rawParsed.length) parseError = 'File is empty';
       if (!newTableName) {
-        newTableName = fileName.replace(/\.csv$/i, '').replace(/[^\w]+/g, '_').toLowerCase() || 'imported';
+        newTableName = fileName.replace(/\.(csv|tsv|txt)$/i, '').replace(/[^\w]+/g, '_').toLowerCase() || 'imported';
       }
     } catch (err) {
       parseError = String(err);
     }
   }
 
-  function inferType(values) {
-    const sample = values.filter((v) => v !== '' && v != null).slice(0, 200);
-    if (!sample.length) return 'text';
-    if (sample.every((v) => /^-?\d+$/.test(v))) return 'integer';
-    if (sample.every((v) => /^-?\d*\.?\d+([eE][+-]?\d+)?$/.test(v))) return 'real';
-    if (sample.every((v) => /^(true|false)$/i.test(v))) return 'boolean';
-    return 'text';
-  }
   function ddlType(kind, inferred) {
     if (inferred === 'integer') return kind === 'sqlite' ? 'INTEGER' : 'BIGINT';
     if (inferred === 'real') return kind === 'mysql' ? 'DOUBLE' : kind === 'sqlite' ? 'REAL' : 'DOUBLE PRECISION';
     if (inferred === 'boolean') return kind === 'sqlite' ? 'INTEGER' : 'BOOLEAN';
     return 'TEXT';
   }
-  function coerce(inferred, raw) {
-    if (raw === '' || raw == null) return null;
-    if (inferred === 'integer' || inferred === 'real') return Number(raw);
-    if (inferred === 'boolean') return /^true$/i.test(raw);
-    return raw;
-  }
+
   $: colTypes = mode === 'new' ? headers.map((h, i) => inferType(dataRows.map((r) => r[i]))) : [];
 
   async function doImport() {
@@ -217,7 +146,7 @@
 <Modal title="Import CSV" width="620px" on:close>
   <div class="field">
     <label for="csvfile">CSV file</label>
-    <input id="csvfile" type="file" accept=".csv,text/csv" on:change={onFile} disabled={importing} />
+    <input id="csvfile" type="file" accept=".csv,.tsv,.txt,text/csv,text/tab-separated-values" on:change={onFile} disabled={importing} />
     {#if parseError}<div class="err">{parseError}</div>{/if}
   </div>
 
